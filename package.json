@@ -1,0 +1,29 @@
+{
+  "name": "agent-tester",
+  "version": "1.0.0",
+  "description": "Test harness for running AI agents in parallel to measure output consistency and quality",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "test:control": "node src/index.js --prompt control",
+    "test:training": "node src/index.js --prompt training",
+    "test:both": "node src/index.js --prompt both",
+    "test:control:cli": "node src/index.js --prompt control --runner cli",
+    "test:training:cli": "node src/index.js --prompt training --runner cli",
+    "test:both:cli": "node src/index.js --prompt both --runner cli",
+    "report": "node src/report.js",
+    "rescreenshot": "node src/rescreenshot.js",
+    "rescreenshot:control": "node src/rescreenshot.js --prompt control",
+    "rescreenshot:training": "node src/rescreenshot.js --prompt training",
+    "rebuild": "node src/rebuild.js",
+    "rebuild:control": "node src/rebuild.js --prompt control",
+    "rebuild:training": "node src/rebuild.js --prompt training"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "puppeteer": "^24.2.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
