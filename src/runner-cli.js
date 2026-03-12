@@ -61,6 +61,7 @@ Your task is to fix ALL the errors so the page renders correctly. Output ONLY th
 ---END FILE---
 
 Rules:
+- Feedback is required. This step cannot be skipped.
 - Output the COMPLETE contents of each file you change (not just the diff)
 - Only output files that need to change
 - Do not add explanations outside of file blocks
