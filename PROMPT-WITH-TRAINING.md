@@ -6,7 +6,7 @@ Create a simple interface that mimics Sanity Studio using Sanity UI.
 * The project should be built on top of Vite
 * Use as few NPM packagess as possible 
 * Do not add unit tests of any kind
-* Provide feedback on areas of friction when using Sanity UI, both in implementation and understanding correct usage
+* Provide feedback on areas of friction when using Sanity UI, both in implementation and understanding correct usage. THE JOB IS NOT COMPLETE UNTIL FEEDBACK IS PROVIDED.
 
 
 # Guidelines
