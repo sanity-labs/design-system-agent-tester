@@ -12,18 +12,25 @@ Sends a prompt to Claude N times in parallel, collects the generated code, valid
 4. **Unique Sanity UI components** used across all iterations
 5. **Screenshots** of each generated app (saved to `output/`)
 6. **Fix attempts** — how many error→fix cycles were needed before the page rendered
+7. **Sanity UI feedback** — friction points and developer experience issues reported by each agent
 
 ## How It Works
 
 Each iteration follows a **generate → validate → fix** loop:
 
-1. **Generate** — Claude produces all project files from the prompt
+1. **Generate** — Claude produces all project files from the prompt, plus structured feedback on Sanity UI friction points
 2. **Validate** — The harness installs deps, starts a Vite dev server, opens the page in headless Chrome, and checks for fatal JS errors + visible rendered content
 3. **Fix** (if needed) — If the page has fatal errors or fails to render, the current project files and browser errors are sent back to Claude with instructions to fix them
 4. **Repeat** — Steps 2–3 repeat until the page renders successfully or the max fix attempts are exhausted
 5. **Screenshot** — Once validated (or after max attempts), a screenshot is captured
 
 This means an iteration is not considered complete until the app works. The number of fix cycles needed is tracked as a quality metric.
+
+### Feedback Collection
+
+The system prompt instructs Claude to emit a structured `---FEEDBACK---` block after all file output. Each feedback item is tagged with a category (`documentation`, `api`, `components`, `theming`, `icons`, `dx`, `other`) and describes a specific friction point encountered while implementing with Sanity UI.
+
+The report aggregates feedback across all iterations: a deduplicated summary of unique items, a breakdown by category, and a full per-iteration line-item list. Feedback is also saved per-iteration as `_feedback.json`.
 
 ## Setup
 
@@ -135,10 +142,11 @@ output/
 │   │   ├── project/               # Generated (and fixed) project files
 │   │   ├── screenshot.png         # App screenshot
 │   │   ├── _raw_response.txt      # Initial Claude response
+│   │   ├── _feedback.json         # Parsed feedback items
 │   │   ├── _fix_response_1.txt    # First fix response (if needed)
 │   │   ├── _fix_response_2.txt    # Second fix response (if needed)
 │   │   ├── _console_errors.txt    # Final browser console errors (if any)
-│   │   └── _meta.json             # Metrics including fixAttempts and fixLog
+│   │   └── _meta.json             # Metrics including fixAttempts, fixLog, and feedback
 │   ├── iteration-2/
 │   └── ...
 └── training/

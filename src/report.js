@@ -48,6 +48,9 @@ export async function generateReport(allResults, outputDir) {
 
     // 6. Fix attempts
     const fixCounts = validIterations.map((r) => r.fixAttempts ?? 0);
+
+    // 7. Feedback analysis
+    const feedbackAnalysis = analyzeFeedback(validIterations);
     const avgFixes = mean(fixCounts);
     const stdDevFixes = stdDev(fixCounts);
     const iterationsNeedingFixes = fixCounts.filter((n) => n > 0).length;
@@ -92,6 +95,7 @@ export async function generateReport(allResults, outputDir) {
           })),
         })),
       },
+      feedback: feedbackAnalysis,
       tokenUsage: {
         avgInputTokens: inputTokens.length ? round(mean(inputTokens)) : null,
         avgOutputTokens: outputTokens.length ? round(mean(outputTokens)) : null,
@@ -174,6 +178,71 @@ function computeCodeVariance(iterations) {
     pairwiseStructuralSimilarity: structuralPairs,
     averageStructuralSimilarity: round(avgStructural),
     description: `Content similarity based on 3-gram Jaccard index (0 = completely different, 1 = identical). Structural similarity based on file paths.`,
+  };
+}
+
+/**
+ * Analyze feedback across iterations.
+ */
+function analyzeFeedback(iterations) {
+  const allItems = [];
+  const perIteration = [];
+  const byCategoryMap = {};
+
+  for (const iter of iterations) {
+    const items = iter.feedback || [];
+    perIteration.push({
+      iteration: iter.iteration,
+      count: items.length,
+      items,
+    });
+    for (const item of items) {
+      allItems.push({ ...item, iteration: iter.iteration });
+      if (!byCategoryMap[item.category]) {
+        byCategoryMap[item.category] = [];
+      }
+      byCategoryMap[item.category].push({
+        text: item.text,
+        iteration: iter.iteration,
+      });
+    }
+  }
+
+  // Deduplicate similar feedback items (simple exact-text dedup)
+  const uniqueTexts = new Set();
+  const uniqueItems = [];
+  for (const item of allItems) {
+    const normalized = item.text.toLowerCase().trim();
+    if (!uniqueTexts.has(normalized)) {
+      uniqueTexts.add(normalized);
+      uniqueItems.push(item);
+    }
+  }
+
+  // Build category summary
+  const byCategory = {};
+  for (const [cat, items] of Object.entries(byCategoryMap)) {
+    byCategory[cat] = {
+      count: items.length,
+      items,
+    };
+  }
+
+  // Sort categories by frequency
+  const categoriesSorted = Object.entries(byCategory)
+    .sort((a, b) => b[1].count - a[1].count)
+    .map(([cat, data]) => ({ category: cat, ...data }));
+
+  return {
+    totalItems: allItems.length,
+    uniqueItems: uniqueItems.length,
+    averagePerIteration: round(mean(perIteration.map((p) => p.count))),
+    iterationsWithFeedback: perIteration.filter((p) => p.count > 0).length,
+    byCategory,
+    categoriesSorted,
+    allItems,
+    allUniqueItems: uniqueItems,
+    perIteration,
   };
 }
 
@@ -334,6 +403,62 @@ function renderMarkdown(report) {
         md += `| ${label} | ${freq}/${data.successfulIterations} |\n`;
       }
       md += `\n`;
+    }
+
+    // Feedback
+    md += `### 💬 Sanity UI Feedback\n\n`;
+    const fb = data.feedback;
+    if (fb.totalItems > 0) {
+      md += `| Metric | Value |\n|--------|-------|\n`;
+      md += `| Total feedback items | ${fb.totalItems} |\n`;
+      md += `| Unique feedback items | ${fb.uniqueItems} |\n`;
+      md += `| Avg per iteration | ${fb.averagePerIteration} |\n`;
+      md += `| Iterations with feedback | ${fb.iterationsWithFeedback}/${data.successfulIterations} |\n\n`;
+
+      // Category breakdown
+      if (fb.categoriesSorted.length > 0) {
+        md += `**By category:**\n\n`;
+        md += `| Category | Count |\n|----------|-------|\n`;
+        for (const cat of fb.categoriesSorted) {
+          const emoji =
+            {
+              documentation: "📖",
+              api: "⚙️",
+              components: "🧩",
+              theming: "🎨",
+              icons: "🎯",
+              dx: "🛠️",
+              other: "📌",
+            }[cat.category] || "📌";
+          md += `| ${emoji} ${cat.category} | ${cat.count} |\n`;
+        }
+        md += `\n`;
+      }
+
+      // Summary: deduplicated list of all feedback
+      md += `**All unique feedback:**\n\n`;
+      for (const item of fb.allUniqueItems) {
+        const catTag = `\`${item.category}\``;
+        md += `- ${catTag} ${item.text} _(iteration ${item.iteration})_\n`;
+      }
+      md += `\n`;
+
+      // Full line-item list per iteration
+      md += `<details>\n<summary>Full feedback by iteration</summary>\n\n`;
+      for (const p of fb.perIteration) {
+        if (p.items.length === 0) {
+          md += `**Iteration ${p.iteration}:** No feedback provided\n\n`;
+        } else {
+          md += `**Iteration ${p.iteration}** (${p.items.length} items):\n\n`;
+          for (const item of p.items) {
+            md += `- \`${item.category}\` ${item.text}\n`;
+          }
+          md += `\n`;
+        }
+      }
+      md += `</details>\n\n`;
+    } else {
+      md += `No feedback was provided by the agent across any iteration.\n\n`;
     }
 
     // Screenshots
