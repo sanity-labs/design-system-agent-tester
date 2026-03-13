@@ -634,3 +634,561 @@ To ensure Cards are accessible to all users:
 
 - **Hierarchy:** Cards often act as containers for grouped information. Ensure the heading levels (H2, H3, etc.) inside the card respect the page's overall outline. Do not start with an H1 inside a card if the page already has a main title.
 - **Grouping:** Content within a card should be logically related. If the content describes different distinct topics, split them into separate cards to reduce cognitive load.
+
+
+# Layout guidelines
+
+## General structure
+
+Layouts consist of three main sections:
+
+1. Navigation sidebar (optional): An inline-start aligned column used to navigate through the application and perform critical application-level actions. Present only when the application has multiple pages or views.
+1. Content: The main window used to present the application's content and data. This is the only required section and is present in every layout type. It is subdivided into Content toolbar (a block-start bar for title and actions) and Content display (the primary content area).
+1. Inspection sidebar (optional): An inline-end aligned column used to view and edit metadata for content presented in the Content window.
+
+Layouts follow these rules:
+
+- Layouts take up the full width and height of the viewport. Each section (Navigation, Content, and Inspection) manages its own scroll independently.
+- The three sections sit side by side along the inline axis. Navigation is always inline-start, Content is always in the center, and Inspection is always inline-end. This order never changes.
+- Each sidebar uses the `<Column />` component, takes up 20% of the screen width on desktop and tablet (minimum 240px, maximum 320px), fills the full height of its parent, and is separated from the Content section by a 1px border on its inner edge.
+- The Content section fills all remaining horizontal space not occupied by sidebars.
+- Content controls aims for a height of 50px but grows when necessary. It has a block-end border separating it from Content display.
+- Layouts accept elements from any UI library as children. Any UI library or simple HTML can be added to Sanity layouts.
+- Layouts adapt to three device classes:
+  1. **Desktop**: All sidebars are visible when present in the layout type.
+  1. **Tablet**: The Navigation sidebar transforms into a fixed top bar spanning the full width. The inspection sidebar remains as a sidebar. Navigation between views is accessed through a `<MenuButton />` in the Content controls bar.
+  1. **Mobile**: Only the Content section is displayed by default. Application controls are accessed through a popover menu triggered by a `<MenuButton />`. Content inspector is displayed as a sheet when an item is selected.
+
+## Layout compositions
+
+A layout can be as simple as a single page or a full-blown multi-view interface. Sanity’s layout components allow you to compose the level of complexity that’s needed. Below are common compositions:
+
+### Shell
+
+This layout consists of a single view application with no toolbar for title/actions. It’s ideal for single-use applications such as an asset uploader.
+
+`<AppShell>`
+
+`<AppShell.Main>`
+
+`{content}`
+
+`</AppShell.Main>`
+
+`</AppShell>`
+
+#### When to use
+
+- The application consists of one view/page and all content, logic, and actions are contained within the main content window. Example: A single form with a submit action.
+
+#### When NOT to use
+
+- When critical actions need to be persistent, regardless of scroll position. Use Shell with Toolbar instead.
+- When an application has multiple pages/views to navigate across. Use Shell with Navigation instead.
+- When one or more items in the application need a dedicated area to view/edit metadata.  Use Shell with Inspector instead.
+
+### Shell with Toolbar
+
+This layout supports a single view application with persistent actions. It’s ideal for simple management of content.
+
+#### When to use
+
+- The application consists of one view/page with important actions and filtering needing easy access. Example: A read-only content navigator.
+
+#### When NOT to use
+
+- When an application has multiple pages/views to navigate across. Use Shell with Navigation instead.
+- When one or more items in the application needs a dedicated area to view/edit metadata. Use Shell with Inspector instead.
+
+### Shell with Inspector
+
+This layout supports a single view application with persistent actions and viewing/editing of content metadata. It’s ideal for simple management of content and its metadata.
+
+
+#### When to use
+
+- When one or more items in the application needs a dedicated area to view/edit metadata.
+
+#### When NOT to use
+
+- When an application has multiple pages/views to navigate across. Use Shell with Navigation and Inspector instead.
+- When all editing of content metadata can be handled in the main content window. Use Shell or Shell with Toolbar instead.
+
+### Shell with Navigation
+
+This layout supports a multi-vew application with persistent navigation and actions. It’s ideal for more organized and fine-grained management of content.
+
+
+#### When to use
+
+- When an application has more than one page/view to navigate across.
+
+#### When NOT to use
+
+- When an application has only one view and requires no navigation. Use Shell, Shell with Toolbar, or Shell with Inspector instead.
+- When at least one page/view in the application needs a dedicated area to view/edit metadata. Use Shell with Navigation and Inspector instead.
+
+### Shell with Navigation and Inspector
+
+This layout supports a multi-vew application with persistent navigation, actions and viewing/editing of content metadata. It’s ideal for more organized and fine-grained management of content and its metadata. **Note:** It’s recommended to hide the Inspector sidebar on pages/views where it’s not used.
+
+#### When to use
+
+- When an application has more than one page/view to navigate across and at least one page/view in the application needs a dedicated area to view/edit metadata.
+
+#### When NOT to use
+
+- When an application has only one view and requires no navigation. Use Shell with Inspector instead.
+- When all editing of content metadata can be handled in the main content window. Use Shell with Navigation instead.
+
+## Layout components
+
+### Navigation sidebar
+
+The Navigation sidebar’s purpose is to orient the user, navigate through key views and perform critical application-level actions. It should only be used when the application has multiple pages/views that require navigation.
+
+- Navigation sidebar utilizes the `<Column />` component and it always inline-start aligned within the layout
+- It should take up 20% of the screen width in desktop/tablet devices–with a minimum width of 240px and a maximum width of 320px
+- It should fill the full height of its parent
+- It should have an inline-end border to act as a visual break between it and the main content window
+
+It is comprised of three sub-components:
+
+1. Navigation Header: Provides context for the application being displayed and displays critical global actions. The slot should be fixed at the top position and remain in place when scrolling through menu items.
+1. Navigation Content: Enables users to move through different views of the application and/or filter across all application content.
+1. Navigation Footer: Provides information related to an application’s status as well as ancillary actions.
+
+Controls should be global in nature. Example: A search affordance at the application controls level would search content across all views in the application.
+
+Third-party applications should bias towards actions with labels instead of icons when space permits.
+
+The application’s title should be fully displayed whenever possible. Truncation should be a last resort.
+
+No more than two actions should be displayed in the Control slot at one time. When more than two actions exist, the primary action (`mode="default"`) should be displayed with all other actions added to an overflow menu triggered by a `<MenuButton />`.
+
+#### Navigation Header
+
+The Navigation header is comprised of two sub-components
+
+1. Navigation Header Title: An inline-start aligned slot that contains the title of the application.
+1. Navigation Header Actions: An inline-end aligned slot containing horizontally-stacked buttons that allow the user to perform application-level actions.
+
+##### Best practices
+
+- The Navigation Header Title should be fully displayed whenever possible. Truncation should be a last resort.
+- Navigation Header Actions should be focused on actions that impactapplication-. Examples include:
+  - Managing application settings, configurations, or permissions
+  - Adding, editing, or removing navigation items
+  - Sorting/filtering of navigation items
+- No more than two actions should be displayed in the Navigation Header Actions at one time. When more than two actions exist, the primary action (`mode="default"`) should be displayed with all other actions added to an overflow menu triggered by a `<MenuButton />`. Do not use a plain `<Button />` to activate the overflow menu.
+
+#### Navigation Content
+
+Navigation content displays all navigation options or filters for content. Navigation/filters should ONLY use Sanity UI's `' component. The content section should be able to scroll independently to accommodate for overflow.
+
+#### Navigation Footer
+
+The Navigation footer is for ancillary actions, such as:
+
+- Help/support/feedback
+- Light/dark mode toggle
+- Settings
+
+### Content
+
+The main Content window is comprised of two sub-components
+
+1. Content Toolbar: A block-start bar that orients the user to provide actions for editing/managing the presented content.
+1. Content Display: The main content area to present information.
+
+#### Content Toolbar
+
+- The toolbar should have a block-end border to act as a visual break between it and Content display.
+- The controls should aim for a height of 50px, but grow in height when necessary.
+
+The Content Controls block-start bar is comprised of two sub-components
+
+1. Content Toolbar Title: Content title is an inline-start aligned slot that contains the title of what's being presented. When the Navigation sidebar does not exist, the title should display the name of the application. Otherwise, the title should display the name of the current page or view being presented to the user.
+1. Content Toolbar Actions: An inline-end aligned slot containing horizontally-stacked buttons that allow the user to perform actions on the content.
+
+##### Content Toolbar Title
+
+The Content Toolbar Title anchors the collection of content being viewed. The title should be given priority in spacing to avoid truncation at all costs. Actions related to organizing and finding, such as favoriting, can be paired with the title. Actions should be inline-end-aligned with the title
+
+##### Content Toolbar Actions
+
+Content Toolbar Actions contains all actions related to editing/managing/manipulating the content presented to the user. Content controls actions acts as the de-facto location for presenting all application-level actions in cases where a layout doesn't use an Navigation sidebar.
+
+###### Best practices
+
+- Aim for as few actions as possible to avoid congestion.
+- All actions should use Sanity UI's `<Button />` component. Button labels should be verb-led, use sentence case, and aim for two words or less (examples: "New document", "Export", "Delete").
+- Do not use `<Button />` to activate a menu. Use Sanity UI's `<MenuButton />` instead. `<MenuButton />` handles placement and display details that ensure consistency.
+- All buttons should be accompanied with a tooltip that describes what action the button does in greater detail (example: "Sort items by most recent", "Close comments pane", etc.). The contents of a tooltip should be detectable and useful for screen readers.
+- The primary action should be first in the stack of buttons and use `mode="default"`. Secondary actions should use `mode="ghost"`. There should be only one `mode="default"` button per action area.
+- Content actions should present no more than three buttons. When more actions exist, they should be contained in a menu triggered by a `<MenuButton />` with an ellipsis icon.
+- Actions within a menu should not have an accompanied tooltip.
+- Destructive actions should use `tone="critical"` and include an icon (`<ErrorOutlineIcon />`) to reinforce the action's nature for people with color vision issues. Do not rely on color alone to convey destructive intent.
+
+#### Content display
+
+The Content display section is the main section of the application. It's where pertinent content is presented and how users interact with it. There are two variants of Content display based on the type of content being presented. The section should be able to scroll independently to accommodate for overflow.
+
+1. **Document width:** Document width is used for content such as forms or content with long-form text. The width should optimize for ~50-70 characters per line.
+1. **Full width: **Full width is used to display grids of content, tabular data or any other content that requires as much horizontal space as possible.
+
+###### Best practices
+
+- In cases where minimal information or content is being presented and no scrolling is necessary, the content should be placed in the horizontal and vertical center of the Content display viewport.
+- Content display should always present something to the user. In cases where no content exists, an empty state should be displayed. This empty state should explain why no content is being displayed and provide an action to add content if such an option exists.
+
+#### Inspection sidebar
+
+The Inspection sidebar is for viewing/editing metadata for collections of content (examples: images within a media library or people in a profile collection).
+
+- The inspection sidebar utilizes the `<Column />` component and is always inline-start aligned within the layout.
+- The sidebar should take up 20% of the screen width in desktop/tablet devices–with a minimum width of 240px and a maximum width of 320px;
+- The sidebar should have an inline-start border to act as a visual break between it and the main content window.
+
+##### Display logic
+
+The inspection column should display context-specific information based on a selection of content within the content display section.
+
+- If no items are selected, the inspection column should either display metadata about the parent of the items or an empty state.
+- If one item is selected, the inspection column should display actions and metadata for that specific item.
+- If two or more items are selected, the inspection column should display actions and metadata for all selected items. Fields where all items have the same value should display the value. Otherwise, fields should be marked as “Mixed”. Uncommon fields should be hidden from view.
+
+##### Content inspector best practices
+
+- The inspection sidebar should only be used when the user must view/edit multiple pieces of content at once.
+- Toggling visibility of the inspector sidebar should only be used in cases where horizontal space is absolutely critical. Hiding the inspection column by default risks hiding critical information/functionality from new users.
+- Key actions on an item should be available in the main content pane in cases where the inspection column can be hidden.
+- Avoid adding complex layouts within the content inspection column whenever possible. Fields ideally should span the entire column. Use no more than two columns.
+
+##### Inspection sidebar sub-components:
+
+1. Content inspector header
+1. Content inspector properties
+1. Content inspector footer (optional)
+
+###### Content inspector header
+
+The content inspector header orients the user on what content is selected and allows them to perform bulk actions on that content.
+
+This section follows the same patterns as the application control header. Inspection controls should be fixed and remain in place when scrolling through properties. The title should be aligned to the start of the inline axis with actions at the end of the axis. Controls with three or more actions should only display one action with a `<MenuButton />` overflow menu for all remaining actions.
+
+###### Content inspector properties
+
+The content inspector properties provide the ability to view/edit an item’s (or multiple items’) metadata. The properties section should be able to scroll independently to accommodate for overflow.
+
+###### Content inspector properties best practices
+
+- Properties should flow vertically and be ordered by importance.
+- Consider grouping when logical categorization exists.
+- Consider adding group labels if 3 or more groups exist or groupings are not immediately intuitive.
+- Groups can be collapsible in cases of extreme scrolling. It’s advised to only make non-essential groups collapsible to avoid “fiddliness”.
+
+##### Content inspector footer
+
+The content inspector footer provides information related to an item’s (or multiple items’) status/availability. Examples include:
+
+- Time since last updated
+- Time since published
+
+## Navigation
+
+All application navigation lives in the Navigation sidebar. There are no secondary navigation bars, no in-content navigation panels, and no additional sidebars dedicated to navigation. The Navigation sidebar is the single, persistent location where users move between views. This constraint exists for three reasons:
+
+1. **Predictability**: Users always know where to go to navigate. There is no ambiguity about which part of the interface controls where they are.
+1. **Simplicity**: A single navigation surface eliminates the cognitive overhead of understanding multiple navigation models on the same screen.
+1. **Scalability**: One well-structured sidebar can accommodate simple and complex information architectures without introducing new layout patterns.
+
+Each pattern is designed for a specific purpose. Navigational patterns should not be mixed. When an application has hierarchical content—such as categories containing subcategories containing items—that hierarchy is represented _within_ the sidebar. It is not split across multiple panels or surfaces. The sidebar adapts to show depth. The layout does not grow new navigation regions.
+
+### Flat navigation
+
+Flat navigation is the default. Flat navigation should be used when there is no meaningful parent-child relationship between views. When all views exist at the same level of hierarchy, the sidebar displays them as a single list of menu items. Each item navigates the user to a distinct view. The active view is visually indicated with a selected state.
+
+### Nested navigation via tree view
+
+A tree view allows users to expand and collapse sections to reveal child items without leaving the sidebar.
+
+#### Use the tree view in the following cases:
+
+- When content has a parent-child hierarchy no more than three levels deep
+- When the number of descendants in parent-child hierarchy is relatively low–typically less than 100
+- When navigation menu items need to display more than a title (such as a caption or additional metadata below the title)
+
+#### Tree view guidelines:
+
+- Only the currently relevant branch should be expanded by default. All other branches should be collapsed.
+- Expanding a branch does not navigate the user. Navigation occurs when a leaf item (or a branch that is also a destination) is selected.
+- The tree should not exceed three levels of depth. If the information architecture requires more than three levels, use hierarchical drill-in navigation instead.
+- Expanded/collapsed states should persist within a session so users don't lose their place when navigating between views.
+- Parent items that are also navigable destinations should be visually distinct from parents that only act as grouping containers. A parent that is a destination should respond to selection like any other menu item. A parent that is only a container should only expand/collapse on interaction.
+
+### Nested navigation via hierarchical drill-in
+
+In this pattern, the sidebar displays one level of the hierarchy at a time. Selecting a parent replaces the current list with that parent's children, and a back affordance allows the user to return to the previous level.
+
+Use the hierarchical drill-in view in the following cases:
+
+- When content hierarchies exceed three levels
+- When the number of child items at any level is large enough to create excessive scrolling, the sidebar should use a hierarchical drill-in pattern
+- When navigational menu items need to show secondary information, such as captions or metadata
+
+#### Hierarchical drill-in guidelines:
+
+- A back button must be visible at the block-start of the sidebar content area when the user is at any level deeper than the root. The back button label should display the name of the parent level being returned to (example: "← Projects" rather than "← Back").
+- The current level's title should be displayed directly below the back button to orient the user.
+- Breadcrumbs are not used. The back button and level title provide sufficient orientation without consuming vertical space. Breadcrumbs also degrade quickly when labels are long or levels are deep.
+
+### Navigation and content relationship
+
+Selecting a navigation item updates the Content display area. The sidebar remains visible and in place. The content transition should be immediate—no full-page reload or layout shift.
+
+When a navigation item is selected:
+
+- The selected item receives a visually distinct active state
+- The Content controls title updates to reflect the name of the selected view
+- The Content display area renders the content for that view
+- The URL should update to reflect the selected view to support direct linking and browser history
+
+### What navigation is not
+
+Navigation is the act of moving between distinct views of content. The following are not navigation and should not live in the Navigation sidebar:
+
+- **Filtering**: Narrowing content within a single view belongs in the Content controls bar or within the Content display area itself.
+- **Sorting**: Reordering content within a view belongs in the Content controls bar.
+- **Searching**: Application-wide search belongs in the Navigation header as an action. View-specific search belongs in the Content controls bar.
+- **Tabs**: In-view tabs that switch between sub-views of a single piece of content (such as "Details" and "Activity" tabs on a document) belong in the Content display area.
+
+## Navigation menu display
+
+### Ordering
+
+Menu items should be ordered intentionally. The order should reflect one of the following logic–in order of priority:
+
+1. **Logical ordering:** Items should be sorted to match the typical order in which a user moves through them (example: "Drafts" → "In Review" → "Published"). In cases where there is a known and well-established order for content, that should be mirrored in the navigation.
+1. **Frequency of use: **In cases where no logical order exists, the items which are most commonly used should be ordered first.
+1. **Alphabetically**: Used when items have no meaningful priority or workflow relationship. Alphabetical ordering reduces the time users spend scanning long lists.
+
+Do not mix ordering strategies within a single group. If one group is ordered by frequency, all items within that group follow that rule.
+
+### Grouping
+
+Related menu items should be visually grouped. Grouping reduces scanning time and helps users build a mental model of the application's structure.
+
+Grouping guidelines:
+
+- Separate groups with a horizontal divider and appropriate vertical spacing. Dividers are the only visual separator between groups—do not use background colors, cards or indentation to distinguish groups.
+- Each group should contain between 2 and 7 items. A group with a single item should be merged with an adjacent group or left ungrouped. A group exceeding 7 items should be considered for splitting into smaller, more specific groups.
+- Aim for no more than 5 groups visible in the sidebar at one time. More than 5 groups creates visual noise and undermines the benefit of grouping in the first place. In such cases, consider hierarchical navigation.
+- The order of groups should follow the same principles as the order of items within a group: by logical ordering, frequency, or alphabetically.
+
+### Labeling groups
+
+Groups of 3 or more items should have a visible label. A label may be omitted if the grouping is self-evident (example: "Inbox" and "Sent" next to each other do not require a "Messages" label). Be cautious of omitting labels–a self-evident grouping for a power user may not be so for a first-time user.
+
+Group label guidelines:
+
+- Labels should be short—ideally one or two words (examples: "Content", "Settings", "Media library").
+- Labels should describe the _category_ of the items, not the action performed on them. Use "Documents" instead of "Manage documents". Use "Team" instead of "View team members".
+- Labels should use sentence case (example: "Media library", not "Media Library" or "MEDIA LIBRARY").
+- Labels should be visually understated relative to the menu items they describe. They orient—they do not compete for attention. Use a smaller font size, muted color, or lighter weight to achieve this.
+- Labels are not interactive. They do not expand, collapse, or navigate.
+
+### Ideal number of menu items
+
+The total number of visible menu items in the sidebar (across all groups) should not exceed 20. This is not a suggestion—exceeding 20 items produces a navigation experience that is functionally equivalent to no organization at all.
+
+For applications that require more than 20 navigable views, use one of the following strategies:
+
+1. **Consolidate views**: Combine related views into a single view with in-content filtering. Five separate status-based views ("Draft", "In review", "Approved", "Published", "Archived") can often be replaced with a single "Documents" view and a status filter.
+1. **Use nested navigation**: Move lower-priority items into collapsible tree branches or hierarchical drill-in levels, reducing the number of items visible at the root level.
+
+If the total number of root-level items still exceeds 20 after applying these strategies, the application's information architecture should be revisited.
+
+## Actions in layouts
+
+Actions are how users create, edit, manipulate and manage content. The layout system defines specific locations for actions based on their scope and importance. Placing actions in the correct location ensures users can predict where to find them and reduces the likelihood of destructive or unintended actions.
+
+### Action scope
+
+Every action has a scope. Scope determines where the action is placed in the layout.
+
+| **Scope** | **Definition** | **Placement** |
+| --- | --- | --- |
+| Application | Affects the entire application or spans all views (examples: global search, creating a new top-level item, application settings) | Navigation header actions |
+| View | Affects the currently displayed collection of content (examples: sorting items, bulk export, toggling view mode between grid and list) | Content controls actions |
+| Item | Affects a single selected piece of content (examples: editing metadata, duplicating, deleting) | Content inspector header actions (when inspector exists) or inline with the item in Content display |
+| Bulk | Affects multiple selected items (examples: bulk delete, bulk status change, bulk tag assignment) | Content inspector header actions (when inspector exists) or Content controls actions (when inspector does not exist) |
+
+When the layout does not include an Navigation sidebar, Application-scope actions move to the Content controls actions area. This is the only case where scope placement shifts between layout regions.
+
+### Action hierarchy
+
+Not all actions are equal. Each action location should establish a clear visual hierarchy using the Button component's `mode` prop:
+
+1. **Primary action** (`mode="default"`): The single most important action in a given section. It uses a solid background with full visual weight. There should be only one primary action per action area. If no action is clearly more important than the others, no action should be styled as primary.
+1. **Secondary actions** (`mode="ghost"`): Supporting actions that are used regularly but are not the main task. They use an outlined/bordered appearance.
+1. **Tertiary actions** (`mode="bleed"`): Infrequent or background actions with minimal visual weight—no background, just text and/or icon. When visible in the interface, tertiary actions use `mode="bleed"`. When space is limited, tertiary actions should be moved into an overflow menu triggered by a `<MenuButton />` with an ellipsis (⋯) icon.
+1. **Destructive actions** (`tone="critical"`): Actions that delete, remove, or irreversibly alter content. They use `tone="critical"` and should include an `<ErrorOutlineIcon />` via the `icon` prop to reinforce the action for people with color vision issues. A destructive action can be secondary or tertiary, but should never be the primary action (`mode="default"`) in a given area.
+
+As a rule of thumb, `mode="bleed"` should represent the majority of visible actions, followed by `mode="ghost"`, with `mode="default"` being the least used. A common ratio across a surface is roughly 6:3:1 (bleed : ghost : default).
+
+### Action placement rules
+
+#### Navigation header actions
+
+- Maximum of 2 visible actions. When more than 2 exist, display the primary action and place the rest in an overflow menu triggered by a `<MenuButton />`.
+- Actions should be global in nature. An action here should apply across all views.
+- Common application-level actions include: global search, creating a new item, notifications, and application settings.
+
+#### Content controls actions
+
+- Maximum of 3 visible actions. When more than 3 exist, display up to 3 (starting with the primary) and place the rest in an overflow menu triggered by a `<MenuButton />`.
+- The primary action (`mode="default"`) should be positioned first (inline-start) in the row of buttons.
+- Actions should relate to the current view's content. They should not duplicate application-level actions that already exist in the Navigation header.
+- When no Navigation sidebar exists, this area absorbs application-level actions. In that case, application-level actions should be visually separated from view-level actions using a divider or spacing.
+
+#### Content inspector header actions
+
+- Maximum of 2 visible actions. When more than 2 exist, display the primary action and place the rest in an overflow menu triggered by a `<MenuButton />`.
+- Actions should relate to the selected item(s) only.
+- When multiple items are selected, only actions that can be applied to all selected items should be visible. Actions that cannot be applied to the full selection should be hidden rather than disabled. If hiding would cause confusion (example: a user expects to see a familiar action but it's absent), a disabled state may be used—but provide context through an adjacent status message or info icon explaining why the action is unavailable and what steps the user can take to enable it. Do not rely on a tooltip for this context, as disabled buttons are removed from the tab order and tooltips on them are inaccessible to keyboard users.
+
+#### Inline actions within Content display
+
+- Inline actions appear directly on or adjacent to content items (examples: a delete icon on a card, a quick-edit button on a table row).
+- Inline actions should be limited to 1–2 per item. More than 2 inline actions per item creates clutter and competes with the content itself.
+- Inline actions are typically icon-only buttons using `mode="bleed"`. Every icon-only button must have an `aria-label` that describes the action (example: `aria-label="Delete item"`) and a paired tooltip for sighted users.
+- Inline actions may be revealed on hover for desktop interfaces. On touch devices, inline actions should be persistently visible or accessible through a long-press/context menu.
+- Inline actions should be redundant—meaning the same action is available through the inspector or content controls. Inline actions are a shortcut, not the only path.
+
+### Action button guidelines
+
+All actions should use Sanity UI's `<Button />` component and follow these rules:
+
+- **Labels**: Button labels should be verb-led, use sentence case, and aim for two words or less (examples: "New document", "Export", "Delete", "Save draft"). Avoid vague labels like "Click here", "Submit", "Go", or "OK". The label should communicate what will happen.
+- **Tooltips**: Every action button should have a tooltip that describes the action in greater detail (example: button label "Export" → tooltip "Export all items as a CSV file"). Tooltip text should be accessible to screen readers. Do not add tooltips to disabled buttons—keyboard users cannot access them since disabled buttons are removed from the tab order.
+- **Icons in buttons**: Icons should not be combined with text labels except in two specific cases. First, to visually reinforce buttons with `tone="positive"`, `tone="caution"`, or `tone="critical"`—pair with `<CheckmarkIcon />`, `<WarningOutlineIcon />`, or `<ErrorOutlineIcon />` respectively. Second, to create additional emphasis on a primary action—this should be reserved for only the most critical use cases. Icons should not replace labels except in high-density spaces (such as toolbars) where the icon is universally understood (example: a magnifying glass for search) _and_ space is constrained. Every icon-only button must have an `aria-label` and a paired tooltip.
+- **Loading states**: Use `loading={true}` only for processes that consistently take longer than 500ms. The button should be `disabled` while loading and the label should not change. For processes that take over three seconds, trigger a Toast notification when the action completes to reinforce that the operation finished.
+- **Confirmation for destructive actions**: Destructive actions should use `tone="critical"` with an `<ErrorOutlineIcon />` and require explicit confirmation before executing. Use a confirmation dialog that clearly states what will happen and provides a cancel option. The confirmation button should repeat the destructive action's name (example: "Delete 3 items") rather than a generic "Confirm" or "Yes". The confirmation button should also use `tone="critical"`.
+- **Buttons are not for navigation**: Do not use `<Button />` to navigate to a new view or URL—use `<Link />` instead. Do not use `<Button />` to switch between views within a surface—use `<Tab />` instead. Users of assistive technology expect buttons to perform actions and links to navigate.
+- **Buttons are not for menus**: Do not use `<Button />` as an activator for displaying a menu. Use `<MenuButton />` instead. `<MenuButton />` handles placement and display details that ensure consistency.
+
+### Overflow menus
+
+When actions exceed the maximum count for a given area, they move into an overflow menu.
+
+- The overflow trigger should use Sanity UI's `<MenuButton />` with an ellipsis (⋯) icon. Do not use a plain `<Button />` for this purpose—`<MenuButton />` handles menu placement and display consistently.
+- Menu items within the overflow should be ordered by frequency of use—most common at the top.
+- Destructive actions within an overflow menu should be placed at the bottom, separated from other items by a divider. Destructive menu items should use `tone="critical"`.
+- Overflow menu items should use a label only—no tooltips, no icons. The label should be descriptive enough to stand on its own (example: "Export as CSV" instead of "Export").
+- Overflow menus should contain no more than 8 items. If more than 8 actions exist, group them into labeled sections within the menu using the same grouping guidelines defined in the Navigation menu display section.
+
+### Empty states and disabled actions
+
+- Do not disable buttons as a blocking mechanism (example: disabling a submit button until all required fields are filled). People may not understand what is preventing the action. Instead, allow the button to be pressed and provide appropriate feedback in response.
+- Actions that cannot be performed in the current context should be hidden rather than disabled when the reason for the disabled state would not be obvious to the user. A button that is permanently disabled with no explanation is worse than no button at all.
+- Primary actions (`mode="default"`) that represent critical workflows should never be hidden. They should remain visible at all times.
+- When a disabled state _is_ used, provide context through an adjacent info icon or inline status message that explains why the action is unavailable and what steps the user can take to enable it (example: "Select at least one item to export"). Do not rely on tooltips for this—disabled buttons are removed from the tab order, making tooltips inaccessible to keyboard users.
+- In empty states where no content exists, a single prominent call-to-action should be placed in the center of the Content display area. This action should directly address the empty state (example: "Create your first document" rather than "Get started").
+
+## Inspection
+
+## Showing and hiding sidebars
+
+Both the Navigation sidebar and the Inspection sidebar can be shown or hidden within desktop and tablet breakpoints. This section defines the rules for when and how sidebars appear and disappear.
+
+### Default visibility
+
+Each layout type implies a default sidebar configuration. The default state is what users see on first load before any interaction.
+
+| **Layout type** | **Navigation sidebar** | **Inspection sidebar** |
+| --- | --- | --- |
+| Pane | Hidden (not available) | Hidden (not available) |
+| Shell | Hidden (not available) | Hidden (not available) |
+| Shell with Inspector | Hidden (not available) | Visible |
+| Shell with Navigation | Visible | Hidden (not available) |
+| Shell with Navigation and Inspector | Visible | Visible |
+
+"Not available" means the layout does not support that sidebar at all—there is no toggle and no way for the user to summon it. "Visible" and "Hidden" refer to sidebars that exist within the layout and can be toggled.
+
+### Toggling sidebars
+
+When a layout supports a sidebar, users should be able to show and hide it. Toggling follows these rules:
+
+- **Toggle affordance**: Each toggleable sidebar should have a clearly labeled button that controls its visibility. The button should use `mode="bleed"` and include both an icon and an `aria-label` describing the action (example: `aria-label="Show navigation"` or `aria-label="Hide inspector"`).
+- **Toggle placement for Navigation sidebar**: The toggle button should be placed in the Content controls bar, inline-start aligned before the Content controls title. When the sidebar is hidden, the button displays a menu/hamburger icon. When the sidebar is visible, the button displays a close icon or the same menu icon in an active/selected state using `selected={true}`.
+- **Toggle placement for Inspection sidebar**: The toggle button should be placed in the Content controls actions area. When the inspector is hidden, the button displays an inspector/panel icon. When the inspector is visible, the button should use `selected={true}` to indicate the active state.
+- **Label change on toggle**: The button's `aria-label` and tooltip should update to reflect the available action. When the sidebar is visible, the label should say "Hide [sidebar name]". When hidden, "Show [sidebar name]".
+- **Only one toggle per sidebar**: There should be exactly one toggle per sidebar. Do not place duplicate toggle buttons in multiple locations.
+
+### Sidebar transitions
+
+- **Animation**: Sidebars should animate in and out with a horizontal slide transition. The transition should be fast (150–200ms) and use an ease-out curve for opening and ease-in for closing.
+- **Content reflow**: When a sidebar is shown or hidden, the Content area should smoothly resize to fill the available space. Content should not jump or reflow abruptly. Avoid layout shifts that would cause the user to lose their place in the content.
+- **Reduced motion**: When the user's operating system has "Reduce motion" enabled, sidebars should appear and disappear instantly without animation. Do not override this preference.
+
+### Persistence
+
+- **User preference should persist**: When a user explicitly shows or hides a sidebar, that preference should be remembered for the duration of the session. If technically feasible, persist the preference across sessions (using local storage or a similar mechanism) so the layout appears the same way on return.
+- **Context-driven overrides**: In some cases, the application may override the user's preference in response to a user action. For example, selecting an item in the Content display area may automatically open the Inspection sidebar to show that item's metadata. This is acceptable only when the user's action directly implies they need the sidebar. The user should still be able to dismiss the sidebar manually after it opens.
+- **Do not auto-hide on interaction**: Sidebars should not collapse automatically when the user clicks or interacts with the Content area. Hiding a sidebar should always be an explicit user action via the toggle button or a keyboard shortcut.
+
+### Keyboard interaction
+
+- **Keyboard shortcut**: Provide a keyboard shortcut to toggle each sidebar. Use bracket-based shortcuts when possible (example: `[` for the Navigation sidebar, `]` for the Inspection sidebar). The shortcut should be discoverable via the toggle button's tooltip.
+- **Focus management on open**: When a sidebar is shown via its toggle, focus should move to the first focusable element inside the sidebar. This ensures keyboard users do not have to tab through the entire layout to reach the newly visible content.
+- **Focus management on close**: When a sidebar is hidden, focus should return to the toggle button that triggered the close. Do not leave focus on a hidden or removed element.
+- **Tab order**: When a sidebar is hidden, its contents should be completely removed from the tab order. Hidden sidebars should not contain focusable elements that keyboard users can accidentally reach.
+
+### Best practices
+
+- **Bias towards keeping sidebars visible on desktop**: Hiding sidebars by default saves space but risks hiding critical functionality from new users who do not know the sidebar exists. Default to visible on desktop-sized screens unless the application's primary use case demands maximum content area.
+- **Do not use sidebars as progressive disclosure**: Sidebars are persistent layout regions, not reveal panels for secondary content. If content only needs to appear temporarily in response to a specific action, use a Popover or Dialog instead.
+- **Avoid dual-hidden states**: In layouts that support both sidebars (Shell with Navigation and Inspector), avoid a state where both sidebars are hidden simultaneously on desktop. This creates an interface that looks like a Pane or Shell layout, which is disorienting for users who expect navigation and inspection to be available. If both sidebars must be hideable, at least one should be visible by default.
+- **Mobile and tablet behavior**: On smaller screens, sidebar visibility follows the responsive rules defined in the Responsiveness section. The toggle patterns described here apply to desktop-sized viewports. On tablets, the Navigation sidebar collapses into a top bar. On mobile, both sidebars are hidden by default and accessed through overlay patterns (popover menu for navigation, sheet for inspector).
+
+## Responsiveness
+
+Layouts should elegantly adapt to the device it's rendered on–from phone to tablet to desktop.
+
+### General responsiveness for mobile devices
+
+- Desktop-oriented components should be displayed in a mobile equivalent (example: Modals on desktop should typically be displayed as a Sheet on mobile devices)
+- Bias towards text-based actions over icons when space permits
+- Bias towards displaying less information broken across multiple surfaces
+
+### General responsiveness for touch-based interfaces
+
+- All UI controls that take user interaction/input should be no smaller than 24x24 pixels in size
+- Critical interactions that relied on hover need to have a mobile-friendly fallback
+
+### Responsiveness for tablets
+
+#### Application controls
+
+Application controls should appear as a fixed top bar above the main Content window. It should span the entire width of the layout. Application controls should contain the name of the application and application-level actions.
+
+### Content controls
+
+Content controls should appear as a fixed top bar above the Content display pane. Navigation between pages/views is available through a `<MenuButton />` with a menu icon, inline-start aligned to the title in the Content controls bar.
+
+#### Content inspector
+
+The Content inspection sidebar should function exactly the same as it does on desktop devices.
+
+### Responsiveness for mobile devices
+
+Mobile phones should only display the content section by default. Both the Navigation sidebar and Inspection sidebar should be hidden. The content controls bar is fixed at the top of the screen and acts as the main section for actions and controls.
+
+#### Application controls
+
+Accessing the application controls should happen through a `<MenuButton />` with a menu icon, inline-start aligned to the title in the Content controls bar. Activating the `<MenuButton />` should display the application controls as a popover menu. Do not use a plain `<Button />` for this purpose.
+
+#### Content inspector
+
+The Content inspector should be displayed as a sheet when an item is tapped/selected in the main content view. The sheet should function like a standard mobile sheet component and have an explicit dismiss button that is block-start and inline-end aligned.
