@@ -13,6 +13,7 @@ Sends a prompt to Claude N times in parallel, collects the generated code, valid
 5. **Screenshots** of each generated app (saved to `output/`)
 6. **Fix attempts** — how many error→fix cycles were needed before the page rendered
 7. **Sanity UI feedback** — friction points and developer experience issues reported by each agent
+8. **Accessibility compliance** — WCAG 2.2 AA violations in each generated app (via Playwright + axe-core)
 
 ## How It Works
 
@@ -120,39 +121,134 @@ npm run test:control:cli      # Control prompt, CLI runner
 npm run test:training:cli     # Training prompt, CLI runner
 npm run test:both:cli         # Both prompts, CLI runner
 
-npm run rescreenshot          # Re-screenshot all iterations
+npm run rescreenshot          # Re-screenshot all iterations (latest run)
 npm run rescreenshot:control  # Re-screenshot control iterations only
 npm run rescreenshot:training # Re-screenshot training iterations only
 
-npm run rebuild               # Re-parse raw responses, rewrite projects, re-screenshot
+npm run rebuild               # Re-parse raw responses, rewrite projects, re-screenshot (latest run)
 npm run rebuild:control       # Rebuild control iterations only
 npm run rebuild:training      # Rebuild training iterations only
+
+npm run test:a11y             # Run standalone a11y tests against latest run
+npm run test:a11y:control     # A11y tests for control iterations only
+npm run test:a11y:training    # A11y tests for training iterations only
 ```
 
 ## Output
 
-Results are written to `output/`:
+Each run creates a timestamped directory under `output/`:
 
 ```
 output/
-├── report.json                    # Machine-readable report
-├── report.md                      # Human-readable Markdown report
-├── control/
-│   ├── iteration-1/
-│   │   ├── project/               # Generated (and fixed) project files
-│   │   ├── screenshot.png         # App screenshot
-│   │   ├── _raw_response.txt      # Initial Claude response
-│   │   ├── _feedback.json         # Parsed feedback items
-│   │   ├── _fix_response_1.txt    # First fix response (if needed)
-│   │   ├── _fix_response_2.txt    # Second fix response (if needed)
-│   │   ├── _console_errors.txt    # Final browser console errors (if any)
-│   │   └── _meta.json             # Metrics including fixAttempts, fixLog, and feedback
-│   ├── iteration-2/
+├── 2026-03-18-14.30/                # One directory per run, timestamped YYYY-MM-DD-HH.MM
+│   ├── report.json                  # Machine-readable report (includes accessibility data)
+│   ├── report.md                    # Human-readable Markdown report
+│   ├── control/
+│   │   ├── iteration-1/
+│   │   │   ├── project/             # Generated (and fixed) project files
+│   │   │   ├── screenshot.png       # App screenshot
+│   │   │   ├── _raw_response.txt    # Initial Claude response
+│   │   │   ├── _feedback.json       # Parsed feedback items
+│   │   │   ├── _fix_response_1.txt  # First fix response (if needed)
+│   │   │   ├── _fix_response_2.txt  # Second fix response (if needed)
+│   │   │   ├── _console_errors.txt  # Final browser console errors (if any)
+│   │   │   ├── _meta.json           # Metrics including fixAttempts, fixLog, feedback, and a11yResults
+│   │   │   └── _a11y_results.json   # Accessibility test results (7 WCAG tests per iteration)
+│   │   ├── iteration-2/
+│   │   └── ...
+│   └── training/
+│       ├── iteration-1/
+│       └── ...
+├── 2026-03-19-09.15/                # Previous runs are preserved
 │   └── ...
-└── training/
-    ├── iteration-1/
-    └── ...
+└── ...
 ```
+
+Accessibility tests run automatically after each iteration successfully builds. Results are included in both the per-iteration `_a11y_results.json` and the summarized `report.json` / `report.md`.
+
+## Accessibility Testing
+
+Accessibility tests run **automatically** as part of the main harness. When an iteration's generated app successfully renders, the runner immediately tests it for WCAG 2.2 AA compliance using Puppeteer + axe-core. Results are saved per-iteration (`_a11y_results.json`) and aggregated in the final report.
+
+### What It Tests
+
+Each iteration is checked with seven accessibility tests:
+
+| Test | What it checks |
+|------|----------------|
+| **axe-core violations** | Full WCAG 2.2 AA + best-practice scan via axe-core |
+| **Images without alt** | `<img>` elements missing the `alt` attribute |
+| **Keyboard accessibility** | All interactive elements (buttons, links, inputs) can receive focus |
+| **ARIA references** | `aria-labelledby`, `aria-describedby`, `aria-controls`, etc. all point to existing DOM IDs |
+| **Color contrast** | Targeted axe-core `color-contrast` rule with detailed per-node reporting |
+| **Page language** | `<html>` has a non-empty `lang` attribute (WCAG 3.1.1) |
+| **Landmark structure** | At least one landmark region exists (`<main>`, `<nav>`, `<header>`, `[role="main"]`, etc.) |
+
+### Report Output
+
+The Markdown report includes an **♿ Accessibility** section per prompt with:
+
+- Total and average axe violations per iteration
+- Pass rate per test across all iterations
+- Most common axe violation IDs ranked by frequency
+- Per-iteration pass/fail/skip summary
+
+### Standalone Playwright Tests
+
+You can also re-run accessibility tests independently against existing output using Playwright:
+
+```
+# Install Playwright browsers (one-time)
+npm run test:a11y:install
+
+# Test all iterations in the latest run
+npm run test:a11y
+
+# Test only control prompt outputs
+npm run test:a11y:control
+
+# Test only training prompt outputs
+npm run test:a11y:training
+
+# Test a specific iteration
+A11Y_ITERATION=2 npm run test:a11y:control
+
+# Point at a specific run directory
+A11Y_RUN_DIR=output/2026-03-18-14.30 npm run test:a11y
+```
+
+The standalone Playwright tests auto-detect the latest timestamped run directory under `output/`, or you can point at a specific one with `A11Y_RUN_DIR`.
+
+### Results Format
+
+Each iteration gets an `_a11y_results.json` file:
+
+```json
+{
+  "label": "control-iter-1",
+  "timestamp": "2026-03-18T12:30:00.000Z",
+  "tests": {
+    "axe-core": { "status": "failed", "details": { "violationCount": 3, "..." : "..." } },
+    "images-alt": { "status": "passed", "details": { "missingAltCount": 0 } },
+    "keyboard-accessible": { "status": "passed", "details": { "totalInteractive": 8, "notFocusableCount": 0 } },
+    "aria-references": { "status": "passed", "details": { "brokenCount": 0 } },
+    "color-contrast": { "status": "passed", "details": { "violationCount": 0 } },
+    "page-lang": { "status": "passed", "details": { "lang": "en" } },
+    "landmark-structure": { "status": "passed", "details": { "landmarkCount": 2, "landmarks": ["main (1)", "nav (1)"] } }
+  },
+  "axeViolationCount": 3,
+  "axeViolations": ["..."],
+  "summary": { "totalTests": 7, "passed": 6, "failed": 1, "skipped": 0 }
+}
+```
+
+### Environment Variables
+
+| Variable | Example | Description |
+|----------|---------|-------------|
+| `A11Y_PROMPT` | `control` | Only test iterations for this prompt (Playwright only) |
+| `A11Y_ITERATION` | `2` | Only test a specific iteration number (Playwright only) |
+| `A11Y_RUN_DIR` | `output/2026-03-18-14.30` | Point Playwright at a specific run directory |
 
 ## How Isolation Works
 
@@ -165,16 +261,23 @@ Fix calls are also isolated — they are standalone requests with only the curre
 
 ## Architecture
 
-- **`src/index.js`** — CLI entry point, argument parsing, runner selection, orchestration with bounded concurrency
-- **`src/runner.js`** — API runner: generate → validate → fix loop using the Anthropic SDK (requires `ANTHROPIC_API_KEY`)
-- **`src/runner-cli.js`** — CLI runner: same generate → validate → fix loop using `claude --print` (no API key needed)
+- **`src/index.js`** — CLI entry point, argument parsing, runner selection, orchestration with bounded concurrency. Creates a timestamped run directory per invocation.
+- **`src/runner.js`** — API runner: generate → validate → a11y test → fix loop using the Anthropic SDK (requires `ANTHROPIC_API_KEY`)
+- **`src/runner-cli.js`** — CLI runner: same generate → validate → a11y test → fix loop using `claude --print` (no API key needed)
 - **`src/screenshot.js`** — Shared validation and screenshot pipeline: `validateProject()` (install, serve, check for errors/render), `captureScreenshot()`, `killDevServer()`
+- **`src/a11y.js`** — Inline accessibility testing module: runs 7 WCAG 2.2 AA tests via Puppeteer + axe-core against a live dev server
 - **`src/analyze.js`** — Shared utilities: file parsing, Sanity UI component extraction, source file detection
-- **`src/report.js`** — Aggregates results and generates JSON + Markdown reports (includes fix attempt metrics)
-- **`src/rescreenshot.js`** — Re-run the screenshot pipeline on existing iteration output
-- **`src/rebuild.js`** — Re-parse raw responses, rewrite project files, and re-screenshot
+- **`src/report.js`** — Aggregates results and generates JSON + Markdown reports (includes fix attempts, feedback, and accessibility metrics)
+- **`src/rescreenshot.js`** — Re-run the screenshot pipeline on existing iteration output. Auto-detects latest timestamped run dir.
+- **`src/rebuild.js`** — Re-parse raw responses, rewrite project files, and re-screenshot. Auto-detects latest timestamped run dir.
+- **`a11y/playwright.config.ts`** — Playwright config for standalone accessibility tests (chromium only, sequential, no shared webServer)
+- **`a11y/tests/output-accessibility.test.ts`** — Discovers iteration outputs in timestamped run dirs and runs WCAG 2.2 AA tests against each
 
 ## Dependencies
 
 - `@anthropic-ai/sdk` — Claude API client (only used by the API runner)
-- `puppeteer` — Headless Chrome for validation and screenshots
+- `puppeteer` — Headless Chrome for validation, screenshots, and inline accessibility testing
+- `axe-core` — WCAG accessibility engine, injected into Puppeteer pages for inline testing
+- `@playwright/test` — Test runner for standalone accessibility tests (dev dependency)
+- `@axe-core/playwright` — axe-core integration for Playwright (dev dependency)
+- `typescript` — TypeScript compiler for the a11y test files (dev dependency)

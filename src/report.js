@@ -51,6 +51,9 @@ export async function generateReport(allResults, outputDir) {
 
     // 7. Feedback analysis
     const feedbackAnalysis = analyzeFeedback(validIterations);
+
+    // 8. Accessibility analysis
+    const a11yAnalysis = analyzeAccessibility(validIterations);
     const avgFixes = mean(fixCounts);
     const stdDevFixes = stdDev(fixCounts);
     const iterationsNeedingFixes = fixCounts.filter((n) => n > 0).length;
@@ -96,6 +99,7 @@ export async function generateReport(allResults, outputDir) {
         })),
       },
       feedback: feedbackAnalysis,
+      accessibility: a11yAnalysis,
       tokenUsage: {
         avgInputTokens: inputTokens.length ? round(mean(inputTokens)) : null,
         avgOutputTokens: outputTokens.length ? round(mean(outputTokens)) : null,
@@ -294,6 +298,116 @@ function analyzeComponents(iterations) {
 }
 
 /**
+ * Analyze accessibility results across iterations.
+ */
+function analyzeAccessibility(iterations) {
+  const withA11y = iterations.filter((r) => r.a11yResults != null);
+
+  if (withA11y.length === 0) {
+    return {
+      iterationsWithResults: 0,
+      totalIterations: iterations.length,
+      description: "No accessibility results collected",
+    };
+  }
+
+  // Aggregate per-test pass/fail/skip counts — keyed to the accessibility
+  // checklist categories from accessibility-standards.md
+  const testNames = [
+    "semantic-structure",
+    "keyboard-interaction",
+    "focus-management",
+    "aria-conventions",
+    "screen-reader",
+    "contrast-and-color",
+    "motion",
+    "touch-targets",
+    "heading-hierarchy",
+    "spacing-and-reflow",
+    "axe-core-full",
+  ];
+
+  const perTest = {};
+  for (const name of testNames) {
+    perTest[name] = { passed: 0, failed: 0, skipped: 0 };
+  }
+
+  let totalAxeViolations = 0;
+  const allAxeViolationIds = {};
+  const perIteration = [];
+
+  for (const iter of withA11y) {
+    const a11y = iter.a11yResults;
+    const summary = a11y.summary || { passed: 0, failed: 0, skipped: 0 };
+
+    perIteration.push({
+      iteration: iter.iteration,
+      passed: summary.passed,
+      failed: summary.failed,
+      skipped: summary.skipped,
+      axeViolationCount: a11y.axeViolationCount || 0,
+    });
+
+    totalAxeViolations += a11y.axeViolationCount || 0;
+
+    // Count per-test status
+    for (const name of testNames) {
+      const test = a11y.tests?.[name];
+      if (!test) {
+        perTest[name].skipped++;
+      } else if (test.status === "passed") {
+        perTest[name].passed++;
+      } else if (test.status === "failed") {
+        perTest[name].failed++;
+      } else {
+        perTest[name].skipped++;
+      }
+    }
+
+    // Collect unique axe violation IDs across iterations
+    for (const v of a11y.axeViolations || []) {
+      const id = v.id || "unknown";
+      if (!allAxeViolationIds[id]) {
+        allAxeViolationIds[id] = {
+          id,
+          impact: v.impact,
+          description: v.description,
+          helpUrl: v.helpUrl,
+          count: 0,
+        };
+      }
+      allAxeViolationIds[id].count++;
+    }
+  }
+
+  // Compute pass rate per test
+  const testPassRates = {};
+  for (const name of testNames) {
+    const t = perTest[name];
+    const tested = t.passed + t.failed;
+    testPassRates[name] = {
+      ...t,
+      passRate: tested > 0 ? round(t.passed / tested) : null,
+    };
+  }
+
+  // Sort violations by frequency
+  const topViolations = Object.values(allAxeViolationIds).sort(
+    (a, b) => b.count - a.count,
+  );
+
+  return {
+    iterationsWithResults: withA11y.length,
+    totalIterations: iterations.length,
+    totalAxeViolations,
+    averageAxeViolations: round(totalAxeViolations / withA11y.length),
+    testPassRates,
+    topViolations: topViolations.slice(0, 20),
+    perIteration,
+  };
+}
+
+/**
  * Render report as Markdown.
  */
 function renderMarkdown(report) {
@@ -459,6 +573,46 @@ function renderMarkdown(report) {
       md += `</details>\n\n`;
     } else {
       md += `No feedback was provided by the agent across any iteration.\n\n`;
+    }
+
+    // Accessibility
+    md += `### ♿ Accessibility\n\n`;
+    const a11y = data.accessibility;
+    if (a11y && a11y.iterationsWithResults > 0) {
+      md += `| Metric | Value |\n|--------|-------|\n`;
+      md += `| Iterations tested | ${a11y.iterationsWithResults}/${a11y.totalIterations} |\n`;
+      md += `| Total axe violations | ${a11y.totalAxeViolations} |\n`;
+      md += `| Avg axe violations/iteration | ${a11y.averageAxeViolations} |\n\n`;
+
+      // Per-test pass rates
+      md += `**Test pass rates:**\n\n`;
+      md += `| Test | Passed | Failed | Skipped | Pass Rate |\n|------|--------|--------|---------|----------|\n`;
+      for (const [name, t] of Object.entries(a11y.testPassRates)) {
+        const rate =
+          t.passRate !== null ? `${round(t.passRate * 100, 1)}%` : "—";
+        md += `| ${name} | ${t.passed} | ${t.failed} | ${t.skipped} | ${rate} |\n`;
+      }
+      md += `\n`;
+
+      // Top violations
+      if (a11y.topViolations.length > 0) {
+        md += `**Most common axe violations:**\n\n`;
+        md += `| Violation | Impact | Occurrences | Description |\n|-----------|--------|-------------|-------------|\n`;
+        for (const v of a11y.topViolations.slice(0, 10)) {
+          md += `| \`${v.id}\` | ${v.impact || "—"} | ${v.count}/${a11y.iterationsWithResults} | ${(v.description || "").slice(0, 80)} |\n`;
+        }
+        md += `\n`;
+      }
+
+      // Per-iteration summary
+      md += `**Per iteration:**\n\n`;
+      for (const p of a11y.perIteration) {
+        const icon = p.failed === 0 ? "✓" : "✗";
+        md += `- **Iteration ${p.iteration}:** ${icon} ${p.passed} passed, ${p.failed} failed, ${p.skipped} skipped (${p.axeViolationCount} axe violations)\n`;
+      }
+      md += `\n`;
+    } else {
+      md += `No accessibility results collected for this prompt.\n\n`;
     }
 
     // Screenshots

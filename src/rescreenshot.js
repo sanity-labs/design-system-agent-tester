@@ -23,10 +23,35 @@ const { values } = parseArgs({
     output: {
       type: "string",
       short: "o",
-      default: resolve(ROOT, "output"),
+      default: "",
     },
   },
 });
+
+/**
+ * Resolve the run directory. If --output is given, use it directly.
+ * Otherwise, find the latest timestamped subdirectory under output/.
+ */
+async function resolveRunDir(outputFlag) {
+  if (outputFlag) return resolve(outputFlag);
+
+  const outputRoot = resolve(ROOT, "output");
+  if (!existsSync(outputRoot)) return outputRoot;
+
+  const entries = await readdir(outputRoot, { withFileTypes: true });
+  const timestamped = entries
+    .filter((e) => e.isDirectory() && /^\d{4}-\d{2}-\d{2}-/.test(e.name))
+    .map((e) => e.name)
+    .sort()
+    .reverse();
+
+  if (timestamped.length > 0) {
+    return resolve(outputRoot, timestamped[0]);
+  }
+
+  // Fallback: maybe it's an old-style flat output/ with control/training directly
+  return outputRoot;
+}
 
 /**
  * Discover all iteration directories under a prompt output folder.
@@ -68,7 +93,7 @@ async function discoverIterations(promptDir) {
 async function main() {
   const promptArg = values.prompt;
   const maxConcurrency = parseInt(values.concurrency, 10) || 3;
-  const outputDir = resolve(values.output);
+  const outputDir = await resolveRunDir(values.output);
 
   // Determine which prompt directories to scan
   let promptKeys;
@@ -98,11 +123,15 @@ async function main() {
     const iterations = await discoverIterations(promptDir);
 
     if (iterations.length === 0) {
-      console.log(`[${key}] No iterations with project/package.json found in ${promptDir} — skipping\n`);
+      console.log(
+        `[${key}] No iterations with project/package.json found in ${promptDir} — skipping\n`,
+      );
       continue;
     }
 
-    console.log(`--- Re-screenshotting "${key}" (${iterations.length} iterations) ---\n`);
+    console.log(
+      `--- Re-screenshotting "${key}" (${iterations.length} iterations) ---\n`,
+    );
 
     // Process with bounded concurrency
     const queue = [...iterations];
@@ -128,18 +157,24 @@ async function main() {
 
         if (screenshotPath) {
           totalSucceeded++;
-          console.log(`[${iterLabel}] Done in ${elapsed}s — ${screenshotPath}\n`);
+          console.log(
+            `[${iterLabel}] Done in ${elapsed}s — ${screenshotPath}\n`,
+          );
 
           // Update _meta.json if it exists
           await updateMeta(iterDir, screenshotPath);
         } else {
           totalFailed++;
-          console.log(`[${iterLabel}] No screenshot produced after ${elapsed}s\n`);
+          console.log(
+            `[${iterLabel}] No screenshot produced after ${elapsed}s\n`,
+          );
         }
       } catch (err) {
         totalFailed++;
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-        console.error(`[${iterLabel}] Failed after ${elapsed}s: ${err.message}\n`);
+        console.error(
+          `[${iterLabel}] Failed after ${elapsed}s: ${err.message}\n`,
+        );
       }
     }
 

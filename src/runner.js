@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { runAccessibilityTests } from "./a11y.js";
 import { writeFile, mkdir, rm, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { existsSync } from "node:fs";
@@ -157,6 +158,18 @@ export async function runAgent({
             iterLabel,
           );
 
+          // Run accessibility tests against the live dev server
+          let a11yResults = null;
+          try {
+            a11yResults = await runAccessibilityTests({
+              serverUrl: validation.serverUrl,
+              iterDir,
+              iterLabel,
+            });
+          } catch (err) {
+            console.warn(`[${iterLabel}] ⚠ A11y tests failed: ${err.message}`);
+          }
+
           // Save any non-fatal console errors for reference
           if (validation.consoleErrors.length > 0) {
             await writeFile(
@@ -179,6 +192,7 @@ export async function runAgent({
             fixAttempts,
             fixLog,
             feedback,
+            a11yResults,
             runner: "api",
           });
           return result;
@@ -310,6 +324,7 @@ export async function runAgent({
       fixAttempts,
       fixLog,
       feedback,
+      a11yResults: null,
       runner: "api",
     });
   }
@@ -326,6 +341,7 @@ export async function runAgent({
     fixAttempts,
     fixLog,
     feedback,
+    a11yResults: null,
     runner: "api",
   });
 }
@@ -448,6 +464,7 @@ async function buildResult({
   fixAttempts,
   fixLog,
   feedback,
+  a11yResults,
   runner,
 }) {
   const linesOfCode = files.reduce(
@@ -475,6 +492,7 @@ async function buildResult({
     fixAttempts,
     fixLog,
     feedback,
+    a11yResults,
   };
   await writeFile(
     resolve(iterDir, "_meta.json"),
@@ -493,5 +511,6 @@ async function buildResult({
     fixAttempts,
     fixLog,
     feedback,
+    a11yResults,
   };
 }

@@ -52,6 +52,17 @@ const PROMPTS = {
   training: resolve(ROOT, "PROMPT-WITH-TRAINING.md"),
 };
 
+/**
+ * Build a timestamped directory name in the format YYYY-MM-DD-HH.MM
+ */
+function buildTimestampedDirName() {
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const time = `${pad(now.getHours())}.${pad(now.getMinutes())}`;
+  return `${date}-${time}`;
+}
+
 async function main() {
   const promptArg = values.prompt;
   const iterations = parseInt(values.iterations, 10);
@@ -97,6 +108,11 @@ async function main() {
     process.exit(1);
   }
 
+  // Create a timestamped run directory: output/2025-03-18-14.30/
+  const runDirName = buildTimestampedDirName();
+  const runDir = resolve(ROOT, "output", runDirName);
+  await mkdir(runDir, { recursive: true });
+
   console.log("=== Agent Tester ===");
   console.log(
     `Runner:       ${runnerType}${runnerType === "cli" ? " (claude CLI — no API key needed)" : " (Anthropic SDK — requires ANTHROPIC_API_KEY)"}`,
@@ -107,6 +123,7 @@ async function main() {
   console.log(`Concurrency:  ${maxConcurrency}`);
   console.log(`Screenshots:  ${takeScreenshots}`);
   console.log(`Prompts:      ${promptKeys.join(", ")}`);
+  console.log(`Output:       ${runDir}`);
   console.log("");
 
   const allResults = {};
@@ -119,7 +136,7 @@ async function main() {
       `\n--- Running "${key}" prompt (${iterations} iterations) ---\n`,
     );
 
-    const outputDir = resolve(ROOT, "output", key);
+    const outputDir = resolve(runDir, key);
     await mkdir(outputDir, { recursive: true });
 
     const results = [];
@@ -194,9 +211,9 @@ async function main() {
 
   // Generate report
   console.log("\n\n=== Generating Report ===\n");
-  await generateReport(allResults, resolve(ROOT, "output"));
+  await generateReport(allResults, runDir);
 
-  console.log("\nDone! See output/ for results and report.");
+  console.log(`\nDone! See ${runDir} for results and report.`);
 }
 
 main().catch((err) => {

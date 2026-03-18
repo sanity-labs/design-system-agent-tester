@@ -1,10 +1,22 @@
 import { parseArgs } from "node:util";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readdir, readFile, writeFile, stat, mkdir, rm } from "node:fs/promises";
+import {
+  readdir,
+  readFile,
+  writeFile,
+  stat,
+  mkdir,
+  rm,
+} from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { parseFiles, extractSanityUIComponents, isSourceFile } from "./analyze.js";
+import {
+  parseFiles,
+  extractSanityUIComponents,
+  isSourceFile,
+} from "./analyze.js";
 import { attemptScreenshot } from "./screenshot.js";
+import { runAccessibilityTests } from "./a11y.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
@@ -24,7 +36,7 @@ const { values } = parseArgs({
     output: {
       type: "string",
       short: "o",
-      default: resolve(ROOT, "output"),
+      default: "",
     },
     "skip-screenshot": {
       type: "boolean",
@@ -36,6 +48,31 @@ const { values } = parseArgs({
     },
   },
 });
+
+/**
+ * Resolve the run directory. If --output is given, use it directly.
+ * Otherwise, find the latest timestamped subdirectory under output/.
+ */
+async function resolveRunDir(outputFlag) {
+  if (outputFlag) return resolve(outputFlag);
+
+  const outputRoot = resolve(ROOT, "output");
+  if (!existsSync(outputRoot)) return outputRoot;
+
+  const entries = await readdir(outputRoot, { withFileTypes: true });
+  const timestamped = entries
+    .filter((e) => e.isDirectory() && /^\d{4}-\d{2}-\d{2}-/.test(e.name))
+    .map((e) => e.name)
+    .sort()
+    .reverse();
+
+  if (timestamped.length > 0) {
+    return resolve(outputRoot, timestamped[0]);
+  }
+
+  // Fallback: maybe it's an old-style flat output/ with control/training directly
+  return outputRoot;
+}
 
 /**
  * Discover all iteration directories under a prompt output folder.
@@ -75,7 +112,13 @@ async function discoverIterations(promptDir) {
 /**
  * Re-parse a raw response, write all project files to disk, and optionally re-screenshot.
  */
-async function rebuildIteration({ iterDir, rawFile, iterLabel, skipScreenshot, skipInstall }) {
+async function rebuildIteration({
+  iterDir,
+  rawFile,
+  iterLabel,
+  skipScreenshot,
+  skipInstall,
+}) {
   const rawText = await readFile(rawFile, "utf-8");
 
   // Parse files from the raw response
@@ -115,7 +158,9 @@ async function rebuildIteration({ iterDir, rawFile, iterLabel, skipScreenshot, s
       console.warn(`[${iterLabel}] Failed to write: ${file.path}`);
     }
   }
-  console.log(`[${iterLabel}] Verified ${writtenPaths.length}/${files.length} files on disk`);
+  console.log(
+    `[${iterLabel}] Verified ${writtenPaths.length}/${files.length} files on disk`,
+  );
 
   // Compute metrics
   const linesOfCode = files.reduce(
@@ -173,7 +218,7 @@ async function rebuildIteration({ iterDir, rawFile, iterLabel, skipScreenshot, s
 async function main() {
   const promptArg = values.prompt;
   const maxConcurrency = parseInt(values.concurrency, 10) || 2;
-  const outputDir = resolve(values.output);
+  const outputDir = await resolveRunDir(values.output);
   const skipScreenshot = values["skip-screenshot"];
   const skipInstall = values["skip-install"];
 
@@ -247,9 +292,7 @@ async function main() {
           );
         } else {
           totalNoFiles++;
-          console.log(
-            `[${iterLabel}] ⚠ ${result.reason} (${elapsed}s)\n`,
-          );
+          console.log(`[${iterLabel}] ⚠ ${result.reason} (${elapsed}s)\n`);
         }
       } catch (err) {
         totalFailed++;

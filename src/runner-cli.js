@@ -13,6 +13,7 @@ import {
   extractSanityUIComponents,
   isSourceFile,
 } from "./analyze.js";
+import { runAccessibilityTests } from "./a11y.js";
 
 const SYSTEM_PROMPT = `You are an expert frontend developer. You will be given instructions to build a web application.
 
@@ -236,6 +237,18 @@ export async function runAgent({
             );
           }
 
+          // Run accessibility tests against the live dev server
+          let a11yResults = null;
+          try {
+            a11yResults = await runAccessibilityTests({
+              serverUrl: validation.serverUrl,
+              iterDir,
+              iterLabel,
+            });
+          } catch (err) {
+            console.warn(`[${iterLabel}] ⚠ A11y tests failed: ${err.message}`);
+          }
+
           // Collect final metrics
           files = await readProjectFiles(projectDir, files);
           const result = buildResult({
@@ -247,6 +260,7 @@ export async function runAgent({
             fixAttempts,
             fixLog,
             feedback,
+            a11yResults,
           });
           return result;
         }
@@ -363,6 +377,7 @@ export async function runAgent({
       fixAttempts,
       fixLog,
       feedback,
+      a11yResults: null,
     });
   }
 
@@ -376,6 +391,7 @@ export async function runAgent({
     fixAttempts,
     fixLog,
     feedback,
+    a11yResults: null,
   });
 }
 
@@ -493,6 +509,7 @@ async function buildResult({
   fixAttempts,
   fixLog,
   feedback,
+  a11yResults,
 }) {
   const linesOfCode = files.reduce(
     (sum, f) => sum + f.content.split("\n").length,
@@ -519,6 +536,7 @@ async function buildResult({
     fixAttempts,
     fixLog,
     feedback,
+    a11yResults,
   };
   await writeFile(
     resolve(iterDir, "_meta.json"),
@@ -537,5 +555,6 @@ async function buildResult({
     fixAttempts,
     fixLog,
     feedback,
+    a11yResults,
   };
 }
