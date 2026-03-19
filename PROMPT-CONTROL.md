@@ -1,7 +1,7 @@
 Create a simple interface that mimics Sanity Studio using Sanity UI.  
 
 # Instructions
-* Use the latest version of Sanity Icons and Sanity UI v3 for the interface
+* Use the latest version of Sanity Icons and Sanity UI v3.1.14 for the interface. 
 * Rely exclusively on [Sanity UI's documentation site](https://www.sanity.io/ui) for guidance on how to use the UI library.
 * The project should be built on top of Vite
 * Use as few NPM packagess as possible 

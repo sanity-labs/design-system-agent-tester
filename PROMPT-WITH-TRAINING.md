@@ -1,7 +1,7 @@
 Create a simple interface that mimics Sanity Studio using Sanity UI.  
 
 # Instructions
-* Use the latest version of Sanity Icons and Sanity UI v3 for the interface
+* Use the latest version of Sanity Icons and Sanity UI v3.1.14 for the interface. 
 * Rely on [Sanity UI's documentation site](https://www.sanity.io/ui) and the guidelines below for guidance on how to use the UI library.
 * The project should be built on top of Vite
 * Use as few NPM packagess as possible 
@@ -671,6 +671,7 @@ This is a living document. Each accessibility review adds to or refines the stan
 10. [Conformance audit](#10-conformance-audit)
 11. [Cross-component patterns](#11-cross-component-patterns)
 12. [Component docs to update](#12-component-docs-to-update)
+13. [Accessibility checklist](#accessibility-checklist)
 
 ---
 
@@ -704,6 +705,8 @@ This is a living document. Each accessibility review adds to or refines the stan
 | `<aside>` | Should have `aria-label` when the role of the aside is not obvious from context. |
 | `<header>`, `<footer>` | When nested inside `<main>`, `<section>`, or `<article>`, they scope to that region. The doc should note that page-level `<header>` and `<footer>` act as page-level landmarks (`banner` and `contentinfo`). |
 | `<form>` | Requires an accessible name via `aria-label`, `aria-labelledby`, or a visible heading. Without one, the form landmark is unlabeled. |
+
+**Minimum landmark set.** Every page built with Sanity UI must have at least one `<main>` landmark. A Studio-style layout should also include a `<nav>` for the sidebar and an `<aside>` for any inspector panel. Without landmarks, screen reader users have no structural cues. They experience the page as a flat list of elements.
 
 **Applies to:** Stack, Flex, Box, Card, and the layouts doc (Navigation sidebar, Content, Review sidebar map to `<nav>`, `<main>`, `<aside>`).
 
@@ -806,6 +809,10 @@ This is a living document. Each accessibility review adds to or refines the stan
 1. `aria-expanded` set to `true` (open) or `false` (closed).
 2. `aria-haspopup` set to the type of popup it owns (`menu`, `listbox`, `dialog`, `grid`, or `tree`). The default value `true` maps to `menu` — do not use `true` unless the popup is in fact a menu.
 
+**Common mistake.** `aria-haspopup="true"` is not a safe default. The value `true` is an alias for `"menu"`. Screen readers announce "has popup menu." If the popup is a dialog, a listbox, or a custom panel, the wrong type misleads users. Always set the value that matches the popup content.
+
+**Known Sanity UI issue.** The `MenuButton` component emits `aria-haspopup="true"` in its rendered output. This is a bug in the library — it should emit `aria-haspopup="menu"`. You cannot override this through props. Automated tests will flag it. Do not spend time trying to fix it in your code. It requires a fix in `@sanity/ui` itself.
+
 **Applies to:** Menu (via MenuButton), Popover, and any future disclosure or expandable part.
 
 ### 4.2 Disabled state strategy
@@ -844,9 +851,13 @@ The current pattern across the system (Button, Menu, layouts) is to use HTML `di
 **Rule:** Every interactive element must have an accessible name that can be found by code.
 
 - Buttons with visible text labels derive their name from the text.
-- Icon-only buttons must have `aria-label` (preferred) or `aria-labelledby`.
-- Form inputs must be associated with a `<label>` element via `for`/`id` or wrapping.
+- Icon-only buttons must have `aria-label` (preferred) or `aria-labelledby`. Passing a `tooltip` prop does not set an accessible name. You must also pass `aria-label`.
+- Form inputs must be associated with a `<label>` element via `for`/`id` or wrapping. A `placeholder` attribute is not a label. Screen readers may read it, but it vanishes when the user types.
 - Tooltips must not repeat the `aria-label` of their trigger. If the trigger already has an accessible name, the tooltip should provide _extra_ context or be omitted.
+
+**Common mistake — icon-only buttons.** When you pass `icon={SomeIcon}` to Button without a `text` prop, the button has no accessible name. The `tooltip` prop renders visible hover text but does not set `aria-label`. You must add `aria-label` yourself. Without it, screen readers announce "button" with no context.
+
+**Common mistake — search inputs.** A text input with `placeholder="Search..."` has no label. Add a `<label>` element (visible or visually hidden) or set `aria-label="Search"` on the input.
 
 **Applies to:** Button, MenuItem, all form parts, Tooltip, and any future interactive element.
 
@@ -880,7 +891,9 @@ The current pattern across the system (Button, Menu, layouts) is to use HTML `di
 - **Standard text** (below 24px regular / 19px bold): minimum 4.5:1 contrast ratio against background.
 - **Large text** (24px+ regular or 19px+ bold): minimum 3:1 contrast ratio against background.
 - **UI parts and graphic objects** (icons, borders, focus markers): minimum 3:1 contrast ratio against nearby colors.
-- **Disabled elements** are exempt from WCAG 1.4.11, but the doc should state the ratios and the waiver so builders do not assume disabled states are held to the same standard.
+- **Disabled elements** are exempt from WCAG 1.4.11, but the doc should state the ratios and the waiver. Builders must not assume disabled states are held to the same standard.
+
+**Known theme contrast gap.** The default Sanity UI theme produces a contrast ratio of about 4.3:1 for white text on `tone="primary"` buttons in default mode. This is below the 4.5:1 AA threshold for standard-size text. Automated tests will flag it. To avoid the failure: use `tone="default"` for primary actions, or use `mode="ghost"` with `tone="primary"` (which renders dark text on a light tint and passes AA). Do not use `tone="primary"` with `mode="default"` for buttons with standard-size text labels.
 
 **Applies to:** Button, Card, Heading, Text, color system doc, and any component that specifies colors.
 
@@ -906,7 +919,26 @@ The current pattern across the system (Button, Menu, layouts) is to use HTML `di
 - No animation should be required to understand a state change.
 - The `animate` prop on Tooltip and Popover must be noted as honoring this setting.
 
-**Applies to:** Tooltip, Popover, sidebar transitions in the layouts doc, and any future part with animation.
+**Custom CSS must also comply.** Sanity UI's built-in parts handle `prefers-reduced-motion` in their own styles. But any CSS you add — hover transitions, fade-ins, loading spinners — must include the media query.
+
+**Known Sanity UI gap.** Sanity UI Button and other interactive parts apply `transition-duration: 0.1s` for hover and focus state changes through styled-components. These transitions do not respect `prefers-reduced-motion` at the library level. You must add a global override to cancel them. Without this override, every Button on the page will fail the motion test.
+
+**Required global rule.** Add this to your main CSS file (e.g. `index.css` or `styles.css`). Import it in your entry point. This is not optional — include it in every project that uses Sanity UI:
+
+```css
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+```
+
+Without this rule, Sanity UI's own 0.1s hover transitions on Button, MenuButton, and other parts will still run when users ask for reduced motion.
+
+**Applies to:** Every project that uses Sanity UI. Also applies to Tooltip, Popover, sidebar transitions, and any custom CSS with transitions or animations.
 
 ---
 
@@ -935,6 +967,10 @@ The current pattern across the system (Button, Menu, layouts) is to use HTML `di
 1. State that the default rendering is a `<div>`, which provides no semantic value.
 2. Instruct implementers to always set `as` to an appropriate `<h1>`–`<h6>` tag.
 3. Warn against skipping heading levels (e.g., `<h1>` to `<h3>`) for visual sizing. Use the `size` prop for visual sizing and `as` for semantic level.
+
+**Every page must have at least one heading.** Headings give screen reader users an outline of the page. A page with zero headings forces users to read every element in sequence. Use `<Heading as="h1">` for the page title and `<Heading as="h2">` for each major section.
+
+**Common mistake.** The Heading part renders as a `<div>` by default. If you write `<Heading size={2}>Page Title</Heading>`, the text looks like a heading but has no heading role. Always set `as`: `<Heading as="h1" size={2}>Page Title</Heading>`.
 
 **Applies to:** Heading. Also applies to Card (content hierarchy guidance) and any part that contains heading content.
 
@@ -1179,7 +1215,7 @@ This section audits each current part doc against each standard. Status values:
 
 **Derives from:** WCAG 1.4.12 Text Spacing (Level AA); WCAG 1.4.10 Reflow (Level AA).
 
-**Rule:** Spacing tokens must use relative units (`rem` or `em`), not fixed `px`, so that spacing scales with user font-size preferences. Layout components must confirm behavior at 400% zoom / 320px equivalent viewport width. Content must reflow into a single column without horizontal scrolling at 320 CSS px width.
+**Rule:** Spacing tokens must use relative units (`rem` or `em`), not fixed `px`. This lets spacing scale with user font-size preferences. Layout components must confirm behavior at 400% zoom / 320px equivalent viewport width. Content must reflow into a single column without horizontal scrolling at 320 CSS px width.
 
 | Document | Status | Notes |
 | --- | --- | --- |
@@ -1222,6 +1258,12 @@ This section audits each current part doc against each standard. Status values:
 **Components:** Stack, Flex, Grid, Inline, Box, and all layout primitives.
 
 **Pattern:** Layout parts must confirm three things: (a) spacing tokens use `rem`, (b) content reflows at 320px viewport width, and (c) visual order matches DOM order.
+
+**320px viewport.** A 320px viewport simulates 400% zoom on a 1280px screen (WCAG 1.4.10 AA). Layouts that use fixed-width sidebars, rigid grids, or `nowrap` flex containers will overflow. Design layouts to collapse into a single column at narrow widths. Use `Flex` with `wrap="wrap"` and avoid fixed `px` widths on containers.
+
+**Common mistake — fixed sidebar layout.** The most common reflow failure is a `Flex` container with `style={{ height: '100vh' }}` that holds a fixed-width sidebar Card and a `flex={1}` content Card. At 320px, the sidebar alone exceeds the viewport width. Fix: use `Flex` with `direction={['column', 'column', 'row']}`. The layout then stacks on small screens. Or use CSS `@media (max-width: 600px)` to hide the sidebar and show a hamburger toggle.
+
+**Common mistake — toolbar buttons.** A row of buttons in a toolbar that does not wrap will overflow at 320px. Use `Flex wrap="wrap" gap={2}`. Buttons then flow to a new line when the viewport narrows.
 
 **Current state:** Stack documents all three. Flex and Box document none.
 
@@ -1276,7 +1318,7 @@ This table lists the changes needed in existing component docs to bring them int
 | button.md | 1.1, 2.1, 4.2, 6.1, 8.1 | (a) **Standard 1.1:** Document what happens to keyboard action and ARIA when `as` changes the element (e.g., `as="a"` means Enter-only, not Space). (b) **Standard 2.1:** Add Space key detail (activate on keyup, prevent scroll). State that disabled buttons leave the tab order via HTML `disabled`. (c) **Standard 4.2:** Mention `aria-disabled="true"` as another approach when users must find the element. (d) **Standard 6.1:** Fix the contrast cite. Button text vs. background falls under WCAG 1.4.3 (4.5:1 for standard text). 1.4.11 (3:1) applies to the button's visual edge against nearby colors. (e) **Standard 8.1:** State the minimum target size (24×24 CSS px per WCAG 2.5.8) and confirm default padding meets it. |
 | popover.md | 3.1, 4.1, 5.1 | (a) **Standard 3.1:** State whether the popover traps focus (modal) or lets focus leave (non-modal). State where focus lands inside the popover. (b) **Standard 4.1:** Document `aria-haspopup` value — now says `"true"` which maps to `menu`. If the popover holds a dialog or listbox, the value should match. (c) **Standard 5.1:** Document how the popover content gets an accessible name (e.g., `role="dialog"` with `aria-label`). |
 | tooltip.md | 2.1 | **Standard 2.1:** Document what happens when focus leaves the trigger — does the tooltip close? Document Tab behavior (tooltip should not be a Tab stop; it should close on Tab away from trigger per APG Tooltip pattern). |
-| menu.md | 1.3, 6.2 | (a) **Standard 1.3:** Add a note that `role="menu"` replaces list semantics, so `role="list"` is not needed. This stops builders from wrongly adding `role="list"` next to `role="menu"`. (b) **Standard 6.2:** State that `tone="critical"` MenuItems should pair with an icon (e.g., `ErrorOutlineIcon`) to meet the color independence standard. |
+| menu.md | 1.3, 6.2 | (a) **Standard 1.3:** Add a note that `role="menu"` replaces list semantics. `role="list"` is not needed and should not be added next to `role="menu"`. (b) **Standard 6.2:** State that `tone="critical"` MenuItems should pair with an icon (e.g., `ErrorOutlineIcon`) to meet the color independence standard. |
 | text.md | 1.1, 10.15 | (a) **Standard 1.1:** List the accepted `as` values and give guidance on when to use each (e.g., `as="p"` for paragraphs, `as="span"` for inline text). Warn against behavioral elements. (b) **Standard 10.15:** Update zoom guidance from "200%" to 400% zoom / 320px viewport width per WCAG 1.4.10. Note that spacing tokens should use `rem`. |
 | heading.md | 10.15 | **Standard 10.15:** Add a note that heading sizes should remain legible at 400% zoom / 320px viewport width per WCAG 1.4.10. Cite the success criterion. |
 
@@ -1286,6 +1328,7 @@ This table lists the changes needed in existing component docs to bring them int
 | --- | --- | --- |
 | stack.md | — | No changes needed. Stack meets all standards and was the source for most standards in this document. Future reviews may add a cross-link to this file. |
 
+---
 
 ## Accessibility checklist
 
@@ -1322,7 +1365,7 @@ Use this checklist when reviewing a component doc or building a new component. E
 ### ARIA conventions
 
 - [ ] If the component triggers a popup or expandable region, the trigger has `aria-expanded` (true/false) documented (4.1, WCAG 4.1.2 A)
-- [ ] If the component triggers a popup, the trigger has `aria-haspopup` documented with the correct popup type — not just `true` (4.1)
+- [ ] If the component triggers a popup, the trigger has `aria-haspopup` documented with the correct popup type — not bare `true` (4.1)
 - [ ] If the component has a disabled state, the doc states whether it uses HTML `disabled` or `aria-disabled="true"` and explains the trade-off (4.2)
 - [ ] If the component has a disabled state, the doc warns that tooltips on HTML-disabled elements cannot be reached by keyboard (4.2)
 - [ ] If the component updates content dynamically, the doc specifies the live region strategy — `aria-live="polite"` for status, `aria-live="assertive"` for errors (4.3, WCAG 4.1.3 AA)
@@ -1364,7 +1407,7 @@ Use this checklist when reviewing a component doc or building a new component. E
 
 ### Spacing and reflow
 
-- [ ] Spacing tokens use `rem` units so they scale with user font-size settings (WCAG 1.4.12 AA)
+- [ ] Spacing tokens use `rem` units. This lets them scale with user font-size settings (WCAG 1.4.12 AA)
 - [ ] The component works at 400% zoom / 320px viewport width without horizontal scrolling (WCAG 1.4.10 AA)
 - [ ] The component works when users override text spacing per WCAG 1.4.12 — line height 1.5×, paragraph spacing 2×, letter spacing 0.12×, word spacing 0.16× (WCAG 1.4.12 AA)
 
@@ -1376,6 +1419,193 @@ Use this checklist when reviewing a component doc or building a new component. E
 - [ ] If the component opens an overlay, it follows the shared overlay focus lifecycle — focus on open, restore on close, Escape to dismiss (11.4)
 - [ ] If the component has a disabled state and supports tooltips, the doc warns that HTML `disabled` blocks tooltip access for keyboard users (11.5)
 - [ ] If the component uses semantic tones, each tone is paired with a non-color indicator (11.6)
+
+---
+
+## Implementation patterns
+
+This section provides code patterns that address the most common accessibility failures. These patterns come from automated test results across multiple AI-generated Sanity UI builds. Each pattern maps to a standard above and a WCAG criterion. Use these patterns as starting points, not as the only valid approach.
+
+### Page structure — landmarks and headings (§1.2, §5.2, §9.1)
+
+Every page must have landmarks and at least one heading. Without them, screen reader users cannot navigate by structure.
+
+**Minimum viable structure:**
+
+```jsx
+<ThemeProvider theme={theme}>
+  <Flex style={{ height: '100vh' }}>
+    {/* Sidebar navigation — landmark */}
+    <Card as="nav" aria-label="Main navigation" padding={3}>
+      <Stack space={3}>
+        <Heading as="h2" size={1}>Navigation</Heading>
+        {/* nav items */}
+      </Stack>
+    </Card>
+
+    {/* Content area — landmark */}
+    <Card as="main" flex={1} padding={4}>
+      <Heading as="h1" size={3}>Page Title</Heading>
+      {/* page content */}
+    </Card>
+  </Flex>
+</ThemeProvider>
+```
+
+**Why this fails without landmarks:** The test checks for `<main>`, `<nav>`, `<header>`, `<aside>`, or labeled `<section>`. A page that wraps everything in `<div>` elements has zero landmarks. Screen readers list "no landmarks found."
+
+**Why this fails without headings:** The test checks for `<h1>`–`<h6>` or `[role="heading"]`. A page that uses `<Text size={4}>` for titles creates large text with no heading role. Use `<Heading as="h1">` instead.
+
+### Icon-only buttons — accessible names (§5.1)
+
+Buttons with only an icon have no accessible name unless you add `aria-label`.
+
+```jsx
+/* ✗ Fails — no accessible name */
+<Button icon={SearchIcon} mode="bleed" />
+
+/* ✗ Fails — tooltip does not set aria-label */
+<Button icon={SearchIcon} mode="bleed" tooltip={{ content: 'Search' }} />
+
+/* ✓ Passes */
+<Button icon={SearchIcon} mode="bleed" aria-label="Search" />
+
+/* ✓ Passes — tooltip for sighted users + aria-label for screen readers */
+<Button
+  icon={SearchIcon}
+  mode="bleed"
+  aria-label="Search"
+  tooltip={{ content: 'Search' }}
+/>
+```
+
+Every icon-only button needs `aria-label`. The `tooltip` prop is for sighted hover text. It does not replace `aria-label`.
+
+### Form inputs — label association (§5.1)
+
+Inputs need a `<label>` or `aria-label`. A `placeholder` is not a label.
+
+```jsx
+/* ✗ Fails — placeholder is not a label */
+<TextInput placeholder="Search content..." />
+
+/* ✓ Passes — aria-label */
+<TextInput placeholder="Search content..." aria-label="Search content" />
+
+/* ✓ Passes — visible label with for/id */
+<Stack space={2}>
+  <Text as="label" htmlFor="search-input" size={1} weight="medium">
+    Search
+  </Text>
+  <TextInput id="search-input" placeholder="Search content..." />
+</Stack>
+```
+
+### MenuButton — aria-haspopup type (§4.1)
+
+The `aria-haspopup` attribute must name the popup type. Do not use `"true"`.
+
+```jsx
+/* ✗ Fails — "true" maps to "menu", misleads if popup is not a menu */
+<button aria-haspopup="true" aria-expanded={open}>Options</button>
+
+/* ✓ Passes — states the popup type */
+<MenuButton
+  id="options-menu"
+  button={<Button text="Options" />}
+  menu={<Menu>{/* items */}</Menu>}
+/>
+```
+
+**Known Sanity UI issue.** `MenuButton` emits `aria-haspopup="true"` in its rendered HTML. This is a bug — it should emit `"menu"`. You cannot fix this through props. Automated tests will flag every `MenuButton` instance. Accept this as a known gap until `@sanity/ui` ships a fix.
+
+When building a custom trigger outside of `MenuButton`, set the value yourself: `"menu"`, `"listbox"`, or `"dialog"`.
+
+### Reduced motion — global override (§7.1)
+
+Sanity UI Button, MenuButton, and other parts apply `transition-duration: 0.1s` for hover states through styled-components. These transitions do not respect `prefers-reduced-motion` at the library level. You must add a global override. **This is required in every project — not optional.**
+
+Create a CSS file (e.g. `src/reduced-motion.css`) and import it in your entry point:
+
+```css
+/* src/reduced-motion.css — REQUIRED for WCAG 2.3.3 compliance */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+```
+
+Import it in your main entry file:
+
+```jsx
+// main.jsx or main.tsx
+import './reduced-motion.css'
+```
+
+Without this file, every Button and MenuButton on the page will fail the motion accessibility test because of its 0.1s hover transition.
+
+### Responsive layout — 320px reflow (§11.3, WCAG 1.4.10 AA)
+
+Layouts must work at 320px viewport width with no horizontal scrolling. This simulates 400% zoom. **Every iteration in automated testing fails this check.** The most common cause is a fixed-width sidebar that does not collapse.
+
+```jsx
+/* ✗ Fails — fixed sidebar + 100vh forces overflow at 320px */
+<Flex style={{ height: '100vh' }}>
+  <Card style={{ width: '250px' }} padding={3}>Sidebar</Card>
+  <Card flex={1} padding={4}>Content</Card>
+</Flex>
+
+/* ✓ Passes — stacks to single column on narrow screens */
+<Flex wrap="wrap" style={{ minHeight: '100vh' }}>
+  <Card
+    as="nav"
+    aria-label="Main navigation"
+    style={{ flex: '1 1 100%', maxWidth: '250px' }}
+    padding={3}
+  >
+    Sidebar
+  </Card>
+  <Card as="main" style={{ flex: '1 1 0', minWidth: 0 }} padding={4}>
+    Content
+  </Card>
+</Flex>
+```
+
+**Why `flex: '1 1 100%'` on the sidebar?** At narrow widths, the sidebar takes the full row and the content stacks below it. At wider widths, `maxWidth: '250px'` keeps the sidebar narrow while the content takes the rest.
+
+**Toolbar buttons.** A row of buttons that does not wrap will also overflow. Use `Flex wrap="wrap" gap={2}` for toolbars. Buttons then flow to a new line at narrow widths.
+
+**Test it.** Open browser DevTools, set the viewport to 320px wide, and confirm no horizontal scrollbar appears.
+
+### HTML lang attribute (WCAG 3.1.1 A)
+
+Every page must declare its language on `<html>`.
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+  <head>...</head>
+  <body>...</body>
+</html>
+```
+
+In a Vite project, this is set in `index.html`. Make sure the file includes `lang="en"` (or the correct language code) on the `<html>` element.
+
+---
+
+## Changelog
+
+| Date | Reviewer | Action |
+| --- | --- | --- |
+| 2025-01-20 | Accessibility Expert (initial) | Created file. Defined 15 standards across 9 categories. Audited 11 component docs. Identified 2 critical violations (box.md, flex.md missing accessibility sections entirely), 2 high-priority gaps (card.md, layouts.md), and 6 medium-priority gaps. |
+| 2025-03-18 | Accessibility Expert | Added consolidated accessibility checklist (section 13). 58 checkable items across 10 categories, each mapped to a standard number and WCAG level. |
+| 2025-03-18 | Accessibility Expert, reviewed by Writer | Added "Implementation patterns" section with 7 code patterns addressing the most common automated test failures: missing landmarks (5/6 iterations), missing headings (4/6), icon-only buttons without aria-label (4/6), inputs without labels (4/6), aria-haspopup misuse (5/6), motion not respecting prefers-reduced-motion (6/6), and layout overflow at 320px (6/6). Added "Common mistake" callouts to standards 1.2, 4.1, 5.1, 7.1, 9.1, and 11.3. |
+| 2025-03-18 | Accessibility Expert, reviewed by Writer | Second round of improvements from automated test run (3 training iterations). Landmarks (0/3 failing) and headings (0/3 failing) now pass — previous guidance worked. Four persistent failures addressed: (1) §4.1 and MenuButton pattern: added "Known Sanity UI issue" callout — `MenuButton` emits `aria-haspopup="true"` at the library level, agents cannot fix it. (2) §6.1: added "Known theme contrast gap" — `tone="primary"` buttons produce 4.3:1 ratio, below AA; guidance to use `tone="default"` or `mode="ghost"`. (3) §7.1 and reduced motion pattern: reframed the global CSS override as required, not optional; noted that Sanity UI's own 0.1s Button transitions are the source; added import example. (4) §11.3 and reflow pattern: replaced generic `wrap` example with a sidebar-stacking pattern using `flex: '1 1 100%'` and `maxWidth`; added toolbar wrap note. |
+
 
 # Box
 

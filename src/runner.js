@@ -89,32 +89,69 @@ export async function runAgent({
   iterLabel,
   takeScreenshots,
   maxFixes = 5,
+  maxGenerationRetries = 3,
 }) {
   const client = new Anthropic();
 
-  // --- Step 1: Initial generation ---
-  const response = await client.messages.create({
-    model,
-    max_tokens: 16000,
-    system: SYSTEM_PROMPT,
-    messages: [
-      {
-        role: "user",
-        content: promptContent,
-      },
-    ],
-  });
+  // --- Step 1: Initial generation (with retries if no files are produced) ---
+  let fullText = "";
+  let files = [];
+  let generationAttempt = 0;
 
-  const fullText = response.content
-    .filter((block) => block.type === "text")
-    .map((block) => block.text)
-    .join("\n");
+  // Track token usage across all calls (including generation retries)
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
 
-  // Save raw response
-  await writeFile(resolve(iterDir, "_raw_response.txt"), fullText, "utf-8");
+  while (generationAttempt < maxGenerationRetries) {
+    generationAttempt++;
 
-  // Parse files and feedback from the response
-  let files = parseFiles(fullText);
+    if (generationAttempt > 1) {
+      console.log(
+        `[${iterLabel}] Generation attempt ${generationAttempt}/${maxGenerationRetries} (previous attempt produced no files)...`,
+      );
+    }
+
+    const response = await client.messages.create({
+      model,
+      max_tokens: 16000,
+      system: SYSTEM_PROMPT,
+      messages: [
+        {
+          role: "user",
+          content: promptContent,
+        },
+      ],
+    });
+
+    totalInputTokens += response.usage?.input_tokens ?? 0;
+    totalOutputTokens += response.usage?.output_tokens ?? 0;
+
+    fullText = response.content
+      .filter((block) => block.type === "text")
+      .map((block) => block.text)
+      .join("\n");
+
+    // Save raw response
+    await writeFile(resolve(iterDir, "_raw_response.txt"), fullText, "utf-8");
+
+    // Parse files from the response
+    files = parseFiles(fullText);
+
+    if (files.length > 0) {
+      break;
+    }
+
+    console.warn(
+      `[${iterLabel}] Generation attempt ${generationAttempt}/${maxGenerationRetries} returned no parseable files (response: ${fullText.length} bytes)`,
+    );
+  }
+
+  if (files.length === 0) {
+    throw new Error(
+      `All ${maxGenerationRetries} generation attempts returned no parseable files. Raw response was ${fullText.length} bytes.`,
+    );
+  }
+
   const feedback = parseFeedback(fullText);
 
   if (feedback.length > 0) {
@@ -127,10 +164,6 @@ export async function runAgent({
   }
   const projectDir = resolve(iterDir, "project");
   await writeProjectFiles(projectDir, files);
-
-  // Track token usage across all calls
-  let totalInputTokens = response.usage?.input_tokens ?? 0;
-  let totalOutputTokens = response.usage?.output_tokens ?? 0;
 
   // Track fix attempts
   let fixAttempts = 0;

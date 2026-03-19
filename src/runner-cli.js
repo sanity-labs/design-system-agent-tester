@@ -1,7 +1,8 @@
-import { writeFile, mkdir, rm, readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { writeFile, mkdir, rm, readFile, mkdtemp } from "node:fs/promises";
+import { resolve, join } from "node:path";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import { tmpdir } from "node:os";
 import {
   validateProject,
   killDevServer,
@@ -86,32 +87,43 @@ async function invokeClaudeCli({
   systemPrompt,
   userPrompt,
   model,
-  cwd,
   iterLabel,
+  timeoutMs = 300_000, // 5 minutes default
 }) {
+  // Merge system prompt into user prompt to avoid --system-prompt CLI hang
+  // (claude CLI v2.1.79+ hangs when --system-prompt is combined with
+  // non-trivial user prompts in --print mode)
+  const combinedPrompt = `${systemPrompt}\n\n---\n\n${userPrompt}`;
+
   const args = [
     "--print",
     "--output-format",
     "text",
-    "--system-prompt",
-    systemPrompt,
     "--model",
     model,
     // Disable all tools so the CLI just returns text (no file edits, no bash, etc.)
-    "--tools",
-    "",
+    // Note: --tools "" broke in CLI v2.1.79+; --allowed-tools "none" is the replacement
+    "--allowed-tools",
+    "none",
     // Don't persist this as a resumable session
     "--no-session-persistence",
-    // The prompt itself
-    userPrompt,
+    // The combined prompt (system + user)
+    combinedPrompt,
   ];
 
-  console.log(`[${iterLabel}] Invoking claude CLI...`);
+  // Use a fresh temp directory as cwd to prevent the CLI from reading
+  // project context (claude.md, package.json, etc.) which causes it to
+  // hang or produce empty output in --print mode.
+  const tempCwd = await mkdtemp(join(tmpdir(), "agent-cli-"));
+
+  console.log(
+    `[${iterLabel}] Invoking claude CLI (timeout: ${Math.round(timeoutMs / 1000)}s)...`,
+  );
 
   return new Promise((resolvePromise, reject) => {
     const child = spawn("claude", args, {
       stdio: ["ignore", "pipe", "pipe"],
-      cwd,
+      cwd: tempCwd,
       env: {
         ...process.env,
         // Prevent the CLI from picking up any project-level config
@@ -121,6 +133,16 @@ async function invokeClaudeCli({
 
     let stdout = "";
     let stderr = "";
+    let killed = false;
+
+    // Timeout: kill the process if it takes too long
+    const timer = setTimeout(() => {
+      killed = true;
+      child.kill("SIGTERM");
+      setTimeout(() => {
+        if (!child.killed) child.kill("SIGKILL");
+      }, 5000);
+    }, timeoutMs);
 
     child.stdout.on("data", (data) => {
       stdout += data.toString();
@@ -131,6 +153,7 @@ async function invokeClaudeCli({
     });
 
     child.on("error", (err) => {
+      clearTimeout(timer);
       reject(
         new Error(
           `Failed to spawn claude CLI: ${err.message}. Is it installed? (npm install -g @anthropic-ai/claude-code)`,
@@ -139,7 +162,14 @@ async function invokeClaudeCli({
     });
 
     child.on("close", (code) => {
-      if (code !== 0) {
+      clearTimeout(timer);
+      if (killed) {
+        reject(
+          new Error(
+            `claude CLI timed out after ${Math.round(timeoutMs / 1000)}s. stdout: ${stdout.length} bytes, stderr: ${stderr.slice(0, 500)}`,
+          ),
+        );
+      } else if (code !== 0) {
         reject(
           new Error(
             `claude CLI exited with code ${code}.\nstderr: ${stderr.slice(0, 1000)}`,
@@ -174,21 +204,51 @@ export async function runAgent({
   iterLabel,
   takeScreenshots,
   maxFixes = 5,
+  maxGenerationRetries = 3,
 }) {
-  // --- Step 1: Initial generation ---
-  const fullText = await invokeClaudeCli({
-    systemPrompt: SYSTEM_PROMPT,
-    userPrompt: promptContent,
-    model,
-    cwd: iterDir,
-    iterLabel,
-  });
+  // --- Step 1: Initial generation (with retries if no files are produced) ---
+  let fullText = "";
+  let files = [];
+  let generationAttempt = 0;
 
-  // Save raw response
-  await writeFile(resolve(iterDir, "_raw_response.txt"), fullText, "utf-8");
+  while (generationAttempt < maxGenerationRetries) {
+    generationAttempt++;
 
-  // Parse files and feedback from the response
-  let files = parseFiles(fullText);
+    if (generationAttempt > 1) {
+      console.log(
+        `[${iterLabel}] Generation attempt ${generationAttempt}/${maxGenerationRetries} (previous attempt produced no files)...`,
+      );
+    }
+
+    fullText = await invokeClaudeCli({
+      systemPrompt: SYSTEM_PROMPT,
+      userPrompt: promptContent,
+      model,
+      iterLabel,
+    });
+
+    // Save raw response
+    await writeFile(resolve(iterDir, "_raw_response.txt"), fullText, "utf-8");
+
+    // Parse files from the response
+    files = parseFiles(fullText);
+
+    if (files.length > 0) {
+      break;
+    }
+
+    console.warn(
+      `[${iterLabel}] Generation attempt ${generationAttempt}/${maxGenerationRetries} returned no parseable files (response: ${fullText.length} bytes)`,
+    );
+  }
+
+  if (files.length === 0) {
+    throw new Error(
+      `All ${maxGenerationRetries} generation attempts returned no parseable files. Raw response was ${fullText.length} bytes.`,
+    );
+  }
+
+  // Parse feedback from the response
   const feedback = parseFeedback(fullText);
 
   if (feedback.length > 0) {
@@ -299,7 +359,6 @@ export async function runAgent({
           systemPrompt: FIX_SYSTEM_PROMPT,
           userPrompt: fixPrompt,
           model,
-          cwd: iterDir,
           iterLabel: `${iterLabel}/fix-${fixAttempts}`,
         });
 
