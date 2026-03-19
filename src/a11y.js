@@ -949,23 +949,42 @@ export async function runAccessibilityTests({ serverUrl, iterDir, iterLabel }) {
         const issues = [];
         const animatedElements = [];
 
+        // Parse a CSS duration string (e.g. "0.1s", "100ms", "1e-05s") to
+        // milliseconds. Returns 0 for unparseable values.
+        function parseDurationMs(raw) {
+          if (!raw || raw === "none") return 0;
+          // Handle comma-separated lists (e.g. "0.1s, 0.1s, 0.1s") —
+          // take the largest value
+          const parts = raw.split(",").map((s) => s.trim());
+          let max = 0;
+          for (const part of parts) {
+            const num = parseFloat(part);
+            if (isNaN(num)) continue;
+            const ms = part.endsWith("ms") ? num : num * 1000;
+            if (ms > max) max = ms;
+          }
+          return max;
+        }
+
+        // Threshold: anything under 1ms is effectively instant.
+        // The recommended prefers-reduced-motion override uses 0.01ms
+        // (rendered by browsers as "1e-05s"), which must not be flagged.
+        const INSTANT_THRESHOLD_MS = 1;
+
         const allEls = document.querySelectorAll("*");
         for (const el of allEls) {
           const cs = window.getComputedStyle(el);
 
-          // Check for transitions that are not instant
           const duration = cs.transitionDuration;
           const animDuration = cs.animationDuration;
           const animName = cs.animationName;
 
-          const hasTransition =
-            duration && duration !== "0s" && duration !== "0ms";
+          const transMs = parseDurationMs(duration);
+          const animMs = parseDurationMs(animDuration);
+
+          const hasTransition = transMs >= INSTANT_THRESHOLD_MS;
           const hasAnimation =
-            animName &&
-            animName !== "none" &&
-            animDuration &&
-            animDuration !== "0s" &&
-            animDuration !== "0ms";
+            animName && animName !== "none" && animMs >= INSTANT_THRESHOLD_MS;
 
           if (hasTransition || hasAnimation) {
             animatedElements.push({

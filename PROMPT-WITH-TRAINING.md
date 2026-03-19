@@ -8,12 +8,1120 @@ Create a simple interface that mimics Sanity Studio using Sanity UI.
 * Do not add unit tests of any kind
 * Provide feedback on areas of friction when using Sanity UI, both in implementation and understanding correct usage. THE JOB IS NOT COMPLETE UNTIL FEEDBACK IS PROVIDED.
 
-
 **Sanity UI guidelines below**
 
 ---
 
+# Quick start
+
+This guide walks you through setting up a Sanity UI project from scratch. By the end you will have a working Vite + React app with a sidebar, toolbar, content area, and proper accessibility structure.
+
+## Create the project
+
+Start with a Vite project and add the three packages Sanity UI needs.
+
+```sh
+npm create vite@latest my-app -- --template react-ts
+cd my-app
+npm install @sanity/ui @sanity/icons styled-components
+```
+
+## Project structure
+
+After setup, you will have these files:
+
+```
+my-app/
+├── index.html
+├── package.json
+├── vite.config.ts
+└── src/
+    ├── main.tsx
+    ├── App.tsx
+    └── reduced-motion.css
+```
+
+## index.html
+
+Set `lang="en"` on the `<html>` element. Without it, screen readers cannot detect the page language (WCAG 3.1.1 A).
+
+```html
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>My App</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+```
+
+## reduced-motion.css
+
+Sanity UI buttons and interactive parts apply `transition-duration: 0.1s` through styled-components. These transitions do not respect `prefers-reduced-motion` at the library level. This file overrides them. Import it in `main.tsx`. It is required in every project.
+
+```css
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+```
+
+## main.tsx
+
+Wrap the app in `ThemeProvider` with `studioTheme`. This gives every child component access to colors, spacing, and typography tokens. Import `reduced-motion.css` here.
+
+```tsx
+import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+import { ThemeProvider, studioTheme } from '@sanity/ui'
+import App from './App'
+import './reduced-motion.css'
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <ThemeProvider theme={studioTheme}>
+      <App />
+    </ThemeProvider>
+  </StrictMode>,
+)
+```
+
+## App.tsx — full scaffold
+
+This file creates a three-region layout: a navigation sidebar, a main content area with a toolbar, and a list of items. It follows the accessibility standards from the component documentation.
+
+```tsx
+import { useState } from 'react'
+import {
+  Flex,
+  Card,
+  Stack,
+  Heading,
+  Text,
+  Button,
+  TextInput,
+  Label,
+  Badge,
+} from '@sanity/ui'
+import { SearchIcon, AddIcon, MenuIcon, CloseIcon } from '@sanity/icons'
+
+function App() {
+  const [sidebarOpen, setSidebarOpen] = useState(true)
+
+  return (
+    <Flex wrap="wrap" style={{ minHeight: '100vh' }}>
+      {/* Navigation sidebar — renders as <nav> landmark */}
+      {sidebarOpen && (
+        <Card
+          as="nav"
+          aria-label="Main navigation"
+          borderRight
+          style={{ flex: '1 1 100%', maxWidth: '260px' }}
+          padding={0}
+        >
+          <Stack>
+            <Card padding={3} borderBottom>
+              <Flex align="center" justify="space-between">
+                <Heading as="h2" size={1}>Studio</Heading>
+                <Button
+                  mode="bleed"
+                  icon={CloseIcon}
+                  aria-label="Close navigation"
+                  onClick={() => setSidebarOpen(false)}
+                />
+              </Flex>
+            </Card>
+            <Card padding={3}>
+              <Stack space={3}>
+                <Stack space={2}>
+                  <Label size={0} htmlFor="nav-search">Search</Label>
+                  <TextInput
+                    id="nav-search"
+                    icon={SearchIcon}
+                    placeholder="Search content..."
+                    aria-label="Search content"
+                  />
+                </Stack>
+                <Stack space={2}>
+                  <Text size={1} weight="medium">Documents</Text>
+                  <Text size={1} muted>Authors</Text>
+                  <Text size={1} muted>Settings</Text>
+                </Stack>
+              </Stack>
+            </Card>
+          </Stack>
+        </Card>
+      )}
+
+      {/* Main content — renders as <main> landmark */}
+      <Card
+        as="main"
+        style={{ flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+      >
+        {/* Toolbar */}
+        <Card padding={3} borderBottom>
+          <Flex align="center" justify="space-between" wrap="wrap" gap={2}>
+            <Flex align="center" gap={3} style={{ minWidth: 0 }}>
+              {!sidebarOpen && (
+                <Button
+                  mode="bleed"
+                  icon={MenuIcon}
+                  aria-label="Show navigation"
+                  onClick={() => setSidebarOpen(true)}
+                />
+              )}
+              <Heading as="h1" size={2} style={{ overflowWrap: 'break-word', wordBreak: 'break-word' }}>All Documents</Heading>
+            </Flex>
+            <Button text="New document" icon={AddIcon} tone="default" />
+          </Flex>
+        </Card>
+
+        {/* Content list */}
+        <Card padding={4} style={{ flex: 1, overflowY: 'auto' }}>
+          <Stack space={3}>
+            {['Getting Started', 'API Reference', 'Design Tokens'].map(
+              (title) => (
+                <Card key={title} padding={3} border radius={2}>
+                  <Flex align="center" justify="space-between">
+                    <Stack space={2}>
+                      <Heading as="h2" size={1}>{title}</Heading>
+                      <Text size={1} muted>Last edited 2 hours ago</Text>
+                    </Stack>
+                    <Badge tone="positive" text="Published" />
+                  </Flex>
+                </Card>
+              ),
+            )}
+          </Stack>
+        </Card>
+      </Card>
+    </Flex>
+  )
+}
+
+export default App
+```
+
+## Run it
+
+```sh
+npm run dev
+```
+
+Open `http://localhost:5173` in a browser. You should see a sidebar with a search field on the left and a document list on the right.
+
+## What the scaffold gives you
+
+| Feature | How it works |
+| --- | --- |
+| Landmark structure | `Card as="nav"` and `Card as="main"` create `<nav>` and `<main>` elements. Screen readers list them as landmarks. |
+| Responsive sidebar | `flex: '1 1 100%'` with `maxWidth` on the sidebar and `wrap="wrap"` on the Flex container. At 320px the sidebar stacks above the content instead of overflowing. |
+| Toolbar reflow | `wrap="wrap"` on the toolbar Flex. The heading and button flow to separate lines at narrow widths instead of overflowing. |
+| Heading hierarchy | `<h1>` for the page title, `<h2>` for each section and list item. No levels are skipped. |
+| Page language | `<html lang="en">` in `index.html`. |
+| Icon-only buttons | `aria-label` on every button that has no visible text (`CloseIcon`, `MenuIcon`). |
+| Form labels | `<Label htmlFor="nav-search">` links to the `TextInput` by `id`. The input also has `aria-label` as a fallback. |
+| Reduced motion | `reduced-motion.css` cancels transitions when the user prefers reduced motion. |
+
+## Key patterns to remember
+
+### ThemeProvider wraps everything
+
+Every Sanity UI component reads color, spacing, and font values from the theme. Without `ThemeProvider`, components render with no styles.
+
+```tsx
+import { ThemeProvider, studioTheme } from '@sanity/ui'
+
+<ThemeProvider theme={studioTheme}>
+  {/* All Sanity UI components go here */}
+</ThemeProvider>
+```
+
+### Card is a layout surface with color context
+
+Card renders a styled container with background, border, and optional tone. Use `as` to set the HTML element.
+
+```tsx
+{/* A navigation landmark — responsive width */}
+<Card
+  as="nav"
+  aria-label="Main navigation"
+  padding={3}
+  borderRight
+  style={{ flex: '1 1 100%', maxWidth: '260px' }}
+>
+  {/* content */}
+</Card>
+
+{/* A content surface */}
+<Card padding={4} border radius={2}>
+  {/* content */}
+</Card>
+```
+
+### Stack spaces children in a vertical column
+
+Stack adds even spacing between children. Use `space` to set the gap.
+
+```tsx
+<Stack space={3}>
+  <Heading as="h2" size={1}>Title</Heading>
+  <Text size={1}>Description</Text>
+</Stack>
+```
+
+### Flex lays children out in a row
+
+Flex defaults to horizontal direction. Use `align`, `justify`, `gap`, and `wrap` to control the layout. Add `wrap="wrap"` to any row that might overflow at narrow widths.
+
+```tsx
+<Flex align="center" justify="space-between" wrap="wrap" gap={2}>
+  <Heading as="h1" size={2}>Page Title</Heading>
+  <Button text="Action" />
+</Flex>
+```
+
+### Heading needs an `as` prop
+
+The Heading component renders a `<div>` by default. That has no heading role. Always set `as` to `h1`–`h6`. Use `size` for visual sizing.
+
+```tsx
+{/* ✗ No heading role — screen readers skip it */}
+<Heading size={2}>Title</Heading>
+
+{/* ✓ Renders as <h1> with heading role */}
+<Heading as="h1" size={2}>Title</Heading>
+```
+
+### Icon-only buttons need aria-label
+
+When a button has only an icon and no `text` prop, add `aria-label`. The `tooltip` prop does not set an accessible name.
+
+```tsx
+{/* ✗ No accessible name */}
+<Button icon={SearchIcon} mode="bleed" />
+
+{/* ✓ Screen readers announce "Search" */}
+<Button icon={SearchIcon} mode="bleed" aria-label="Search" />
+```
+
+### Form inputs need labels
+
+A `placeholder` is not a label. Use `<Label>` with `htmlFor` or set `aria-label` on the input.
+
+```tsx
+<Stack space={2}>
+  <Label size={0} htmlFor="search-field">Search</Label>
+  <TextInput id="search-field" placeholder="Type to search..." />
+</Stack>
+```
+
+## Next steps
+
+- Add an inspector sidebar with `Card as="aside" aria-label="Inspector"`.
+- Add a `Menu` and `MenuButton` for dropdown actions.
+- Use `tone` on Card and Button to show status (`"positive"`, `"caution"`, `"critical"`). Pair each tone with an icon.
+- See the component docs for Button, Card, Stack, Flex, Heading, and Text for full prop references and accessibility guidelines.
+
+# Accessibility standards
+
+This document helps designers and developers build accessible interfaces with Sanity UI components. It covers the rules you need to follow, the mistakes to avoid, and tested code patterns you can copy.
+
+For guidelines on building or documenting Sanity UI components themselves, see `component-authoring-accessibility.md`.
+
+---
+
+## 1. Landmarks and page structure
+
+### Use landmarks for screen reader navigation
+
+Every page must have at least one `<main>` landmark. A layout with a sidebar should also include `<nav>` and `<aside>`. Without landmarks, screen reader users experience the page as a flat list of elements.
+
+Use the `as` prop on Card to render landmark elements:
+
+```jsx
+<Card as="nav" aria-label="Main navigation">...</Card>
+<Card as="main">...</Card>
+<Card as="aside" aria-label="Document inspector">...</Card>
+```
+
+### Label landmarks when needed
+
+| Element | When to label |
+| --- | --- |
+| `<nav>` | Add `aria-label` when more than one `<nav>` exists on the page. Without it, screen readers list multiple "navigation" landmarks with no way to tell them apart. |
+| `<section>` | Add a heading child or `aria-label`. Without an accessible name, `<section>` is the same as `<div>`. |
+| `<main>` | Use once per page. No label needed. |
+| `<aside>` | Add `aria-label` when the role is not clear from context. |
+| `<form>` | Add `aria-label`, `aria-labelledby`, or a `<legend>` inside a `<fieldset>`. |
+| `<header>`, `<footer>` | At page level they act as `banner` and `contentinfo` landmarks. Nested inside `<main>` or `<section>`, they scope to that region. |
+
+---
+
+## 2. Headings
+
+### Every page needs at least one heading
+
+Headings give screen reader users an outline of the page. A page with zero headings forces users to read every element in sequence. Use `<Heading as="h1">` for the page title and `<Heading as="h2">` for each major section.
+
+### Always set the `as` prop
+
+The Heading component renders a `<div>` by default. That has no heading role. Screen readers skip it.
+
+```jsx
+/* ✗ Looks like a heading but has no heading role */
+<Heading size={2}>Page Title</Heading>
+
+/* ✓ Renders as <h1> — screen readers find it */
+<Heading as="h1" size={2}>Page Title</Heading>
+```
+
+### Do not skip heading levels
+
+Heading levels must descend in sequence: H1 → H2 → H3. Do not skip from H1 to H3. The `as` prop sets the semantic level. The `size` prop sets the visual size. They are independent.
+
+```jsx
+/* ✗ Skips h2 — breaks the heading outline */
+<Heading as="h1" size={3}>All Documents</Heading>
+<Heading as="h3" size={1}>Getting Started</Heading>
+
+/* ✓ No levels skipped — use size for visual sizing */
+<Heading as="h1" size={3}>All Documents</Heading>
+<Heading as="h2" size={1}>Getting Started</Heading>
+```
+
+---
+
+## 3. Accessible names
+
+### Icon-only buttons need `aria-label`
+
+When a Button has only an icon and no `text` prop, it has no accessible name. The `tooltip` prop renders visible hover text but does not set `aria-label`. You must add it yourself.
+
+```jsx
+/* ✗ No accessible name — screen readers say "button" */
+<Button icon={SearchIcon} mode="bleed" />
+
+/* ✗ Tooltip does not set aria-label */
+<Button icon={SearchIcon} mode="bleed" tooltip={{ content: 'Search' }} />
+
+/* ✓ Screen readers announce "Search" */
+<Button icon={SearchIcon} mode="bleed" aria-label="Search" />
+```
+
+The same applies to MenuButton triggers:
+
+```jsx
+/* ✗ Trigger has no accessible name */
+<MenuButton
+  id="doc-menu"
+  button={<Button icon={EllipsisVerticalIcon} mode="bleed" />}
+  menu={<Menu><MenuItem text="Edit" /></Menu>}
+/>
+
+/* ✓ Trigger has aria-label */
+<MenuButton
+  id="doc-menu"
+  button={
+    <Button icon={EllipsisVerticalIcon} mode="bleed" aria-label="Document options" />
+  }
+  menu={<Menu><MenuItem text="Edit" /></Menu>}
+/>
+```
+
+### Form inputs need labels
+
+A `placeholder` attribute is not a label. Screen readers may read it, but it vanishes when the user types.
+
+```jsx
+/* ✗ Placeholder is not a label */
+<TextInput placeholder="Search content..." />
+
+/* ✓ aria-label */
+<TextInput placeholder="Search content..." aria-label="Search content" />
+
+/* ✓ Visible label linked by id */
+<Stack space={2}>
+  <Label size={0} htmlFor="search-input">Search</Label>
+  <TextInput id="search-input" placeholder="Search content..." />
+</Stack>
+```
+
+### Tooltips must not repeat the accessible name
+
+If a button already has `aria-label="Settings"`, a tooltip that also says "Settings" adds no value. The tooltip should provide extra context or be omitted.
+
+---
+
+## 4. Color contrast
+
+### Text contrast ratios
+
+- **Standard text** (below 24px regular / 19px bold): minimum **4.5:1** against background (WCAG 1.4.3 AA).
+- **Large text** (24px+ regular or 19px+ bold): minimum **3:1** against background.
+- **UI components** (icons, borders, focus rings): minimum **3:1** against nearby colors (WCAG 1.4.11 AA).
+- **Disabled elements** are exempt from WCAG 1.4.11.
+
+### Do not use `tone="primary"` in default mode
+
+The default Sanity UI theme produces white text (`#fff`) on a blue background (`#556bfc`) for `tone="primary"` buttons in default mode. The contrast ratio is 4.29:1 — below the 4.5:1 AA threshold. Automated tests flag this every time.
+
+The fix: **use `tone="default"`** for primary actions. If you need a blue button, use `mode="ghost"` with `tone="primary"` — this renders dark text on a light blue tint and passes AA.
+
+```jsx
+/* ✗ Fails contrast — 4.29:1 */
+<Button tone="primary" text="New document" />
+
+/* ✓ Passes contrast */
+<Button tone="default" text="New document" />
+
+/* ✓ Also passes — ghost mode with primary tone */
+<Button tone="primary" mode="ghost" text="New document" />
+```
+
+### Pair semantic color with a non-color indicator
+
+Color must not be the only way to convey meaning. Every use of `tone="positive"`, `tone="caution"`, or `tone="critical"` must include an icon, a text label, or both (WCAG 1.4.1 A).
+
+```jsx
+/* ✗ Color alone — users with color vision differences miss the meaning */
+<Button tone="critical" text="Delete" />
+
+/* ✓ Icon reinforces the meaning */
+<Button tone="critical" text="Delete" icon={TrashIcon} />
+```
+
+---
+
+## 5. Reduced motion
+
+### Add the global override to every project
+
+Sanity UI Button, MenuButton, and other interactive parts apply `transition-duration: 0.1s` for hover states through styled-components. These transitions do not respect `prefers-reduced-motion` at the library level. You must add a global CSS override. **This is required — not optional.**
+
+Create `src/reduced-motion.css`:
+
+```css
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+```
+
+Import it in your entry file:
+
+```jsx
+// main.tsx
+import './reduced-motion.css'
+```
+
+The `0.01ms` value triggers transition-end events that some components rely on, but it is fast enough to count as instant. Automated tests treat any duration under 1ms as passing.
+
+Without this file, every Button on the page will fail the motion accessibility test.
+
+---
+
+## 6. Touch targets
+
+### Minimum 24×24 CSS pixels
+
+All interactive targets must meet 24×24 CSS pixels (WCAG 2.5.8 AA). Inline links within paragraph text are exempt.
+
+### Do not use bare native checkboxes or radios
+
+Browser-default `<input type="checkbox">` and `<input type="radio">` render at about 13×13px. Use the Sanity UI `Checkbox`, `Radio`, or `Switch` components instead — they render at compliant sizes.
+
+If you must use a native input, wrap it in a `<label>` with enough padding to reach 24×24px, or set `width` and `height` via CSS.
+
+---
+
+## 7. Responsive layout — 320px reflow
+
+Layouts must work at 320px viewport width with no horizontal scrolling (WCAG 1.4.10 AA). This simulates 400% zoom on a 1280px screen.
+
+### The pattern that fails every time
+
+```jsx
+/* ✗ Fixed sidebar + 100vh forces overflow at 320px */
+<Flex style={{ height: '100vh' }}>
+  <Card style={{ width: '260px', flexShrink: 0 }}>Sidebar</Card>
+  <Card flex={1}>Content</Card>
+</Flex>
+```
+
+At 320px, the 260px sidebar plus any content exceeds the viewport.
+
+### The pattern that passes
+
+```jsx
+/* ✓ Sidebar stacks above content at narrow widths */
+<Flex wrap="wrap" style={{ minHeight: '100vh' }}>
+  <Card
+    as="nav"
+    aria-label="Main navigation"
+    style={{ flex: '1 1 100%', maxWidth: '260px' }}
+    padding={3}
+  >
+    Sidebar
+  </Card>
+  <Card as="main" style={{ flex: '1 1 0', minWidth: 0, overflow: 'hidden' }} padding={4}>
+    Content
+  </Card>
+</Flex>
+```
+
+### Key differences
+
+| Prop | Fails | Passes |
+| --- | --- | --- |
+| Container | `Flex` (no wrap) | `Flex wrap="wrap"` |
+| Sidebar sizing | `width: '260px', flexShrink: 0` | `flex: '1 1 100%', maxWidth: '260px'` |
+| Container height | `height: '100vh'` | `minHeight: '100vh'` |
+| Content card | `flex={1}` | `flex: '1 1 0', minWidth: 0, overflow: 'hidden'` |
+
+**Do not use `flexShrink: 0`** on sidebars. It prevents the sidebar from shrinking below its width.
+
+**Do not use `height: '100vh'`** on the outer Flex. Use `minHeight: '100vh'`. A fixed height stops the container from growing when content stacks.
+
+**Always set `overflow: 'hidden'`** on the content Card. Long headings or button rows can push the page `scrollWidth` past the viewport.
+
+### Toolbar rows must wrap
+
+Any horizontal `Flex` that holds a heading, buttons, or other inline content must use `wrap="wrap"`. A heading + button toolbar is the second most common overflow source.
+
+```jsx
+/* ✗ Heading + button exceed 320px in one line */
+<Flex align="center" justify="space-between">
+  <Heading as="h1" size={2}>All Documents</Heading>
+  <Button text="New document" icon={AddIcon} />
+</Flex>
+
+/* ✓ Button wraps to next line at narrow widths */
+<Flex align="center" justify="space-between" wrap="wrap" gap={2}>
+  <Heading as="h1" size={2}>All Documents</Heading>
+  <Button text="New document" icon={AddIcon} />
+</Flex>
+```
+
+---
+
+## 8. HTML lang attribute
+
+Every page must declare its language on `<html>` (WCAG 3.1.1 A).
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+  <head>...</head>
+  <body>...</body>
+</html>
+```
+
+In a Vite project, set this in `index.html`.
+
+---
+
+## 9. Known Sanity UI issues
+
+These are library-level issues you cannot fix through props. Automated tests will flag them. Do not spend time trying to work around them.
+
+### MenuButton emits `aria-haspopup="true"`
+
+The `MenuButton` component emits `aria-haspopup="true"` instead of `aria-haspopup="menu"`. The value `"true"` is an alias for `"menu"`, but screen readers may announce it as "has popup" instead of "has popup menu." This requires a fix in `@sanity/ui` itself.
+
+### `tone="primary"` contrast in default mode
+
+White text on `tone="primary"` default-mode buttons produces a 4.29:1 ratio. This is below the 4.5:1 AA threshold. Use `tone="default"` or `mode="ghost"` with `tone="primary"` instead. See §4 above.
+
+---
+
+## Full page scaffold
+
+This scaffold passes all automated accessibility tests. Use it as a starting point.
+
+```jsx
+<ThemeProvider theme={theme}>
+  <Flex wrap="wrap" style={{ minHeight: '100vh' }}>
+    {/* Sidebar — <nav> landmark */}
+    <Card
+      as="nav"
+      aria-label="Main navigation"
+      padding={3}
+      style={{ flex: '1 1 100%', maxWidth: '260px' }}
+    >
+      <Stack space={3}>
+        <Heading as="h2" size={1}>Navigation</Heading>
+        {/* nav items */}
+      </Stack>
+    </Card>
+
+    {/* Content — <main> landmark */}
+    <Card as="main" style={{ flex: '1 1 0', minWidth: 0, overflow: 'hidden' }} padding={4}>
+      {/* Toolbar — wrap prevents overflow at 320px */}
+      <Flex align="center" justify="space-between" wrap="wrap" gap={2}>
+        <Heading as="h1" size={2}>Page Title</Heading>
+        <Button text="New document" icon={AddIcon} tone="default" />
+      </Flex>
+      {/* page content */}
+    </Card>
+  </Flex>
+</ThemeProvider>
+```
+
+**What this gives you:**
+
+| Feature | How |
+| --- | --- |
+| Landmarks | `Card as="nav"` and `Card as="main"` |
+| Heading hierarchy | `<h1>` for the page title, `<h2>` for sections |
+| Page language | Set `<html lang="en">` in `index.html` |
+| Responsive reflow | `wrap="wrap"` + flex sizing (no fixed widths) |
+| Toolbar wrap | `wrap="wrap"` on toolbar Flex |
+| Contrast | `tone="default"` instead of `tone="primary"` |
+| Overflow clip | `overflow: 'hidden'` on content Card |
+
+---
+
+## Changelog
+
+| Date | Reviewer | Action |
+| --- | --- | --- |
+| 2025-01-20 | Accessibility Expert (initial) | Created file. Defined 15 standards across 9 categories. |
+| 2025-03-18 | Accessibility Expert | Added accessibility checklist. |
+| 2025-03-18 | Accessibility Expert, reviewed by Writer | Added "Implementation patterns" section. Added "Common mistake" callouts. |
+| 2025-03-18 | Accessibility Expert, reviewed by Writer | Second round: landmarks and headings now pass. Added known Sanity UI issues (MenuButton aria-haspopup, tone="primary" contrast). Added required reduced-motion CSS override. |
+| 2025-03-18 | Accessibility Expert, reviewed by Writer | Applied conformance audit notes to component docs. Removed audit tables from this file. |
+| 2025-03-18 | Accessibility Expert, reviewed by Writer | Third round: fixed motion test false positive. Added native checkbox warning. Added heading level skip guidance. |
+| 2025-03-19 | Accessibility Expert, reviewed by Writer | Fourth round: rewrote reflow pattern with overflow: hidden and toolbar wrap. Strengthened tone="primary" warning. Added MenuButton aria-label example. |
+| 2025-03-19 | Accessibility Expert, reviewed by Writer | Separated library-authoring standards into `component-authoring-accessibility.md`. Rewrote this document for consumers who use existing Sanity UI components. Removed documentation-requirement rules, cross-component pattern tracking, and library-internal design decisions. Kept all guidance on landmarks, headings, accessible names, contrast, motion, touch targets, reflow, and lang attribute. |
+
+# Product content standards
+
+This file sets rules for the words, labels, messages, and short copy inside UI parts. It tells you what end users should read: button labels, menu items, tooltip text, error messages, empty states, confirm dialogs, placeholder text, and status messages.
+
+`content-standards.md` tells how authors write the _docs_ (section layout, table format, source style). This file is for designers, engineers, and content reviewers who pick the words inside Sanity UI parts.
+
+Both files work as a pair. `content-standards.md` keeps the docs steady. `product-content-standards.md` keeps the product steady. When a part doc has a "Content" or "Content Guidelines" section, its rules must match the standards here.
+
+---
+
+## Standards by content type
+
+### P1: Labels and actions
+
+Labels name the action on buttons, menu items, tabs, links, and other controls. Users read labels to know what happens before they act.
+
+#### Rules
+
+1. **Start with a verb.** Write labels that say what the user does. Use "Publish," "Edit," "Upload image" — not "Publishing," "Editor," or "Image upload."
+   - _Derives from:_
+     - Button Content ("Start with verbs. Describe the action")
+     - Tooltip Content Guidelines ("Start with a verb if describing an action")
+     - Menu Content Guidelines ("Use verbs that describe the action")
+     - Layouts Action button guidelines ("Button labels should be verb-led")
+     - Popover Content Guidelines ("If the popover contains a menu, use verbs for labels")
+
+2. **Be short.** Aim for 1–3 words on button labels. Keep menu item labels to 1–3 words. Use 1–2 words for nav group labels. Overflow menu items may run up to 5 words because they must stand alone without icons or tooltips.
+   - _Derives from:_
+     - Button Content ("Labels should be short and clear")
+     - Menu Content Guidelines ("Keep MenuItem text short (1-3 words)")
+     - Layouts Labeling groups ("Labels should be short — one or two words")
+     - Layouts Action button guidelines ("aim for two words or less")
+     - Layouts Overflow menus ("The label should stand on its own")
+
+3. **Use sentence case.** Cap only the first word and proper nouns. Write "Add item," not "Add Item." Write "Save to board," not "Save To Board."
+   - _Derives from:_
+     - Button Content ("Use sentence case")
+     - Text Content ("Use sentence case for UI labels and body text")
+     - Tooltip Content Guidelines ("Use sentence case")
+     - Popover Content Guidelines ("Use sentence case")
+     - Menu Content Guidelines ("Use sentence case for all menu items")
+     - Heading Content ("Use sentence case for headings")
+     - Layouts Labeling groups ("Labels should use sentence case")
+
+4. **Name the action.** Do not use vague labels like "Click here," "Submit," "Go," or "OK." The label must say what will happen. "Upload image" beats "Submit." "Delete 3 items" beats "Confirm."
+   - _Derives from:_
+     - Button Content ("Avoid vague labels")
+     - Button Best practices ("Don't use vague labels like 'Click here'")
+     - Layouts Action button guidelines ("Avoid vague labels like 'Click here', 'Submit', 'Go', or 'OK'")
+
+5. **Use plain, clear words for critical actions.** Give destructive actions strong verbs: "Delete," "Remove," "Discard." Do not soften destructive labels. Give safe actions clear verbs: "Publish," "Confirm," "Complete."
+   - _Derives from:_
+     - Button Tone table ("critical" tone pairs with "Delete, Remove")
+     - Layouts Confirmation for destructive actions ("The confirm button repeats the destructive action's name")
+
+6. **Name the group, not the action, for group labels.** Nav group labels name what the items are, not what the user does with them. Use "Documents" instead of "Manage documents." Use "Team" instead of "View team members."
+   - _Derives from:_ Layouts Labeling groups ("Labels should name the kind of items, not the action done on them").
+
+7. **Overflow menu labels must stand alone.** When an action goes into an overflow menu, its label must make sense on its own — no icon, no tooltip. Use "Export as CSV" instead of "Export."
+   - _Derives from:_ Layouts Overflow menus ("Overflow menu items use a label only — no tooltips, no icons. The label must stand on its own").
+
+8. **Toggle labels must show the next action.** When a button toggles state (show/hide, expand/collapse), write the `aria-label` and tooltip to say what happens next — not what is true now. Sidebar shown → "Hide nav." Sidebar hidden → "Show nav."
+   - _Derives from:_ Layouts Toggling sidebars ("The button's aria-label and tooltip should update to match the action").
+
+#### Quick reference
+
+| Part | Length target | Verb-first | Sentence case | Sample |
+| --- | --- | --- | --- | --- |
+| Button label | 1–3 words | Yes | Yes | "Save draft" |
+| Menu item label | 1–3 words | Yes | Yes | "Rename" |
+| Overflow menu item | 1–5 words | Yes | Yes | "Export as CSV" |
+| Nav group label | 1–2 words | No (noun phrase) | Yes | "Media library" |
+| Tab label | 1–2 words | No (noun phrase) | Yes | "Page settings" |
+| Toggle button label | 1–3 words | Yes | Yes | "Show inspector" |
+
+---
+
+### P2: Tooltips
+
+Tooltips give brief help when a user hovers or focuses on a part. Use them for quick scans — not key info.
+
+#### Rules
+
+1. **Keep tooltips under 75 characters.** Aim for 60–75 characters. If you need more, put the words in body text, a popover, or a dialog — not a tooltip.
+   - _Derives from:_ Tooltip Content Guidelines ("Limit text to 60–75 characters").
+
+2. **Start with a verb when naming an action.** If the tooltip says what a button does, lead with the verb: "Edit profile," not "Profile editor." If the tooltip adds info (not an action), a short phrase works.
+   - _Derives from:_ Tooltip Content Guidelines ("Start with a verb if describing an action").
+
+3. **Use sentence case.** Cap only the first word and proper nouns.
+   - _Derives from:_ Tooltip Content Guidelines ("Use sentence case").
+
+4. **No dots on fragments.** Do not end tooltip fragments with a dot. If the tooltip holds a full sentence, add a dot as normal.
+   - _Derives from:_ Tooltip Content Guidelines ("Avoid dots at the end of fragments. Only add dots if the tooltip holds full sentences").
+
+5. **Do not restate shown text.** If the button says "Delete," write a tooltip that adds more ("Delete this document and all its links"). Do not repeat "Delete."
+   - _Derives from:_ Tooltip When not to use ("Do not use when you restate text already shown on screen").
+
+6. **Do not put tooltips on disabled buttons.** Disabled buttons drop out of the tab order. Keyboard users cannot reach them, and the tooltip stays hidden. Use a nearby note or info icon instead.
+   - _Derives from:_
+     - Tooltip ("Never attach a tooltip to a disabled button")
+     - Button ("Avoid tooltips on disabled buttons")
+     - Layouts ("Do not rely on tooltips — disabled buttons leave the tab order")
+
+7. **All icon-only buttons need a tooltip.** When a button has no shown text, add a tooltip for sighted users. Pair it with an `aria-label` for screen readers. Both are needed.
+   - _Derives from:_
+     - Button Best practices ("Add tooltips to icon-only buttons")
+     - Iconography ("Always pair standalone icons with a Tooltip")
+     - Layouts ("All icon-only buttons must have an aria-label and a paired tooltip")
+
+8. **The tooltip must not repeat the `aria-label`.** If the `aria-label` says "Close dialog," the tooltip must either match it (fine) or say more. It must never clash with the `aria-label`.
+   - _Derives from:_ Tooltip ("Make sure the tooltip does not repeat the aria-label. If the button reads 'Settings,' the tooltip should say more").
+
+9. **All action buttons with a text label need a tooltip that adds detail.** The tooltip grows the label: "Export" → "Export all items as a CSV file."
+   - _Derives from:_ Layouts ("All action buttons should have a tooltip that adds detail").
+
+---
+
+### P3: Error messages
+
+No part doc yet has error message rules in its "Content" section. This standard draws on best practices and patterns from other docs. Parts that need error message help: TextInput, Dialog, Card (with `tone="critical"`), and Toast.
+
+#### Rules
+
+1. **Name the problem in plain words.** Tell the user what went wrong. Do not show error codes, jargon, or stack traces in the UI. "The image failed to upload" works. "Error 413: Payload over limit" does not.
+
+2. **Tell the user what to do next.** Each error message must have a next step — what the user can do to fix it. "The image failed to upload. Try a file under 10 MB." The pattern: _what went wrong_ + _what to do about it_.
+
+3. **Do not blame the user.** Keep it neutral. "This file type is not allowed" — not "You sent a bad file." Frame the error as a state, not a fault.
+
+4. **Be exact.** "Something went wrong" is a last resort. Name the thing and what failed: "Could not save the document. The server did not answer."
+
+5. **Use sentence case.** Error messages follow the same casing rule as all other UI text.
+
+6. **Keep error messages under two sentences.** If the problem needs more, link to docs or offer a "Details" toggle.
+
+7. **Pair `tone="critical"` with an icon.** When showing errors in Cards, Buttons, or Toasts, use `tone="critical"` and add `ErrorOutlineIcon`. Do not rely on color alone.
+   - _Derives from:_
+     - Button Best practices ("Pair tones with an icon that matches")
+     - Card Variants ("Pair Card tone values with an icon that matches")
+     - Color Principles ("Never rely on color alone to show meaning")
+
+#### Components that need error message guidance
+
+| Part | Why |
+| --- | --- |
+| TextInput (not yet documented) | Form errors display inline near inputs |
+| Dialog (not yet written) | Error confirms and failure notes |
+| Card | Uses `tone="critical"` but has no error message content rules |
+| Toast (not yet written) | Async error notices |
+
+---
+
+### P4: Empty states
+
+Empty states show up when a list has no items, a search finds nothing, or a feature is not set up yet. The docs cover empty state layout but not the words inside them.
+
+#### Rules
+
+1. **Name what is missing.** The first line of an empty state says what is not there: "No documents yet," "No results found," "No team members."
+
+2. **Tell the user how to fill the space.** The next line gives an action or a call-to-action button. "Create your first document" — not "Get started."
+   - _Derives from:_ Layouts Empty states ("Put a clear call-to-action in the middle of the content space: 'Create your first document,' not 'Get started'").
+
+3. **Structure: what + why + action.** An empty state has at most three parts:
+   1. What the space will hold.
+   2. A one-line reason why it's empty (optional).
+   3. A call-to-action button using P1's verb-first label rules.
+
+4. **Use a warm, helpful tone.** Empty states are a chance to help, not to alarm. Avoid "Error: no data." Use "No documents yet. Create one to get started."
+
+5. **Center empty state text.** Put the copy in the middle of the content space. Set `align="center"` on Text parts inside the empty state.
+   - _Derives from:_ Text Variants Align ("Copy within a center content block, such as an empty state").
+
+6. **Use Text `size={1}` for empty state messages.** Empty state text is low-priority.
+   - _Derives from:_ Text Variants Size ("Non-critical messages, such as Toasts and empty states" maps to `size={1}`).
+
+#### Components that should document empty state guidance
+
+| Part | Why |
+| --- | --- |
+| Layouts | Already has layout empty state rules; needs content rules for the text within |
+| Card | Cards can contain lists that may be empty |
+| Menu | A menu with no items needs an empty state |
+
+---
+
+### P5: Confirm dialogs
+
+Confirm dialogs ask the user to check an action before it runs. The Layouts doc covers patterns for destructive actions. This standard widens the pattern to cover all confirms.
+
+#### Rules
+
+1. **The question names the action and the thing.** "Delete 'About us' page?" — not "Are you sure?" The user must know what will happen from the dialog title alone.
+   - _Derives from:_ Layouts ("a confirm dialog that states what will happen").
+
+2. **The confirm button repeats the action verb.** If the dialog asks "Delete 3 items?", the confirm button says "Delete 3 items" — not "Confirm," "Yes," or "OK."
+   - _Derives from:_ Layouts ("The confirm button repeats the action's name — 'Delete 3 items,' not 'Confirm' or 'Yes'").
+
+3. **The cancel button says "Cancel."** Do not use "No," "Go back," "Never mind," or "Dismiss." All users know "Cancel."
+
+4. **Destructive confirm buttons use `tone="critical"`.** The look reinforces the weight of the action.
+   - _Derives from:_ Layouts ("The confirm button should also use tone='critical'").
+
+5. **Add a brief note when the outcome is unclear.** If the action has side effects, state them in the dialog body. Keep to one or two sentences. Like: "Deleting this document will also remove 12 links to it."
+
+6. **Use sentence case for dialog titles and body text.** The same casing rule holds for all parts.
+
+---
+
+### P6: Placeholder text
+
+No current part doc covers placeholder text rules. This standard draws on best practices. Add these rules to the TextInput and Autocomplete docs when written.
+
+#### Rules
+
+1. **Placeholder text shows the format, not the field name.** A date field reads "YYYY-MM-DD," not "Enter date." A search field reads "Search by title or ID," not "Search."
+
+2. **Placeholder text does not take the place of a shown label.** Give each input a shown label above or next to it. The placeholder is a hint — it fades when the user types and fails as a lasting label.
+
+3. **Use sentence case.** Placeholder text follows the same rule as all other UI text.
+
+4. **Keep placeholder text short.** One phrase or short line. It must fit inside the input at the input's default width with no clipping.
+
+5. **Do not use placeholder text for rules.** If the user must know rules before typing (like "Must be at least 8 chars"), put help text below the input.
+
+#### Components that should document placeholder text guidance
+
+| Part | Why |
+| --- | --- |
+| TextInput (not yet written) | The main user of placeholder text |
+| Autocomplete (not yet written) | Search-style inputs with placeholder |
+
+---
+
+### P7: Status messages
+
+Status messages are toast notices, inline markers, and loading notes. They tell the user what happened or what a task is doing.
+
+#### Rules
+
+1. **Name the action and its result.** "Document published" — not "Success." "3 items deleted" — not "Done." Users must know what happened without thinking back to what they had clicked.
+
+2. **Use past tense for done actions.** Write "Published," "Saved," "Deleted." Use "-ing" for actions not yet done: "Publishing…," "Saving…"
+
+3. **Keep status messages under one sentence.** Toast messages must be easy to read at a glance. If more is needed, add a link to the item or a "Details" link.
+
+4. **Fire a Toast for actions that take over three seconds.** When a task ends after loading for more than three seconds, show a Toast to tell the user. Do not rely on the button going back to its on state — the user may have moved on.
+   - _Derives from:_
+     - Button Loading state ("For tasks over three seconds, trigger a Toast when the action finishes")
+     - Layouts Loading states ("trigger a Toast when the action completes")
+
+5. **Use `tone` to match the status.** Good outcomes use `tone="positive"`. Warnings use `tone="caution"`. Failures use `tone="critical"`. Add the matching icon.
+   - _Derives from:_ Card Tone table, Button Tone table, Color Principles ("Color carries meaning").
+
+6. **Loading messages must name the task, not say "Loading."** Write "Publishing document…" or "Uploading image…" when the task is known. Use "Loading…" only when you do not know the task.
+
+7. **Use sentence case.** Applies to all status messages.
+
+8. **Use Text `size={1}` for toast and status messages.** Status messages are low-rank, short-lived words.
+   - _Derives from:_ Text Variants Size (`size={1}` is for "small messages, such as Toasts and empty states").
+
+---
+
+### P8: Casing and format
+
+Casing and format rules apply to all content types. They appear here once. All other standards point to them.
+
+#### Rules
+
+1. **Sentence case for all text.** All UI text uses sentence case: button labels, menu items, tooltips, headings, tab labels, group labels, error messages, empty states, placeholders, and status notes. Cap the first word and proper nouns only.
+   - _Derives from:_
+     - Button ("Use sentence case")
+     - Text ("Use sentence case for UI labels and body text")
+     - Tooltip ("Use sentence case")
+     - Popover ("Use sentence case")
+     - Menu ("Use sentence case for all menu items")
+     - Heading ("Use sentence case for headings")
+     - Layouts ("Labels should use sentence case")
+
+2. **When not to use sentence case.** Proper nouns (Sanity, GitHub, GROQ), short forms (CSV, JSON, URL, UUID), and brand names keep their own casing. Never use all-caps text (like "MEDIA LIBRARY").
+
+3. **No dots on short bits.** Button labels, menu items, tooltip bits, headings, and group labels do not end with a dot. Full sentences in body text, error messages, and dialog text do get dots and other marks.
+   - _Derives from:_
+     - Tooltip ("Avoid periods at the end of fragments")
+     - Heading ("Do not end headings with a dot unless it is a question")
+
+4. **No "!" marks in UI text.** Product copy keeps a calm, clear tone. Save "!" marks for sales copy — not buttons, errors, or status messages.
+
+5. **Use figures, not words, for counts.** "Delete 3 items" — not "Delete three items." Users read figures faster in UI text.
+
+6. **Use the Oxford comma in lists.** When a line lists three or more items, put a comma before "and" or "or" to keep the meaning clear.
+
+---
+
+### P9: Internationalization considerations
+
+Sanity UI is used around the world. Write all text for translation, even when the source is English.
+
+#### Rules
+
+1. **Allow 30–50% growth for translated labels.** German, Finnish, and other languages often make labels 30–50% longer than English. A two-word English button may grow to four words in German. Plan layouts for this growth — do not treat the English length as the cap.
+
+2. **Avoid text placed in code.** Make all user-facing strings easy to pull out. Do not hard-code labels, error messages, or status text in JSX. Pass them as props or through a locale file.
+
+3. **Do not join strings to build sentences.** "You have " + count + " items" breaks in languages where word order is not the same. Use template strings with slots a translator can move: "You have {count} items."
+
+4. **Support RTL scripts.** Labels, tooltips, error messages, and all other text must look right in right-to-left languages (like Hebrew). Use `inline-start` and `inline-end` in place of `left` and `right`.
+   - _Derives from:_
+     - Text Variants Align ("`left` for LTR, `right` for RTL")
+     - Heading Best practices ("Start-align headings (left in LTR languages)")
+
+5. **Avoid sayings and word games.** "Hit the ground running," "low-hanging fruit," and "out of the box" do not translate well. Use plain, straight words.
+   - _Aligns with:_ Text Content ("Avoid jargon, acronyms, and hard sentences. Aim for an 8th-grade reading level").
+
+6. **Test labels at their longest.** When building a part, test with the longest likely translated string (such as a 50%-longer German form). Check that the layout does not break, clip text, or push buttons off screen.
+
+---
+
+### P10: Truncation
+
+Truncation is a last resort. All parts that handle text overflow must follow clear rules about when and how to truncate.
+
+#### Rules
+
+1. **Shorten the text before clipping.** The best clip is no clip at all. If users can change the text (like a title they typed), you may need to cut it. If the system sets the text (like a button label), write it shorter.
+   - _Derives from:_
+     - Heading TextOverflow ("Before truncating, try to shorten the text. The best truncation is no truncation")
+     - Text TextOverflow ("Before truncating, try to shorten the text")
+
+2. **Use ellipsis (`…`) to show clipping.** The default `textOverflow="ellipsis"` works for most cases. Do not use `clip` unless the cut part is only for looks.
+   - _Derives from:_ Button API (`textOverflow` defaults to `'ellipsis'`).
+
+3. **Show the full text with a Tooltip or `title`.** When you clip text, let the user see the full string on hover or focus. Use the Tooltip part or the HTML `title` tag.
+   - _Derives from:_
+     - Heading TextOverflow ("make sure the full text is within reach via Tooltip or title tag")
+     - Text TextOverflow (same rule)
+
+4. **Save clipping for user-made or changing text.** Write system-set labels (buttons, menu items, section headings) short enough to never clip. Clipping is for text the system cannot control: user-typed titles, machine-made IDs, and long web links.
+   - _Derives from:_
+     - Text TextOverflow ("Text that is user/machine made and edge cases may exist")
+     - Heading TextOverflow (same)
+
+5. **Clipping in grids and lists.** When grid or list items would cause odd sizes or layout jumps if they wrapped, clipping works. Make sure users can still see the full text.
+   - _Derives from:_
+     - Text TextOverflow ("Text within a grid where wrapping would cause odd sizes or shifts")
+     - Heading TextOverflow (same)
+
+---
+
+## Part Content sections to update
+
+All items from the initial audit have been resolved. The table below tracks only remaining work — docs not yet written, and Box/Flex layout primitives that still need minimal Content sections.
+
+| Document | Standard | What needs to change |
+| --- | --- | --- |
+| `box.md` | P8 | Add a Content section noting that Box does not set text styles. Child Text/Heading components own casing and styling. Cite P8 for sentence case. |
+| `flex.md` | P8 | Same as Box. Add a Content section noting that Flex does not set text styles. Cite P8. |
+| `dialog.md` (not yet written) | P3, P5, P6 | When written, include a Content section covering confirm dialog rules (P5), error message structure (P3), and placeholder text in dialog inputs (P6). |
+| `textinput.md` (not yet written) | P3, P6 | When written, include a Content section covering placeholder text rules (P6) and inline error messages (P3). |
+| `toast.md` (not yet written) | P7 | When written, include a Content section covering status message rules (P7). |
+
+---
+
+## How to use this file
+
+### For people building interfaces with Sanity UI
+
+1. **Before writing any user-facing text**, read the right standard (P1 for button labels, P2 for tooltips, P3 for errors, etc.).
+2. **Use P8 (casing and format) on all text.** Use sentence case, skip dots on bits, use figures for counts.
+3. **When in doubt, check the quick lookup table** in P1 for label length and form.
+4. **Think about translation.** Even if you write in English, follow P9 — allow for 30–50% growth, avoid string joining, use plain words.
+5. **Clipping is a last resort.** Follow P10 — shorten the text first. If you cannot avoid clipping, show the full text with a Tooltip.
+
+### For reviewers checking Content sections
+
+1. **Check each part's Content section against all rules in this file.** Use the audit as a checklist to start.
+2. **When a part's Content section adds a new rule**, see if it belongs here. If the rule goes past that one part, add it here and cite it from the part doc.
+3. **When a part's Content section clashes with a rule here**, the system rule wins. Change the part doc to match, or pitch a change with proof.
+4. **Flag missing Content sections.** The "Parts with NO Content section" table lists parts that need them. When you write a new part doc, add a Content section that cites the right rules from this file.
+
+### For maintaining this file
+
+1. **This file grows over time.** Each review adds to or makes the rules better. Do not repeat — update in place.
+2. **All new rules must cite proof.** Ground each rule in part doc Content sections. Where no part doc has a given content type, note the gap and write the rule from best practices.
+3. **Run the feedback loop.** When you add or change a rule, also update the audit and the "Part Content sections to update" table. A rule that lives only here and never gets into part docs does not work.
+4. **Version the changes.** Add a row to the changelog below when you add, refine, or retire standards.
+
+---
+
+## Standards changelog
+
+| Date | Change | Standards changed |
+| --- | --- | --- |
+| 2025-01-01 | Made. Drew standards from button.md, card.md, heading.md, text.md, tooltip.md, popover.md, menu.md, stack.md, layouts.md, icon.md, color.md. Set P1–P10. | P1, P2, P3, P4, P5, P6, P7, P8, P9, P10 |
+| 2025-01-01 | Resolved all initial audit items. Updated Content sections in button.md (P2, P5, P9, P10), card.md (P3, P4, P8), heading.md (P9), text.md (P1, P9), tooltip.md (P9), popover.md (P9), menu.md (P5, P9). Added Content sections to iconography.md (P1, P2, P8), layouts.md (P1, P4, P5, P7, P8), color.md (P3, P7). Updated conformance audit to reflect all changes. | P1, P2, P3, P4, P5, P7, P8, P9, P10 |
+
+# Typography
+
+## Best practices
+
+**Do**
+- Always use vertically stacked Text/Heading pairings with `<Stack>` or `<Flex>`. Text and Heading components require explicit vertical spacing between them because they have all vertical spacing stripped.
+- Use `<Heading>` along with the `as` prop for all interface waypoints. 
+
+**Don’t**
+- Don't replace text with icons for critical or complex topics. 
+-
+
 # Color
+
+
 
 Overview Color is a potent and volatile design tool. What appears vibrant to one person may be gray to another, and cultural interpretations of color can vary wildly. Within our design system, color is not merely decorative; it is a functional tool used to communicate hierarchy, indicate interactive states, and guide the user.
 
@@ -39,6 +1147,27 @@ Better use of less is always preferred over "more on top of more". Keeping a lim
 - Low-Intensity Backgrounds: Light tints (or "weak" colors) of semantic colors are safe to use as larger background areas or behind text, maintaining readability while still conveying the status.
 - Typography & Iconography: Text colors must be strictly managed to maintain readability hierarchy (e.g., separating default body text from subtle metadata). Icon colors should generally match their accompanying text colors to maintain visual consistency.
 
+## Applying color in practice
+
+This section bridges the ideas in the current document with concrete patterns.
+
+### The hierarchy of color decisions
+
+When choosing how to apply color, follow this order:
+
+- **Tone on the component** — Does an interactive element need semantic meaning? Set `tone` on the Button, MenuItem, Badge, or other component.
+- **Muted prop** — Does the content need to be de-emphasized? Use `muted` on Text or Card instead of picking a lighter color.
+- **Scheme override** — Does a section need to invert the palette for emphasis? Set `scheme="dark"` on a Card inside a light interface (or vice versa). Use sparingly.
+- **Direct color** — As a last resort, for elements outside the `@sanity/ui` component system (such as charts or data visualizations), reference `@sanity/color` values.
+
+### What not to do
+
+- **Don't use hardcoded hex values** for colors that `@sanity/ui` components manage. Every `color`, `background-color`, and `border-color` in the system flows through CSS custom properties. Hardcoded values break in dark mode, ignore tone contexts, and diverge from the palette.
+- **Don't reference `--card-*` variables** in component styles unless building a custom component that takes part in the Card color context. Prefer `@sanity/ui` components with `tone` and `muted` props.
+- **Don't use `ThemeColorProvider` directly** unless you are building infrastructure-level components. Use Card's `tone` and `scheme` props, which wrap `ThemeColorProvider` with the correct semantics.
+- **Don't assign meaning to raw hues.** Users should never see "blue" or "red" as a concept in the interface. They should see "primary," "critical," and the like. The mapping from tone to hue is the theme's job, and it may change.
+
+
 ## Accessibility
 
 We adhere to WCAG AA guidelines for contrast to ensure visual clarity.
@@ -48,44 +1177,208 @@ We adhere to WCAG AA guidelines for contrast to ensure visual clarity.
 - UI Components: Meaningful visual elements, such as icons or input borders, must maintain a 3:1 contrast ratio against adjacent colors.
 - Dynamic Backgrounds: When text is rendered over gradient backgrounds or images, you must verify that the text color meets contrast standards in all places it appears. This is particularly critical for interfaces using animations or parallax scrolling where text and backgrounds move independently.
 
-### CSS custom properties
+### Contrast ratios in the theme
 
-The theme generates `--card-*` CSS custom properties on every Card and color context. Use these in custom styles to stay consistent with the active tone and scheme.
+The `@sanity/color` package includes a `contrastRatio` utility function that the theme build process uses to check color pairs. The tint scale is designed to ensure:
 
-**Core properties:**
-- `--card-bg-color` — background color
-- `--card-fg-color` — foreground (text) color
-- `--card-border-color` — border color
-- `--card-icon-color` — icon color
-- `--card-muted-fg-color` — de-emphasized text color
-- `--card-link-fg-color` — link text color
-- `--card-focus-ring-color` — focus ring color
+- Tints 600+ on white backgrounds meet WCAG AA for normal text (≥ 4.5:1)
+- Tints 700+ on white backgrounds meet WCAG AAA for normal text (≥ 7:1)
+- The default foreground (gray/800 on white) provides about 10:1 contrast
+- Dark scheme foregrounds (gray/200 on gray/950) provide about 9:1 contrast
 
-These properties update when the Card's `tone` or `scheme` changes. A custom style using `color: var(--card-fg-color)` adapts to light mode, dark mode, and every tone.
+These ratios hold across all semantic tones. Positive, caution, and critical foregrounds on their tinted backgrounds all meet AA minimums.
 
-Do not hardcode hex values for colors that the theme already provides. Hardcoded values break in dark mode and ignore tone contexts.
+# Iconography
 
-### Tone values across components
+
 
-Tones map semantic meaning to color. The available tones differ by component:
+### **Usage guidelines**
 
-| Tone | Button | Card | MenuItem | Badge |
-| --- | --- | --- | --- | --- |
-| `'default'` | ✓ | ✓ | ✓ | ✓ |
-| `'neutral'` | ✓ | — | — | — |
-| `'primary'` | ✓ (legacy) | ✓ | — | ✓ |
-| `'suggest'` | ✓ | — | — | — |
-| `'positive'` | ✓ | ✓ | — | ✓ |
-| `'caution'` | ✓ | ✓ | — | ✓ |
-| `'critical'` | ✓ | ✓ | ✓ | ✓ |
+**When to use:**
 
-Not every component supports every tone. Check the component doc for the accepted values. The visual treatment of a tone (hue, saturation, contrast) varies by component — a `'critical'` Button is a solid red fill, while a `'critical'` Card is a light red tint. The meaning is the same; the intensity differs.
+- To convey meaning in cases where space is limited
+- To reinforce a label with a more visual representation
+- To create visual emphasis for a critical element on the screen
+- To support communication of important states (such as errors or success) for people who do not perceive color.
+- When displaying information that’s visual in nature (ex: map pins in a map)
 
-### Content
+**When not to use:**
 
-- **Color must pair with text or icons.** Never rely on color alone to convey meaning. Every use of a semantic tone (positive, caution, critical) must include a text label, an icon, or both.
-- **Error messages (P3).** When using critical tones, the accompanying text should state what went wrong and what the user can do. See product-content-standards.md P3.
-- **Status messages (P7).** When using positive, caution, or critical tones for status, the text should lead with the outcome and include a next step when applicable. See product-content-standards.md P7.
+- As a decoration. Use imagery or illustrations instead.
+- As the primary form of communication when space is available. Use text labels whenever possible.
+
+### Best practices
+
+**Do**
+
+- Color icons to match the semantic meaning.
+- When placed adjacent to text, size the icons proportionally to the text’s size.
+- Use icons within an interactive element (like Button) when it’s intended to be interactive.
+- Add a Tooltip to describe interactive elements using an icon as the primary form of communication.
+
+**Don’t**
+
+- Don’t add icons alongside text unless it provides a clear functional purpose _or _the element requires high emphasis.
+- Don’t use the “closest matching” icon in cases where there isn’t an obvious one for the intended use case. It’s better to use no icon than one that doesn’t match in meaning. Consider not using an icon or create a new icon for that specific use case.
+- Don’t color icons specifically to increase visual emphasis.
+- Don’t use filled variants of icons to increase visual weight.
+
+### Treatments
+
+#### Supportive
+
+Supportive icons accompany a text label. They reinforce or emphasize meaning but do not replace the text — if the icon were removed, the element would still be understood.
+
+- Used via the `icon` prop on Button, MenuItem, TextInput, and similar components.
+- The text label serves as the accessible name. The icon is decorative.
+- Mark standalone supportive icons with `aria-hidden="true"` so screen readers skip them.
+
+##### Guidance
+
+- Do not add a supportive icon unless it provides a clear functional benefit — faster scanning, visual reinforcement of a semantic tone, or disambiguation between similar labels.
+- When pairing icons with semantic tones (`positive`, `caution`, `critical`), the icon should match the tone's intent: `CheckmarkCircleIcon` for positive, `WarningOutlineIcon` for caution, `ErrorOutlineIcon` for critical. This supports people who do not perceive color.
+
+#### Independent
+
+Independent icons are the sole visual element communicating meaning — there is no adjacent text label. If the icon were removed, the element's purpose would be lost.
+
+- Used as icon-only buttons, toolbar actions, or standalone status indicators.
+- **Must** have an accessible name since no visible text is present. Provide `aria-label` on the interactive parent element.
+- Should be paired with a Tooltip for sighted users to confirm meaning on hover/focus.
+- Reserve for:
+  - Universally understood concepts: close, search, add, settings, navigation arrows.
+  - Compositions where density is critical (ex: Toolbars)
+  - 
+  - Secondary or low-risk actions where immediate comprehension is not critical
+
+**Guidance:**
+
+- When in doubt, use a supportive treatment instead. Independent icons require the user to already know (or discover via tooltip) what the icon means.
+- Always pair independent icons with a Tooltip. This serves both as a learning aid for new users and a confirmation for experienced ones.
+- Never use an independent treatment for critical or destructive actions. A delete action should always have a visible "Delete" label.
+
+### Variants
+
+#### Outlined vs Filled
+
+Sanity icons should be displayed as outlined by default. Filled icons are specifically used to indicate that an element is active or toggled on. An example of this is using PinOutlineIcon when a navigation element is unpinned and PinFilledIcon when it’s pinned.
+
+Note that not every icon has a filled counterpart. Most icons exist only in their outlined form. The filled variants are intentionally limited to cases where a toggle or active-state distinction is meaningful.
+
+#### Size
+
+Sanity icons currently come in one default size, 25x25. However, icon sizing should be visually paired when set next to text.
+
+- Icons render at `width="1em"` and `height="1em"`, meaning they scale with their parent's font size.
+- When placed inside `@sanity/ui` typography components, the theme applies a precise `font-size` override to `[data-sanity-icon]` elements that aligns icons to the cap-height of adjacent text.
+
+_You should not manually set _`fontSize`_, _`width`_, or _`height`_ on Sanity icons._* Instead, control size by placing the icon inside the appropriate typography component at the desired `size` prop value. The theme handles the rest.
+
+#### Text icon sizes
+
+| `size` | **Font size** | **Icon size** | **Line height** |
+| --- | --- | --- | --- |
+| `0` | 10px | 17px | 15px |
+| `1` | 13px | 21px | 19px |
+| `2`** (default)** | **15px** | **25px** | **23px** |
+| `3` | 18px | 29px | 27px |
+| `4` | 21px | 33px | 31px |
+
+#### Heading icon sizes
+
+| `size` | **Font size** | **Icon size** | **Line height** |
+| --- | --- | --- | --- |
+| `0` | 13px | 17px | 19px |
+| `1` | 16px | 25px | 23px |
+| `2` | 21px | 33px | 29px |
+| `3` | 27px | 41px | 35px |
+| `4` | 33px | 49px | 41px |
+| `5` | 38px | 53px | 47px |
+
+#### Label icon sizes
+
+| `size` | **Font size** | **Icon size** | **Line height** |
+| --- | --- | --- | --- |
+| `0` | 8.1px | 13px | 10px |
+| `1` | 9.5px | 15px | 11px |
+| `2` | 10.8px | 17px | 12px |
+| `3` | 12.25px | 19px | 13px |
+| `4` | 13.6px | 21px | 14px |
+| `5` | 15px | 23px | 15px |
+
+#### Color
+
+Icons in `@sanity/icons` use `stroke="currentColor"` (outlined icons) or `fill="currentColor"` (filled icons). This means they automatically inherit color from their parent element. Color should be controlled through `@sanity/ui`'s theming system — not by setting `color`, `fill`, or `stroke` directly on the icon.
+
+| **Context** | **How color is applied** | **Result** |
+| --- | --- | --- |
+| Default | Inherits `--card-fg-color` from the nearest Card context | Standard foreground color matching surrounding text |
+| Muted | Place inside `<Text muted>` | Renders at `--card-muted-fg-color`, a lighter shade for de-emphasized content |
+| Semantic tone | Tone is applied on the parent component | Icon color follows the component's tone automatically |
+| Status: success | Use `tone="positive"` on the parent component or Card | Green foreground color |
+| Status: warning | Use `tone="caution"` on the parent component or Card | Yellow/amber foreground color |
+| Status: error | Use `tone="critical"` on the parent component or Card | Red foreground color |
+| Status: info | Use `tone="primary"` on the parent component or Card | Blue foreground color |
+
+**Guidance:**
+
+- **Never set **`color`**, **`fill`**, or **`stroke`** directly on icon SVGs.** Let color cascade from the parent component's tone and the Card color context. This ensures icons respond correctly to light/dark mode, high-contrast themes, and tone changes.
+- When using icons to communicate status (success, warning, error, info), always pair the colored icon with a text label. Color alone is insufficient for people with color vision deficiencies.
+- The muted treatment (via `<Text muted>`) is useful for de-emphasizing secondary icons in dense layouts, such as metadata rows or collapsed sections.
+
+
+
+## Choosing the right icon
+
+The library contains 200+ icons. Choosing the right one starts with knowing the categories of icons and the naming conventions used.
+
+1. **Use the most specific icon available.** Prefer `DocumentTextIcon` over `DocumentIcon` when representing a text document. Prefer `ImageRemoveIcon` over a generic `CloseIcon` when indicating image removal.
+1. **Don't use a "close enough" icon.** If no icon in the library clearly represents the concept, it's better to use no icon at all than one that could be misinterpreted. Consider requesting a new icon for the specific use case.
+1. **Be consistent across the product.** Once an icon is chosen for a concept, use that same icon everywhere the concept appears. Don't use `CogIcon` for settings in one place and `ControlsIcon` in another.
+1. **Match established conventions.** Users bring expectations from other software. A magnifying glass means search. A trash can means delete. A pencil means edit. Don't repurpose universally understood icons for novel meanings.
+
+### Naming conventions
+
+Icon names follow PascalCase with an `Icon` suffix. Modifiers appear between the concept and the suffix:
+
+- **Outline/Filled:** `HeartIcon` / `HeartFilledIcon` — outline is the default treatment; filled indicates active/toggled state.
+- **Directional:** `ArrowUpIcon`, `ChevronLeftIcon`, `DoubleChevronRightIcon` — direction is always stated in the name.
+- **State variants:** `EyeOpenIcon` / `EyeClosedIcon`, `LockIcon` / `UnlockIcon` — opposing states use distinct names instead of a single togglable icon.
+- **Related concepts:** `LinkIcon` / `LinkRemovedIcon`, `PinIcon` / `PinRemovedIcon` — the `Removed` suffix indicates negation or deactivation.
+
+### Icons by category
+
+#### Navigation & wayfinding
+
+`ArrowDownIcon`, `ArrowLeftIcon`, `ArrowRightIcon`, `ArrowUpIcon`, `ArrowTopRightIcon`, `ChevronDownIcon`, `ChevronLeftIcon`, `ChevronRightIcon`, `ChevronUpIcon`, `DoubleChevronDownIcon`, `DoubleChevronLeftIcon`, `DoubleChevronRightIcon`, `DoubleChevronUpIcon`, `CollapseIcon`, `ExpandIcon`, `HomeIcon`, `LaunchIcon`, `EnterIcon`, `EnterRightIcon`, `LeaveIcon`, `PanelLeftIcon`, `PanelRightIcon`, `MasterDetailIcon`
+
+#### Actions
+
+`AddIcon`, `AddCircleIcon`, `RemoveIcon`, `RemoveCircleIcon`, `EditIcon`, `TrashIcon`, `CopyIcon`, `DownloadIcon`, `UploadIcon`, `ShareIcon`, `SearchIcon`, `FilterIcon`, `SortIcon`, `CropIcon`, `DragHandleIcon`, `ComposeIcon`, `PublishIcon`, `UnpublishIcon`, `RestoreIcon`, `RevertIcon`, `ResetIcon`, `RefreshIcon`, `RetryIcon`, `SyncIcon`, `UndoIcon`, `RedoIcon`, `SelectIcon`, `TransferIcon`, `GenerateIcon`
+
+#### Status & feedback
+
+`CheckmarkIcon`, `CheckmarkCircleIcon`, `CloseIcon`, `CloseCircleIcon`, `ErrorOutlineIcon`, `WarningOutlineIcon`, `InfoOutlineIcon`, `HelpCircleIcon`, `SpinnerIcon`, `AccessDeniedIcon`, `ReadOnlyIcon`, `EyeOpenIcon`, `EyeClosedIcon`, `LockIcon`, `UnlockIcon`
+
+#### Content types & documents
+
+`DocumentIcon`, `DocumentTextIcon`, `DocumentSheetIcon`, `DocumentVideoIcon`, `DocumentWordIcon`, `DocumentZipIcon`, `DocumentPdfIcon`, `DocumentRemoveIcon`, `DocumentsIcon`, `BinaryDocumentIcon`, `ImageIcon`, `ImagesIcon`, `ImageRemoveIcon`, `FolderIcon`, `DatabaseIcon`, `SchemaIcon`, `JsonIcon`, `CodeIcon`, `CodeBlockIcon`
+
+#### Text formatting
+
+`BoldIcon`, `ItalicIcon`, `UnderlineIcon`, `StrikethroughIcon`, `HighlightIcon`, `BlockquoteIcon`, `OlistIcon`, `UlistIcon`, `InlineIcon`, `InlineElementIcon`, `BlockContentIcon`, `BlockElementIcon`, `InsertAboveIcon`, `InsertBelowIcon`, `TruncateIcon`, `StringIcon`, `TextIcon`, `NumberIcon`, `HashIcon`
+
+#### Communication & social
+
+`CommentIcon`, `AddCommentIcon`, `EnvelopeIcon`, `BellIcon`, `HeartIcon`, `HeartFilledIcon`, `StarIcon`, `UserIcon`, `UsersIcon`
+
+#### Objects & concepts
+
+`CogIcon`, `ControlsIcon`, `TagIcon`, `TagsIcon`, `CalendarIcon`, `ClockIcon`, `PinIcon`, `PinRemovedIcon`, `LinkIcon`, `LinkRemovedIcon`, `TokenIcon`, `PackageIcon`, `PlugIcon`, `WrenchIcon`, `RobotIcon`, `RocketIcon`, `SparkleIcon`, `SparklesIcon`, `BoltIcon`, `BookIcon`, `ClipboardIcon`, `ClipboardImageIcon`, `CreditCardIcon`, `DashboardIcon`, `BarChartIcon`, `ChartUpwardIcon`, `TrendUpwardIcon`, `EarthGlobeIcon`, `EarthAmericasIcon`, `ComponentIcon`, `CubeIcon`, `DiamondIcon`
+
+#### Presentation & layout
+
+`MenuIcon`, `ThLargeIcon`, `ThListIcon`, `StackIcon`, `StackCompactIcon`, `SplitHorizontalIcon`, `SplitVerticalIcon`, `TiersIcon`, `DesktopIcon`, `MobileDeviceIcon`, `TabletDeviceIcon`, `ToggleArrowRightIcon`, `EllipsisHorizontalIcon`, `EllipsisVerticalIcon`, `DotIcon`, `CircleIcon`, `SquareIcon`, `TriangleOutlineIcon`
 
 # Theming
 
@@ -647,1817 +1940,6 @@ pnpm add --save-exact styled-components@npm:@sanity/css-in-js
 | Style a custom component | Use `--card-*` CSS custom properties |
 | Override Studio colors | Use `buildLegacyTheme()` in `sanity.config.ts` |
 | Reference raw palette | Import hues from `@sanity/color` (last resort) |
-
-
-# System-level accessibility standards
-
-This document defines the accessibility standards that apply across all parts and patterns in the Sanity UI design system. Standards are grouped by category. Each standard cites the WCAG success criteria or WAI-ARIA Authoring Practices Guide (APG) pattern it derives from, states the rule, and lists which parts it applies to.
-
-This is a living document. Each accessibility review adds to or refines the standards here. Part docs cite these standards; they do not restate them.
-
----
-
-## Table of contents
-
-1. [Semantic structure](#1-semantic-structure)
-2. [Keyboard interaction](#2-keyboard-interaction)
-3. [Focus management](#3-focus-management)
-4. [ARIA conventions](#4-aria-conventions)
-5. [Screen reader behavior](#5-screen-reader-behavior)
-6. [Contrast and color](#6-contrast-and-color)
-7. [Motion](#7-motion)
-8. [Touch targets](#8-touch-targets)
-9. [Heading hierarchy](#9-heading-hierarchy)
-10. [Conformance audit](#10-conformance-audit)
-11. [Cross-component patterns](#11-cross-component-patterns)
-12. [Component docs to update](#12-component-docs-to-update)
-13. [Accessibility checklist](#accessibility-checklist)
-
----
-
-## 1. Semantic structure
-
-### 1.1 Semantic element selection guidance for polymorphic components
-
-**Derives from:** WCAG 1.3.1 Info and Relationships (Level A); WCAG 4.1.2 Name, Role, Value (Level A).
-
-**Rule:** Every component that exposes a polymorphic `as` prop must document:
-
-1. **Decision criteria** for picking a semantic element over the default. The doc must state _when_ to use each accepted `as` value and what user need or content structure justifies the choice.
-2. **Which elements carry behavioral needs beyond layout.** Elements like `<button>`, `<dialog>`, `<select>`, `<details>`, `<summary>`, `<form>`, and `<fieldset>` have behavioral contracts defined by the HTML spec (keyboard action, focus management, form submission, implicit ARIA roles). The doc must warn that using `as` to render one of these elements does not cause the part to fulfil the behavioral contract.
-3. **Clear statement that layout parts provide layout only, not action behavior.** For layout primitives (Stack, Flex, Box, Grid, Inline), the doc must state that the part provides spatial grouping only. It does not add keyboard handling, focus management, or ARIA state tied to the chosen element.
-
-**Rationale:** When a part renders as a `<nav>` or `<form>`, assistive technology users expect the landmark or widget behavior that comes with that element. If the part only provides layout, the gap between what is announced and what is delivered creates a roadblock.
-
-**Applies to:** Stack, Flex, Box, Card, Button, Heading, Text, and any future part with an `as` prop.
-
-### 1.2 Landmark labeling requirement
-
-**Derives from:** WCAG 1.3.1 Info and Relationships (Level A); WCAG 2.4.1 Bypass Blocks (Level A).
-
-**Rule:** Every part that can render as a landmark element must document the labeling needs for that element:
-
-| Element | Labeling requirement |
-| --- | --- |
-| `<nav>` | Requires `aria-label` when more than one `<nav>` exists on the same page. Without a label, screen readers list many "navigation" landmarks with no way to tell them apart. |
-| `<section>` | Requires an accessible name (a heading child or `aria-label`) to count as a landmark. Without one, `<section>` is the same as `<div>`. |
-| `<main>` | Should appear once per page. Multiple `<main>` elements confuse the landmark hierarchy. |
-| `<aside>` | Should have `aria-label` when the role of the aside is not obvious from context. |
-| `<header>`, `<footer>` | When nested inside `<main>`, `<section>`, or `<article>`, they scope to that region. The doc should note that page-level `<header>` and `<footer>` act as page-level landmarks (`banner` and `contentinfo`). |
-| `<form>` | Requires an accessible name via `aria-label`, `aria-labelledby`, or a visible heading. Without one, the form landmark is unlabeled. |
-
-**Minimum landmark set.** Every page built with Sanity UI must have at least one `<main>` landmark. A Studio-style layout should also include a `<nav>` for the sidebar and an `<aside>` for any inspector panel. Without landmarks, screen reader users have no structural cues. They experience the page as a flat list of elements.
-
-**Applies to:** Stack, Flex, Box, Card, and the layouts doc (Navigation sidebar, Content, Review sidebar map to `<nav>`, `<main>`, `<aside>`).
-
-### 1.3 WebKit list-style-none remediation
-
-**Derives from:** WCAG 1.3.1 Info and Relationships (Level A).
-
-**Rule:** Any part that renders `<ul>` or `<ol>` and is likely to have `list-style: none` applied must document the need for `role="list"` on the list element. This applies whether the part itself or a common CSS reset adds the style.
-
-**Rationale:** WebKit (Safari, all iOS browsers) strips list semantics from `<ul>` and `<ol>` elements when `list-style: none` is applied. VoiceOver does not announce the element as a list and does not report the item count. Adding `role="list"` restores the expected behavior. This is a known WebKit design choice, not a bug, and it is not likely to change.
-
-**Added rule:** The doc must state that each child of a list must be an `<li>` element. Using `<div>` children inside `<ul>` or `<ol>` produces invalid HTML no matter what `role` is set.
-
-**Applies to:** Stack (with `as="ul"` or `as="ol"`), Menu (renders a list of items), and any future part that renders ordered or unordered lists.
-
-### 1.4 Semantic elements carry behavioral contracts
-
-**Derives from:** WCAG 4.1.2 Name, Role, Value (Level A).
-
-**Rule:** When a layout or structural part allows rendering as a key HTML element — `<button>`, `<dialog>`, `<form>`, `<fieldset>`, `<details>`, `<summary>`, `<select>` — the doc must state one of:
-
-1. **The part fulfils the behavioral contract**, including all keyboard action, focus management, and implicit ARIA semantics defined by the HTML spec for that element. _or_
-2. **The part does NOT fulfil the behavioral contract**, and builders should use the matching part (Button, Dialog, etc.) instead. The doc must warn against using `as` for these elements. It must explain the result: the element will announce its role to assistive technology but will not behave as expected. This is worse than having no role at all.
-
-**Applies to:** Stack, Flex, Box, Card, and any part with an `as` prop that accepts key behavioral elements.
-
----
-
-## 2. Keyboard interaction
-
-### 2.1 Keyboard interaction model documentation
-
-**Derives from:** WCAG 2.1.1 Keyboard (Level A); WAI-ARIA APG interaction patterns.
-
-**Rule:** Every interactive part must document its full keyboard interaction model. "Ensure the component is keyboard accessible" is not guidance — it is a goal statement. The doc must specify:
-
-1. Which keys activate the part (Enter, Space, or both — and the gap in behavior between them).
-2. Which keys navigate within the component (Arrow keys, Tab, Home, End).
-3. Edge behavior: what happens when the user moves past the first or last item (wrap vs. stop).
-4. What happens when the component is disabled: is it removed from the tab order (`tabindex="-1"`) or focusable but inert (`aria-disabled="true"`)?
-5. What keyboard shortcuts exist and whether they conflict with other components on the same page.
-
-**Applies to:** Button, Menu, MenuItem, MenuGroup, Popover, Tooltip, and any future interactive part. Layout primitives (Stack, Flex, Box) are exempt unless they render as interactive elements via `as`.
-
-### 2.2 Visual-to-DOM order consistency
-
-**Derives from:** WCAG 1.3.2 Meaningful Sequence (Level A); WCAG 2.4.3 Focus Order (Level A).
-
-**Rule:** Layout parts must document whether visual order matches DOM order. The doc must warn against CSS properties that create gaps between visual display and DOM/focus order:
-
-- `order` (Flexbox and Grid)
-- `flex-direction: row-reverse` and `flex-direction: column-reverse`
-- Grid placement (`grid-row`, `grid-column`) that reorders items from source order
-
-**Rationale:** Screen readers traverse the DOM in source order. Keyboard focus follows DOM order by default. When visual order splits from DOM order, sighted keyboard users see focus jump in odd ways. Screen reader users hear content in a sequence that does not match the visual layout. Both groups lose their place.
-
-**The doc must state:** "Do not use CSS `order`, reverse flex directions, or grid placement to reorder children. If visual reordering cannot be avoided, document the mismatch and ensure the DOM order produces a logical reading sequence."
-
-**Applies to:** Stack, Flex, Grid, Inline, Box, and the layouts doc.
-
----
-
-## 3. Focus management
-
-### 3.1 Focus management for overlays
-
-**Derives from:** WCAG 2.4.3 Focus Order (Level A); APG Dialog (Modal) pattern.
-
-**Rule:** Every part that opens an overlay (dialog, popover, menu, tooltip panel, sheet) must document:
-
-1. **Where focus moves when the overlay opens.** Name the target: the first focusable element, the overlay container, a given element, or no movement.
-2. **Where focus returns when the overlay closes.** Default: focus returns to the trigger element. If the trigger no longer exists, the doc must specify the fallback.
-3. **Whether the overlay traps focus.** Modal overlays must trap focus. Non-modal overlays must not.
-4. **How Escape key closing works with focus.** Pressing Escape should close the overlay and return focus to the trigger.
-
-**Applies to:** Popover, Menu (via MenuButton), Dialog, Tooltip (focus-triggered), and any future overlay part. Also applies to the layouts doc sidebar show/hide behavior.
-
-### 3.2 Focus management for sidebar visibility
-
-**Derives from:** WCAG 2.4.3 Focus Order (Level A); WCAG 2.4.7 Focus Visible (Level AA).
-
-**Rule:** When a sidebar or panel is shown or hidden:
-
-1. **On show:** Focus should move to the first focusable element inside the sidebar.
-2. **On hide:** Focus should return to the toggle button that triggered the close.
-3. **Hidden content must be removed from tab order.** A hidden sidebar must not contain focusable elements that keyboard users can reach.
-
-**Applies to:** The layouts doc (Navigation sidebar toggle, Inspection sidebar toggle).
-
----
-
-## 4. ARIA conventions
-
-### 4.1 Trigger-state ARIA for expandable controls
-
-**Derives from:** WCAG 4.1.2 Name, Role, Value (Level A).
-
-**Rule:** Every trigger element that opens a popup, overlay, or expandable region must have:
-
-1. `aria-expanded` set to `true` (open) or `false` (closed).
-2. `aria-haspopup` set to the type of popup it owns (`menu`, `listbox`, `dialog`, `grid`, or `tree`). The default value `true` maps to `menu` — do not use `true` unless the popup is in fact a menu.
-
-**Common mistake.** `aria-haspopup="true"` is not a safe default. The value `true` is an alias for `"menu"`. Screen readers announce "has popup menu." If the popup is a dialog, a listbox, or a custom panel, the wrong type misleads users. Always set the value that matches the popup content.
-
-**Known Sanity UI issue.** The `MenuButton` component emits `aria-haspopup="true"` in its rendered output. This is a bug in the library — it should emit `aria-haspopup="menu"`. You cannot override this through props. Automated tests will flag it. Do not spend time trying to fix it in your code. It requires a fix in `@sanity/ui` itself.
-
-**Applies to:** Menu (via MenuButton), Popover, and any future disclosure or expandable part.
-
-### 4.2 Disabled state strategy
-
-**Derives from:** WCAG 4.1.2 Name, Role, Value (Level A); WCAG 2.1.1 Keyboard (Level A).
-
-**Rule:** The design system must use a uniform approach for disabled interactive elements:
-
-- **HTML `disabled` attribute** removes the element from tab order and blocks all action. Use for form controls where the disabled state is short-lived and the user does not need to find the element.
-- **`aria-disabled="true"`** keeps the element focusable and findable but blocks activation. Use when the user needs to know the element exists and understand why it is not available.
-
-The current pattern across the system (Button, Menu, layouts) is to use HTML `disabled`, which removes elements from tab order. The docs must state this and warn that tooltips on disabled elements cannot be reached by keyboard users.
-
-**Applies to:** Button, MenuItem, and any future interactive part with a disabled state.
-
-### 4.3 Live region announcement patterns
-
-**Derives from:** WCAG 4.1.3 Status Messages (Level AA).
-
-**Rule:**
-
-- Status changes (loading complete, item count updates, filter results) use `aria-live="polite"`.
-- Error messages and urgent alerts use `aria-live="assertive"`.
-- Loading states use `aria-busy="true"` on the container.
-
-**Applies to:** Button (loading state), Toast/notice patterns, form checking, and any part that updates content in real time.
-
----
-
-## 5. Screen reader behavior
-
-### 5.1 Accessible names for interactive elements
-
-**Derives from:** WCAG 4.1.2 Name, Role, Value (Level A); WCAG 1.1.1 Non-text Content (Level A).
-
-**Rule:** Every interactive element must have an accessible name that can be found by code.
-
-- Buttons with visible text labels derive their name from the text.
-- Icon-only buttons must have `aria-label` (preferred) or `aria-labelledby`. Passing a `tooltip` prop does not set an accessible name. You must also pass `aria-label`.
-- Form inputs must be associated with a `<label>` element via `for`/`id` or wrapping. A `placeholder` attribute is not a label. Screen readers may read it, but it vanishes when the user types.
-- Tooltips must not repeat the `aria-label` of their trigger. If the trigger already has an accessible name, the tooltip should provide _extra_ context or be omitted.
-
-**Common mistake — icon-only buttons.** When you pass `icon={SomeIcon}` to Button without a `text` prop, the button has no accessible name. The `tooltip` prop renders visible hover text but does not set `aria-label`. You must add `aria-label` yourself. Without it, screen readers announce "button" with no context.
-
-**Common mistake — search inputs.** A text input with `placeholder="Search..."` has no label. Add a `<label>` element (visible or visually hidden) or set `aria-label="Search"` on the input.
-
-**Applies to:** Button, MenuItem, all form parts, Tooltip, and any future interactive element.
-
-### 5.2 Landmark structure for application layouts
-
-**Derives from:** WCAG 1.3.1 Info and Relationships (Level A); WCAG 2.4.1 Bypass Blocks (Level A).
-
-**Rule:** Application layouts must map their regions to HTML landmarks:
-
-| Layout region | Landmark element | Labeling |
-| --- | --- | --- |
-| Navigation sidebar | `<nav>` | `aria-label` required (e.g., "Application navigation") |
-| Content area | `<main>` | One per page. No extra labeling needed. |
-| Review sidebar | `<aside>` | `aria-label` required (e.g., "Content inspector") |
-| Content toolbar | `<header>` (within `<main>`) | Scoped to `<main>`, no separate landmark. |
-
-**Rationale:** Screen reader users move through complex layouts via landmarks. Without landmarks, a multi-region layout is a flat sequence of elements with no cues about structure.
-
-**Applies to:** The layouts doc. Also applies to Stack, Flex, and Box when used to build layout regions.
-
----
-
-## 6. Contrast and color
-
-### 6.1 Color contrast ratios
-
-**Derives from:** WCAG 1.4.3 Contrast (Minimum) (Level AA); WCAG 1.4.11 Non-text Contrast (Level AA).
-
-**Rule:**
-
-- **Standard text** (below 24px regular / 19px bold): minimum 4.5:1 contrast ratio against background.
-- **Large text** (24px+ regular or 19px+ bold): minimum 3:1 contrast ratio against background.
-- **UI parts and graphic objects** (icons, borders, focus markers): minimum 3:1 contrast ratio against nearby colors.
-- **Disabled elements** are exempt from WCAG 1.4.11, but the doc should state the ratios and the waiver. Builders must not assume disabled states are held to the same standard.
-
-**Known theme contrast gap.** The default Sanity UI theme produces a contrast ratio of about 4.3:1 for white text on `tone="primary"` buttons in default mode. This is below the 4.5:1 AA threshold for standard-size text. Automated tests will flag it. To avoid the failure: use `tone="default"` for primary actions, or use `mode="ghost"` with `tone="primary"` (which renders dark text on a light tint and passes AA). Do not use `tone="primary"` with `mode="default"` for buttons with standard-size text labels.
-
-**Applies to:** Button, Card, Heading, Text, color system doc, and any component that specifies colors.
-
-### 6.2 Color independence
-
-**Derives from:** WCAG 1.4.1 Use of Color (Level A).
-
-**Rule:** Color must never be the sole means of sharing meaning. Every use of semantic color — `positive`, `caution`, `critical`, `primary` — must be paired with a non-color sign: an icon, a text label, a pattern, or a shape change.
-
-**Applies to:** Button (tone prop), Card (tone prop), color system doc, MenuItem (tone prop), and any part that uses semantic color.
-
----
-
-## 7. Motion
-
-### 7.1 Reduced motion compliance
-
-**Derives from:** WCAG 2.3.3 Animation from Interactions (Level AAA, but treated as a baseline expectation in this design system).
-
-**Rule:** All animations and transitions must honor the `prefers-reduced-motion` media query. When the user has asked for reduced motion:
-
-- Transitions should be instant (0ms duration) or removed.
-- No animation should be required to understand a state change.
-- The `animate` prop on Tooltip and Popover must be noted as honoring this setting.
-
-**Custom CSS must also comply.** Sanity UI's built-in parts handle `prefers-reduced-motion` in their own styles. But any CSS you add — hover transitions, fade-ins, loading spinners — must include the media query.
-
-**Known Sanity UI gap.** Sanity UI Button and other interactive parts apply `transition-duration: 0.1s` for hover and focus state changes through styled-components. These transitions do not respect `prefers-reduced-motion` at the library level. You must add a global override to cancel them. Without this override, every Button on the page will fail the motion test.
-
-**Required global rule.** Add this to your main CSS file (e.g. `index.css` or `styles.css`). Import it in your entry point. This is not optional — include it in every project that uses Sanity UI:
-
-```css
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
-  }
-}
-```
-
-Without this rule, Sanity UI's own 0.1s hover transitions on Button, MenuButton, and other parts will still run when users ask for reduced motion.
-
-**Applies to:** Every project that uses Sanity UI. Also applies to Tooltip, Popover, sidebar transitions, and any custom CSS with transitions or animations.
-
----
-
-## 8. Touch targets
-
-### 8.1 Minimum target size
-
-**Derives from:** WCAG 2.5.8 Target Size (Minimum) (Level AA).
-
-**Rule:** All interactive targets must meet a minimum size of 24×24 CSS pixels. Inline links within text are exempt. The layouts doc states this requirement for touch-based interfaces; it applies universally.
-
-**Enhanced target (Level AAA):** WCAG 2.5.5 Target Size (Enhanced) suggests 44×44 CSS pixels. The design system should state which level it targets and measure to match.
-
-**Applies to:** Button, MenuItem, all form controls, inline action icons, sidebar toggle buttons, and any future interactive part.
-
----
-
-## 9. Heading hierarchy
-
-### 9.1 Configurable heading levels
-
-**Derives from:** WCAG 1.3.1 Info and Relationships (Level A); WCAG 2.4.6 Headings and Labels (Level AA).
-
-**Rule:** Parts that render headings must accept a heading level set via the `as` prop (e.g., `as="h2"`, `as="h3"`). No part may hardcode a heading level. The doc must:
-
-1. State that the default rendering is a `<div>`, which provides no semantic value.
-2. Instruct implementers to always set `as` to an appropriate `<h1>`–`<h6>` tag.
-3. Warn against skipping heading levels (e.g., `<h1>` to `<h3>`) for visual sizing. Use the `size` prop for visual sizing and `as` for semantic level.
-
-**Every page must have at least one heading.** Headings give screen reader users an outline of the page. A page with zero headings forces users to read every element in sequence. Use `<Heading as="h1">` for the page title and `<Heading as="h2">` for each major section.
-
-**Common mistake.** The Heading part renders as a `<div>` by default. If you write `<Heading size={2}>Page Title</Heading>`, the text looks like a heading but has no heading role. Always set `as`: `<Heading as="h1" size={2}>Page Title</Heading>`.
-
-**Applies to:** Heading. Also applies to Card (content hierarchy guidance) and any part that contains heading content.
-
----
-
-## 10. Conformance audit
-
-This section audits each current part doc against each standard. Status values:
-
-- **Conforms** — the doc meets the standard.
-- **Partial** — the doc addresses part of the standard but has gaps.
-- **Violates** — the doc breaks or omits the standard in a way that would lead to unusable results.
-- **N/A** — the standard does not apply to this part.
-
-### 10.1 Standard 1.1 — Semantic element selection guidance for polymorphic components
-
-| Document | Status | Notes |
-| --- | --- | --- |
-| stack.md | **Conforms** | Lists decision criteria for each `as` value, warns against behavioral elements (`button`, `dialog`), and states that Stack provides layout only. |
-| box.md | **Violates** | Has an `as` prop (implied by usage as lowest-level building block) but has no accessibility section. No guidance on semantic element choice, no warnings about behavioral elements. |
-| flex.md | **Violates** | Has an `as` prop (implied by layout primitive role) but has no accessibility section at all. No semantic element guidance. |
-| card.md | **Partial** | Mentions `as="section"` and `as="article"` for landmarks. Mentions `as="button"` for interactive cards. Does not warn against using `as` for elements whose behavioral contract Card does not fulfil (e.g., `<dialog>`, `<form>`, `<fieldset>`). Does not state that Card is a layout/surface primitive, not a behavioral part. |
-| button.md | **Partial** | Documents `as="a"` for rendering as a link. Does not document what happens to keyboard interaction when `as` changes the element. Does not warn against `as` values that conflict with button behavior. |
-| heading.md | **Conforms** | Documents `as` for setting heading level. Warns against relying on default `<div>`. The `as` prop here is for semantic heading levels, not polymorphic element choice. |
-| text.md | **Partial** | Mentions `as="p"` for semantic structure but does not list other accepted values or warn about behavioral elements. |
-| tooltip.md | **N/A** | Does not expose `as`. |
-| popover.md | **N/A** | Does not expose `as`. |
-| menu.md | **N/A** | Uses specific ARIA roles, not polymorphic rendering. |
-| layouts.md | **N/A** | System-level layout doc, not a component with `as`. |
-
-### 10.2 Standard 1.2 — Landmark labeling requirement
-
-| Document | Status | Notes |
-| --- | --- | --- |
-| stack.md | **Conforms** | Documents `aria-label` for `<nav>`, accessible name requirement for `<section>`, and `<legend>` for `<fieldset>`. |
-| box.md | **Violates** | No accessibility section. No landmark labeling guidance despite being usable as any element via `as`. |
-| flex.md | **Violates** | No accessibility section. No landmark labeling guidance. |
-| card.md | **Partial** | Mentions landmarks for `as="section"` and `as="article"` but does not document the labeling requirements (e.g., `<section>` needs an accessible name to register as a landmark). |
-| button.md | **N/A** | Button does not render landmarks. |
-| heading.md | **N/A** | Heading does not render landmarks. |
-| text.md | **N/A** | Text does not render landmarks. |
-| tooltip.md | **N/A** | No landmark rendering. |
-| popover.md | **N/A** | Popover content may need ARIA role but not landmark labeling. |
-| menu.md | **N/A** | Menu uses `role="menu"`, not landmarks. |
-| layouts.md | **Violates** | Describes Navigation sidebar, Content area, and Inspection sidebar but never specifies the landmark elements (`<nav>`, `<main>`, `<aside>`) or their labeling requirements. The doc mentions `<Column />` components but not their semantic role. |
-
-### 10.3 Standard 1.3 — WebKit list-style-none remediation
-
-| Document | Status | Notes |
-| --- | --- | --- |
-| stack.md | **Conforms** | Documents `role="list"` requirement for `as="ul"` and `as="ol"`. Explains the WebKit behavior and VoiceOver impact. Includes code example. |
-| box.md | **Violates** | Box can render as `<ul>`/`<ol>` but has no accessibility section and no list remediation guidance. |
-| flex.md | **Violates** | Flex can render as `<ul>`/`<ol>` but has no accessibility section. |
-| menu.md | **Partial** | Menu renders list-like content. The doc states ARIA roles are handled automatically (`role="menu"`, `role="menuitem"`) which sidesteps the list issue, but does not explain why `role="list"` is not needed (because `role="menu"` replaces list semantics). |
-| card.md | **N/A** | Card does not typically render lists. |
-| button.md | **N/A** | |
-| heading.md | **N/A** | |
-| text.md | **N/A** | |
-| tooltip.md | **N/A** | |
-| popover.md | **N/A** | |
-| layouts.md | **N/A** | |
-
-### 10.4 Standard 1.4 — Semantic elements carry behavioral contracts
-
-| Document | Status | Notes |
-| --- | --- | --- |
-| stack.md | **Conforms** | Explicitly warns against `as="button"`, `as="dialog"`, `as="select"`. States that Stack provides layout, not behavior. |
-| box.md | **Violates** | "Don't add onClick to Box" is the only warning. No mention of behavioral element contracts. |
-| flex.md | **Violates** | No accessibility section. No behavioral contract warnings. |
-| card.md | **Partial** | Warns against using Card as a button ("use the Button part for interactive actions to ensure full keyboard access and semantic fit"). But the doc also describes interactive Card patterns (clickable, `tabindex`, `Enter`/`Space`) without stating whether Card fulfils the `<button>` behavioral contract. |
-| button.md | **N/A** | Button itself is the behavioral element. |
-| heading.md | **N/A** | |
-| text.md | **N/A** | |
-| tooltip.md | **N/A** | |
-| popover.md | **N/A** | |
-| menu.md | **N/A** | |
-| layouts.md | **N/A** | |
-
-### 10.5 Standard 2.2 — Visual-to-DOM order consistency
-
-| Document | Status | Notes |
-| --- | --- | --- |
-| stack.md | **Conforms** | Explicitly warns against CSS `order`. States that visual order and DOM order match by default. Cites WCAG 1.3.2. |
-| flex.md | **Violates** | No accessibility section. Flex is the component most likely to use `flex-direction: row-reverse` or `order`, and the doc says nothing about the accessibility impact. |
-| box.md | **Violates** | No accessibility section. No order-consistency guidance. |
-| card.md | **N/A** | Card is a container, not a layout reordering tool. |
-| button.md | **N/A** | |
-| heading.md | **N/A** | |
-| text.md | **N/A** | |
-| tooltip.md | **N/A** | |
-| popover.md | **N/A** | |
-| menu.md | **N/A** | |
-| layouts.md | **Partial** | States that the three layout sections "sit side by side along the inline axis" and "this order never changes," which implies DOM order holds. But does not warn against CSS reordering or cite the WCAG criteria. |
-
-### 10.6 Standard 2.1 — Keyboard interaction model documentation
-
-| Document | Status | Notes |
-| --- | --- | --- |
-| button.md | **Partial** | States Tab for focus, Enter and Space to activate. Does not describe Space-specific behavior (activate on keyup, prevent scroll on keydown). Does not describe disabled keyboard behavior (removed from tab order). |
-| menu.md | **Conforms** | Documents Enter, Space, Arrow keys, Escape. Documents boundary behavior (ArrowDown opens, ArrowUp focuses last). Documents focus restoration on Escape. |
-| popover.md | **Partial** | Documents Escape to dismiss and focus restoration. Does not document Tab behavior within the popover or whether it traps focus. |
-| tooltip.md | **Partial** | Documents keyboard focus trigger and Escape to dismiss. Does not document Tab behavior or what happens when focus leaves the trigger. |
-| card.md | **Partial** | Mentions Enter and Space for interactive cards, but does not describe Tab behavior or what happens when Card is not interactive. |
-| stack.md | **N/A** | Layout primitive, not interactive by default. |
-| box.md | **N/A** | Layout primitive. |
-| flex.md | **N/A** | Layout primitive. |
-| heading.md | **N/A** | |
-| text.md | **N/A** | |
-| layouts.md | **Partial** | Documents keyboard shortcuts for sidebar toggling (`[` and `]`) and focus management on open/close. Does not specify what happens when shortcuts conflict with other components. |
-
-### 10.7 Standard 3.1 — Focus management for overlays
-
-| Document | Status | Notes |
-| --- | --- | --- |
-| popover.md | **Partial** | States focus moves into popover on open and returns to trigger on close. Does not state whether focus is trapped or where focus lands inside the popover. |
-| menu.md | **Conforms** | Documents that menu acts as a focus trap. Documents Escape restoring focus to trigger. Documents focus placement on first/last item depending on key used. |
-| tooltip.md | **N/A** | Tooltips are not interactive overlays — they do not receive focus. |
-| button.md | **N/A** | Button is a trigger, not an overlay. |
-| card.md | **N/A** | |
-| stack.md | **N/A** | |
-| box.md | **N/A** | |
-| flex.md | **N/A** | |
-| heading.md | **N/A** | |
-| text.md | **N/A** | |
-| layouts.md | **Conforms** | Documents focus management for sidebar show/hide: focus moves to first focusable element on show, returns to toggle on hide, hidden content removed from tab order. |
-
-### 10.8 Standard 4.2 — Disabled state strategy
-
-| Document | Status | Notes |
-| --- | --- | --- |
-| button.md | **Partial** | States disabled buttons are removed from tab order. Warns against tooltips on disabled buttons. Does not mention `aria-disabled` as an option for findable-but-inert states. |
-| menu.md | **N/A** | Does not document disabled MenuItems. |
-| tooltip.md | **Conforms** | Explicitly states never to attach tooltips to disabled elements. |
-| card.md | **N/A** | Card disabled behavior not documented. |
-| layouts.md | **Partial** | Warns against tooltips on disabled buttons in the action guidelines. Suggests giving context via nearby messages. Does not discuss the HTML `disabled` vs. `aria-disabled` contrast. |
-| stack.md | **N/A** | |
-| box.md | **N/A** | |
-| flex.md | **N/A** | |
-| heading.md | **N/A** | |
-| text.md | **N/A** | |
-| popover.md | **N/A** | |
-
-### 10.9 Standard 5.1 — Accessible names for interactive elements
-
-| Document | Status | Notes |
-| --- | --- | --- |
-| button.md | **Conforms** | Documents accessible name from `text` prop. Documents `aria-label` for icon-only buttons. |
-| menu.md | **Partial** | States ARIA roles are handled by default. Does not document accessible name source for MenuItems. |
-| tooltip.md | **Conforms** | States tooltip content should not redundantly repeat `aria-label`. |
-| popover.md | **Partial** | Mentions `aria-haspopup` and `aria-expanded` on the trigger but does not document an accessible name for the popover content. |
-| layouts.md | **Partial** | Specifies `aria-label` on sidebar toggle buttons ("Show navigation", "Hide inspector"). Does not document accessible names for other interactive elements in the layout. |
-| card.md | **Violates** | Describes interactive cards but does not document how they get an accessible name. A clickable card without an accessible name is read out as a plain container. |
-| stack.md | **N/A** | |
-| box.md | **N/A** | |
-| flex.md | **N/A** | |
-| heading.md | **N/A** | |
-| text.md | **N/A** | |
-
-### 10.10 Standard 6.1 — Color contrast ratios
-
-| Document | Status | Notes |
-| --- | --- | --- |
-| button.md | **Partial** | States 3:1 for button text against button background (cites 1.4.11). Should specify 4.5:1 for standard text per 1.4.3, with 3:1 for UI components per 1.4.11. The current wording conflates text contrast and non-text contrast. |
-| card.md | **Partial** | States 4.5:1 for nested custom components. Does not state ratios for Card's own tone colors. |
-| heading.md | **Conforms** | States 3:1 for large text and 4.5:1 for smaller text. |
-| text.md | **Conforms** | States 4.5:1 for standard text and 3:1 for large text. Warns about `muted` and `accent` on non-standard backgrounds. |
-| color.md | **Conforms** | States 4.5:1 for standard text, 3:1 for large text, 3:1 for UI components. |
-| tooltip.md | **N/A** | Inherits from Card/theme. |
-| popover.md | **N/A** | Inherits from Card/theme. |
-| menu.md | **N/A** | Does not document contrast. |
-| stack.md | **N/A** | Layout primitive, no color. |
-| box.md | **N/A** | |
-| flex.md | **N/A** | |
-| layouts.md | **N/A** | |
-
-### 10.11 Standard 6.2 — Color independence
-
-| Document | Status | Notes |
-| --- | --- | --- |
-| button.md | **Conforms** | Multiple mentions of pairing tone with icons. "Don't rely on color alone." |
-| card.md | **Conforms** | States semantic tones should pair with icons. "Don't rely on color alone." |
-| color.md | **Conforms** | "Never rely on color alone to convey meaning." |
-| text.md | **Conforms** | "Don't rely on color or the `accent` prop to draw focus." |
-| heading.md | **N/A** | Heading does not use semantic color. |
-| menu.md | **Partial** | Uses `tone="critical"` on harmful-action items. Does not state to pair with an icon, though the layouts doc does for such actions. |
-| tooltip.md | **N/A** | |
-| popover.md | **N/A** | |
-| stack.md | **N/A** | |
-| box.md | **N/A** | |
-| flex.md | **N/A** | |
-| layouts.md | **Conforms** | States destructive actions should use `tone="critical"` with `ErrorOutlineIcon`. |
-
-### 10.12 Standard 7.1 — Reduced motion compliance
-
-| Document | Status | Notes |
-| --- | --- | --- |
-| tooltip.md | **Conforms** | States `animate` respects `prefers-reduced-motion`. |
-| popover.md | **Conforms** | States `animate` respects `prefers-reduced-motion`. |
-| layouts.md | **Conforms** | States sidebars appear at once when reduced motion is on. |
-| button.md | **N/A** | No animation props. |
-| card.md | **N/A** | |
-| heading.md | **N/A** | |
-| text.md | **N/A** | |
-| menu.md | **N/A** | |
-| stack.md | **N/A** | |
-| box.md | **N/A** | |
-| flex.md | **N/A** | |
-
-### 10.13 Standard 8.1 — Minimum target size
-
-| Document | Status | Notes |
-| --- | --- | --- |
-| button.md | **Partial** | Documents padding values that produce specific rendered sizes. Does not state minimum target size or cite WCAG 2.5.8. |
-| layouts.md | **Partial** | States 24×24px minimum for touch interfaces. Does not cite WCAG 2.5.8. Does not apply the minimum to all interactive targets — only to "touch-based interfaces." The standard applies universally. |
-| menu.md | **N/A** | Does not document target sizes. |
-| tooltip.md | **N/A** | Tooltip is not a target. |
-| popover.md | **N/A** | |
-| card.md | **N/A** | |
-| heading.md | **N/A** | |
-| text.md | **N/A** | |
-| stack.md | **N/A** | |
-| box.md | **N/A** | |
-| flex.md | **N/A** | |
-
-### 10.14 Standard 9.1 — Configurable heading levels
-
-| Document | Status | Notes |
-| --- | --- | --- |
-| heading.md | **Conforms** | Documents `as` for heading level. Warns against default `<div>`. Warns against skipping levels. Recommends `size` for visual sizing. |
-| card.md | **Partial** | Content guidelines mention heading hierarchy ("do not start with an H1 inside a card if the page already has a main title"). They do not cite the Heading `as` prop or this standard. |
-| button.md | **N/A** | |
-| text.md | **N/A** | |
-| tooltip.md | **N/A** | |
-| popover.md | **N/A** | |
-| menu.md | **N/A** | |
-| stack.md | **N/A** | |
-| box.md | **N/A** | |
-| flex.md | **N/A** | |
-| layouts.md | **N/A** | Does not mention heading hierarchy for layout regions. |
-
-### 10.15 Spacing scale and text reflow compatibility
-
-**Derives from:** WCAG 1.4.12 Text Spacing (Level AA); WCAG 1.4.10 Reflow (Level AA).
-
-**Rule:** Spacing tokens must use relative units (`rem` or `em`), not fixed `px`. This lets spacing scale with user font-size preferences. Layout components must confirm behavior at 400% zoom / 320px equivalent viewport width. Content must reflow into a single column without horizontal scrolling at 320 CSS px width.
-
-| Document | Status | Notes |
-| --- | --- | --- |
-| stack.md | **Conforms** | States spacing tokens use `rem`. States content reflows well on narrow screens. Cites WCAG 1.4.10 and 1.4.12. |
-| flex.md | **Violates** | No accessibility section. No mention of reflow or spacing units. |
-| box.md | **Violates** | No accessibility section. No mention of reflow. |
-| card.md | **N/A** | Card inherits spacing from children. |
-| button.md | **N/A** | Button sizes are controlled by the component. |
-| heading.md | **Partial** | Mentions scaling but does not cite WCAG 1.4.10 or 1.4.12. |
-| text.md | **Partial** | "Ensure text remains legible when the browser is zoomed up to 200%." This is weaker than the 400% / 320px standard in WCAG 1.4.10. Does not mention spacing units. |
-| tooltip.md | **N/A** | |
-| popover.md | **N/A** | |
-| menu.md | **N/A** | |
-| layouts.md | **Partial** | Responsiveness section discusses device adaptation but does not reference WCAG 1.4.10 or test at 320px. |
-
----
-
-## 11. Cross-component patterns
-
-### 11.1 Polymorphic `as` prop accessibility pattern
-
-**Components:** Stack, Flex, Box, Card, Button, Heading, Text.
-
-**Pattern:** Many parts expose an `as` prop that changes the rendered HTML element. The access needs are the same across all of them: the rendered element sets the ARIA role, the landmark status, and the behavioral contract.
-
-**Current state:** Stack documents this pattern in full. Heading documents it for heading levels. Button documents it for `as="a"`. Card partly documents it. Box, Flex, and Text do not document it at all.
-
-**Target state:** Every part with `as` should cite standards 1.1, 1.2, and 1.4 from this document and give part-level guidance for which `as` values are fitting.
-
-### 11.2 List rendering pattern
-
-**Components:** Stack (with `as="ul"`/`as="ol"`), Menu, Autocomplete (future).
-
-**Pattern:** Parts that render `<ul>` or `<ol>` need `role="list"` to preserve VoiceOver semantics when `list-style: none` is applied. Parts that render `role="menu"` do not need this fix because the menu role replaces list semantics.
-
-**Current state:** Stack documents this well. Menu handles it through ARIA roles but does not explain the contrast. Box and Flex could render lists but have no guidance.
-
-### 11.3 Layout-and-reflow pattern
-
-**Components:** Stack, Flex, Grid, Inline, Box, and all layout primitives.
-
-**Pattern:** Layout parts must confirm three things: (a) spacing tokens use `rem`, (b) content reflows at 320px viewport width, and (c) visual order matches DOM order.
-
-**320px viewport.** A 320px viewport simulates 400% zoom on a 1280px screen (WCAG 1.4.10 AA). Layouts that use fixed-width sidebars, rigid grids, or `nowrap` flex containers will overflow. Design layouts to collapse into a single column at narrow widths. Use `Flex` with `wrap="wrap"` and avoid fixed `px` widths on containers.
-
-**Common mistake — fixed sidebar layout.** The most common reflow failure is a `Flex` container with `style={{ height: '100vh' }}` that holds a fixed-width sidebar Card and a `flex={1}` content Card. At 320px, the sidebar alone exceeds the viewport width. Fix: use `Flex` with `direction={['column', 'column', 'row']}`. The layout then stacks on small screens. Or use CSS `@media (max-width: 600px)` to hide the sidebar and show a hamburger toggle.
-
-**Common mistake — toolbar buttons.** A row of buttons in a toolbar that does not wrap will overflow at 320px. Use `Flex wrap="wrap" gap={2}`. Buttons then flow to a new line when the viewport narrows.
-
-**Current state:** Stack documents all three. Flex and Box document none.
-
-### 11.4 Overlay focus management pattern
-
-**Components:** Popover, Menu (via MenuButton), Dialog, sidebar show/hide in layouts.
-
-**Pattern:** Every overlay follows the same lifecycle: open → move focus into overlay → trap or scope focus → close → restore focus to trigger. The details vary (menus trap focus; non-modal popovers do not), but the pattern is shared.
-
-**Current state:** Menu documents this in full. Popover documents it in part (no focus trap detail). Layouts documents it for sidebars. No shared write-up exists.
-
-### 11.5 Disabled element and tooltip pattern
-
-**Components:** Button, Menu, Card (interactive), layouts (action buttons).
-
-**Pattern:** Disabled elements are removed from tab order (HTML `disabled`). Tooltips on disabled elements cannot be reached by keyboard users. When an element is disabled, provide context through nearby text, status messages, or info icons — not tooltips.
-
-**Current state:** Button, Tooltip, and layouts all state this rule independently with slightly different wording. The rule should be stated once here and referenced from each doc.
-
-### 11.6 Color-and-icon pairing for semantic tones
-
-**Components:** Button, Card, MenuItem, layouts (action buttons).
-
-**Pattern:** Semantic tones (`positive`, `caution`, `critical`) must be paired with a matching icon. Button docs pair tones with set icons (`CheckmarkIcon`, `WarningOutlineIcon`, `ErrorOutlineIcon`). Card docs state the rule. Menu docs and layouts docs partly state it.
-
-**Current state:** Uneven. Button and layouts are thorough. Menu mentions `tone="critical"` but does not pair it with an icon note.
-
----
-
-## 12. Component docs to update
-
-This table lists the changes needed in existing component docs to bring them into conformance with the standards defined above. Changes are ordered by severity: violations first, then partial conformance.
-
-### Critical — no accessibility section exists
-
-| Document | Standard(s) | What needs to change |
-| --- | --- | --- |
-| box.md | 1.1, 1.2, 1.3, 1.4, 2.2, 10.15 | **Add an accessibility section.** Box is a core primitive with an `as` prop. Cover six areas: (a) element choice (1.1), (b) landmark labeling (1.2), (c) `role="list"` when `as="ul"` or `as="ol"` (1.3), (d) behavioral contract warnings (1.4), (e) visual-to-DOM order (2.2), (f) `rem` spacing and reflow (10.15). |
-| flex.md | 1.1, 1.2, 1.3, 1.4, 2.2, 10.15 | **Add an accessibility section.** Flex is a layout primitive with an `as` prop and is the part most likely to use `flex-direction: *-reverse` or CSS `order`. Cover all items listed for Box above, plus: (a) a warning against `flex-direction: row-reverse` and `column-reverse` per standard 2.2, (b) note that `order` on children breaks visual-to-DOM match, (c) reflow at 320px per standard 10.15. |
-
-### High — accessibility section exists but has significant gaps
-
-| Document | Standard(s) | What needs to change |
-| --- | --- | --- |
-| card.md | 1.1, 1.2, 1.4, 5.1 | (a) **Standard 1.1:** Add decision criteria for `as` values beyond `"section"` and `"article"`. List which elements Card accepts and the semantic meaning of each. (b) **Standard 1.2:** State that `as="section"` requires an accessible name (heading or `aria-label`) to count as a landmark. Now only says it "creates landmark regions" without the labeling rule. (c) **Standard 1.4:** Add a clear warning that Card does not fulfil the behavioral contract of `<button>`, `<dialog>`, `<form>`, or `<fieldset>`. The current text hints at this for `<button>` but does not state it for other elements. (d) **Standard 5.1:** Document how interactive (clickable) cards get an accessible name. A clickable card with only visual content is read out as a plain container. |
-| layouts.md | 1.2, 5.2, 2.2, 10.15 | (a) **Standard 1.2 / 5.2:** Add an accessibility section with the landmark map: Navigation sidebar = `<nav aria-label="...">`, Content = `<main>`, Review sidebar = `<aside aria-label="...">`. State labeling for each. (b) **Standard 2.2:** State that the inline-start → center → inline-end order must match DOM order. Warn against CSS reordering. Cite WCAG 1.3.2. (c) **Standard 10.15:** Add reflow guidance. State that layouts must work at 320px viewport width per WCAG 1.4.10 and link to the responsive section. |
-
-### Medium — accessibility section exists with minor gaps
-
-| Document | Standard(s) | What needs to change |
-| --- | --- | --- |
-| button.md | 1.1, 2.1, 4.2, 6.1, 8.1 | (a) **Standard 1.1:** Document what happens to keyboard action and ARIA when `as` changes the element (e.g., `as="a"` means Enter-only, not Space). (b) **Standard 2.1:** Add Space key detail (activate on keyup, prevent scroll). State that disabled buttons leave the tab order via HTML `disabled`. (c) **Standard 4.2:** Mention `aria-disabled="true"` as another approach when users must find the element. (d) **Standard 6.1:** Fix the contrast cite. Button text vs. background falls under WCAG 1.4.3 (4.5:1 for standard text). 1.4.11 (3:1) applies to the button's visual edge against nearby colors. (e) **Standard 8.1:** State the minimum target size (24×24 CSS px per WCAG 2.5.8) and confirm default padding meets it. |
-| popover.md | 3.1, 4.1, 5.1 | (a) **Standard 3.1:** State whether the popover traps focus (modal) or lets focus leave (non-modal). State where focus lands inside the popover. (b) **Standard 4.1:** Document `aria-haspopup` value — now says `"true"` which maps to `menu`. If the popover holds a dialog or listbox, the value should match. (c) **Standard 5.1:** Document how the popover content gets an accessible name (e.g., `role="dialog"` with `aria-label`). |
-| tooltip.md | 2.1 | **Standard 2.1:** Document what happens when focus leaves the trigger — does the tooltip close? Document Tab behavior (tooltip should not be a Tab stop; it should close on Tab away from trigger per APG Tooltip pattern). |
-| menu.md | 1.3, 6.2 | (a) **Standard 1.3:** Add a note that `role="menu"` replaces list semantics. `role="list"` is not needed and should not be added next to `role="menu"`. (b) **Standard 6.2:** State that `tone="critical"` MenuItems should pair with an icon (e.g., `ErrorOutlineIcon`) to meet the color independence standard. |
-| text.md | 1.1, 10.15 | (a) **Standard 1.1:** List the accepted `as` values and give guidance on when to use each (e.g., `as="p"` for paragraphs, `as="span"` for inline text). Warn against behavioral elements. (b) **Standard 10.15:** Update zoom guidance from "200%" to 400% zoom / 320px viewport width per WCAG 1.4.10. Note that spacing tokens should use `rem`. |
-| heading.md | 10.15 | **Standard 10.15:** Add a note that heading sizes should remain legible at 400% zoom / 320px viewport width per WCAG 1.4.10. Cite the success criterion. |
-
-### Low — conformant but could reference system standards
-
-| Document | Standard(s) | What needs to change |
-| --- | --- | --- |
-| stack.md | — | No changes needed. Stack meets all standards and was the source for most standards in this document. Future reviews may add a cross-link to this file. |
-
----
-
-## Accessibility checklist
-
-Use this checklist when reviewing a component doc or building a new component. Each item maps to a standard above. Check every item that applies to the component. Items marked with a WCAG level indicate the minimum conformance level.
-
-### Semantic structure
-
-- [ ] If the component has an `as` prop, the doc lists when to use each semantic element value (1.1, WCAG 1.3.1 A)
-- [ ] If the component has an `as` prop, the doc warns which elements carry behavioral contracts the component does not fulfil (1.4, WCAG 4.1.2 A)
-- [ ] If the component is a layout primitive, the doc states it provides layout only — no keyboard handling, focus management, or ARIA state (1.1)
-- [ ] If the component can render as `<nav>`, `<section>`, `<aside>`, `<form>`, `<header>`, or `<footer>`, the doc states the labeling requirement for each (1.2, WCAG 1.3.1 A)
-- [ ] If the component can render as `<nav>`, the doc states that `aria-label` is required when more than one `<nav>` exists on the page (1.2)
-- [ ] If the component can render as `<section>`, the doc states that an accessible name (heading or `aria-label`) is required for it to register as a landmark (1.2)
-- [ ] If the component renders `<ul>` or `<ol>`, the doc states that `role="list"` is needed when `list-style: none` is applied (1.3, WCAG 1.3.1 A)
-- [ ] If the component renders `<ul>` or `<ol>`, the doc states that children must be `<li>` elements (1.3)
-
-### Keyboard interaction
-
-- [ ] If the component is interactive, the doc specifies which keys activate it — Enter, Space, or both (2.1, WCAG 2.1.1 A)
-- [ ] If the component is interactive, the doc specifies which keys navigate within it — Arrow keys, Tab, Home, End (2.1)
-- [ ] If the component has internal navigation, the doc specifies edge behavior — wrap to start or stop at the end (2.1)
-- [ ] If the component has a disabled state, the doc states whether disabled removes it from tab order or keeps it focusable (2.1)
-- [ ] If the component is a layout primitive, the doc warns against CSS `order`, reverse flex directions, and grid reordering that break visual-to-DOM order (2.2, WCAG 1.3.2 A)
-
-### Focus management
-
-- [ ] If the component opens an overlay, the doc states where focus moves on open (3.1, WCAG 2.4.3 A)
-- [ ] If the component opens an overlay, the doc states where focus returns on close (3.1)
-- [ ] If the component opens a modal overlay, the doc states that focus is trapped inside the modal (3.1)
-- [ ] If the component opens an overlay, the doc states that Escape closes it and returns focus to the trigger (3.1)
-- [ ] If the component shows or hides a sidebar or panel, the doc states where focus moves on show and on hide (3.2)
-- [ ] If the component hides content, the doc states that hidden content is removed from tab order (3.2)
-
-### ARIA conventions
-
-- [ ] If the component triggers a popup or expandable region, the trigger has `aria-expanded` (true/false) documented (4.1, WCAG 4.1.2 A)
-- [ ] If the component triggers a popup, the trigger has `aria-haspopup` documented with the correct popup type — not bare `true` (4.1)
-- [ ] If the component has a disabled state, the doc states whether it uses HTML `disabled` or `aria-disabled="true"` and explains the trade-off (4.2)
-- [ ] If the component has a disabled state, the doc warns that tooltips on HTML-disabled elements cannot be reached by keyboard (4.2)
-- [ ] If the component updates content dynamically, the doc specifies the live region strategy — `aria-live="polite"` for status, `aria-live="assertive"` for errors (4.3, WCAG 4.1.3 AA)
-- [ ] If the component has a loading state, the doc states that `aria-busy="true"` is set on the container (4.3)
-
-### Screen reader behavior
-
-- [ ] Every interactive element has a documented accessible name source — visible text, `aria-label`, or `aria-labelledby` (5.1, WCAG 4.1.2 A)
-- [ ] Icon-only buttons have `aria-label` documented (5.1, WCAG 1.1.1 A)
-- [ ] Form inputs have label association documented — `<label>` via `for`/`id` or wrapping (5.1)
-- [ ] Tooltips do not repeat the trigger's `aria-label` (5.1)
-- [ ] If the component builds an application layout, the doc maps regions to landmarks — `<nav>`, `<main>`, `<aside>` — with labeling (5.2, WCAG 2.4.1 A)
-
-### Contrast and color
-
-- [ ] Standard text meets 4.5:1 contrast against its background (6.1, WCAG 1.4.3 AA)
-- [ ] Large text (24px+ regular or 19px+ bold) meets 3:1 contrast against its background (6.1, WCAG 1.4.3 AA)
-- [ ] UI components and graphical objects meet 3:1 contrast against adjacent colors (6.1, WCAG 1.4.11 AA)
-- [ ] If disabled elements have reduced contrast, the doc states the exemption from WCAG 1.4.11 (6.1)
-- [ ] Every use of semantic color (`positive`, `caution`, `critical`) is paired with a non-color indicator — icon, text label, or shape (6.2, WCAG 1.4.1 A)
-
-### Motion
-
-- [ ] All animations and transitions honor `prefers-reduced-motion` (7.1, WCAG 2.3.3 AAA — treated as baseline)
-- [ ] No animation is required to understand a state change (7.1)
-- [ ] If the component has an `animate` prop, the doc states it respects `prefers-reduced-motion` (7.1)
-
-### Touch targets
-
-- [ ] All interactive targets meet 24×24 CSS px minimum (8.1, WCAG 2.5.8 AA)
-- [ ] The doc states the target size and confirms it meets the minimum (8.1)
-- [ ] If the component is an inline link within text, the doc notes the inline exemption (8.1)
-
-### Heading hierarchy
-
-- [ ] If the component renders a heading, it accepts a heading level via `as` (`as="h2"`, `as="h3"`, etc.) (9.1, WCAG 1.3.1 A)
-- [ ] If the component renders a heading, the doc warns against skipping heading levels for visual sizing — use `size` for visuals, `as` for semantics (9.1)
-- [ ] If the component contains heading content, the doc states that heading levels must follow the page hierarchy (9.1, WCAG 2.4.6 AA)
-
-### Spacing and reflow
-
-- [ ] Spacing tokens use `rem` units. This lets them scale with user font-size settings (WCAG 1.4.12 AA)
-- [ ] The component works at 400% zoom / 320px viewport width without horizontal scrolling (WCAG 1.4.10 AA)
-- [ ] The component works when users override text spacing per WCAG 1.4.12 — line height 1.5×, paragraph spacing 2×, letter spacing 0.12×, word spacing 0.16× (WCAG 1.4.12 AA)
-
-### Cross-component patterns
-
-- [ ] If the component has a polymorphic `as` prop, all `as`-related accessibility guidance follows the shared pattern defined in standard 1.1 (11.1)
-- [ ] If the component renders a list, it follows the WebKit list remediation pattern — `role="list"` plus `<li>` children (11.2)
-- [ ] If the component is a layout primitive, it confirms visual order matches DOM order and documents reflow behavior (11.3)
-- [ ] If the component opens an overlay, it follows the shared overlay focus lifecycle — focus on open, restore on close, Escape to dismiss (11.4)
-- [ ] If the component has a disabled state and supports tooltips, the doc warns that HTML `disabled` blocks tooltip access for keyboard users (11.5)
-- [ ] If the component uses semantic tones, each tone is paired with a non-color indicator (11.6)
-
----
-
-## Implementation patterns
-
-This section provides code patterns that address the most common accessibility failures. These patterns come from automated test results across multiple AI-generated Sanity UI builds. Each pattern maps to a standard above and a WCAG criterion. Use these patterns as starting points, not as the only valid approach.
-
-### Page structure — landmarks and headings (§1.2, §5.2, §9.1)
-
-Every page must have landmarks and at least one heading. Without them, screen reader users cannot navigate by structure.
-
-**Minimum viable structure:**
-
-```jsx
-<ThemeProvider theme={theme}>
-  <Flex style={{ height: '100vh' }}>
-    {/* Sidebar navigation — landmark */}
-    <Card as="nav" aria-label="Main navigation" padding={3}>
-      <Stack space={3}>
-        <Heading as="h2" size={1}>Navigation</Heading>
-        {/* nav items */}
-      </Stack>
-    </Card>
-
-    {/* Content area — landmark */}
-    <Card as="main" flex={1} padding={4}>
-      <Heading as="h1" size={3}>Page Title</Heading>
-      {/* page content */}
-    </Card>
-  </Flex>
-</ThemeProvider>
-```
-
-**Why this fails without landmarks:** The test checks for `<main>`, `<nav>`, `<header>`, `<aside>`, or labeled `<section>`. A page that wraps everything in `<div>` elements has zero landmarks. Screen readers list "no landmarks found."
-
-**Why this fails without headings:** The test checks for `<h1>`–`<h6>` or `[role="heading"]`. A page that uses `<Text size={4}>` for titles creates large text with no heading role. Use `<Heading as="h1">` instead.
-
-### Icon-only buttons — accessible names (§5.1)
-
-Buttons with only an icon have no accessible name unless you add `aria-label`.
-
-```jsx
-/* ✗ Fails — no accessible name */
-<Button icon={SearchIcon} mode="bleed" />
-
-/* ✗ Fails — tooltip does not set aria-label */
-<Button icon={SearchIcon} mode="bleed" tooltip={{ content: 'Search' }} />
-
-/* ✓ Passes */
-<Button icon={SearchIcon} mode="bleed" aria-label="Search" />
-
-/* ✓ Passes — tooltip for sighted users + aria-label for screen readers */
-<Button
-  icon={SearchIcon}
-  mode="bleed"
-  aria-label="Search"
-  tooltip={{ content: 'Search' }}
-/>
-```
-
-Every icon-only button needs `aria-label`. The `tooltip` prop is for sighted hover text. It does not replace `aria-label`.
-
-### Form inputs — label association (§5.1)
-
-Inputs need a `<label>` or `aria-label`. A `placeholder` is not a label.
-
-```jsx
-/* ✗ Fails — placeholder is not a label */
-<TextInput placeholder="Search content..." />
-
-/* ✓ Passes — aria-label */
-<TextInput placeholder="Search content..." aria-label="Search content" />
-
-/* ✓ Passes — visible label with for/id */
-<Stack space={2}>
-  <Text as="label" htmlFor="search-input" size={1} weight="medium">
-    Search
-  </Text>
-  <TextInput id="search-input" placeholder="Search content..." />
-</Stack>
-```
-
-### MenuButton — aria-haspopup type (§4.1)
-
-The `aria-haspopup` attribute must name the popup type. Do not use `"true"`.
-
-```jsx
-/* ✗ Fails — "true" maps to "menu", misleads if popup is not a menu */
-<button aria-haspopup="true" aria-expanded={open}>Options</button>
-
-/* ✓ Passes — states the popup type */
-<MenuButton
-  id="options-menu"
-  button={<Button text="Options" />}
-  menu={<Menu>{/* items */}</Menu>}
-/>
-```
-
-**Known Sanity UI issue.** `MenuButton` emits `aria-haspopup="true"` in its rendered HTML. This is a bug — it should emit `"menu"`. You cannot fix this through props. Automated tests will flag every `MenuButton` instance. Accept this as a known gap until `@sanity/ui` ships a fix.
-
-When building a custom trigger outside of `MenuButton`, set the value yourself: `"menu"`, `"listbox"`, or `"dialog"`.
-
-### Reduced motion — global override (§7.1)
-
-Sanity UI Button, MenuButton, and other parts apply `transition-duration: 0.1s` for hover states through styled-components. These transitions do not respect `prefers-reduced-motion` at the library level. You must add a global override. **This is required in every project — not optional.**
-
-Create a CSS file (e.g. `src/reduced-motion.css`) and import it in your entry point:
-
-```css
-/* src/reduced-motion.css — REQUIRED for WCAG 2.3.3 compliance */
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
-  }
-}
-```
-
-Import it in your main entry file:
-
-```jsx
-// main.jsx or main.tsx
-import './reduced-motion.css'
-```
-
-Without this file, every Button and MenuButton on the page will fail the motion accessibility test because of its 0.1s hover transition.
-
-### Responsive layout — 320px reflow (§11.3, WCAG 1.4.10 AA)
-
-Layouts must work at 320px viewport width with no horizontal scrolling. This simulates 400% zoom. **Every iteration in automated testing fails this check.** The most common cause is a fixed-width sidebar that does not collapse.
-
-```jsx
-/* ✗ Fails — fixed sidebar + 100vh forces overflow at 320px */
-<Flex style={{ height: '100vh' }}>
-  <Card style={{ width: '250px' }} padding={3}>Sidebar</Card>
-  <Card flex={1} padding={4}>Content</Card>
-</Flex>
-
-/* ✓ Passes — stacks to single column on narrow screens */
-<Flex wrap="wrap" style={{ minHeight: '100vh' }}>
-  <Card
-    as="nav"
-    aria-label="Main navigation"
-    style={{ flex: '1 1 100%', maxWidth: '250px' }}
-    padding={3}
-  >
-    Sidebar
-  </Card>
-  <Card as="main" style={{ flex: '1 1 0', minWidth: 0 }} padding={4}>
-    Content
-  </Card>
-</Flex>
-```
-
-**Why `flex: '1 1 100%'` on the sidebar?** At narrow widths, the sidebar takes the full row and the content stacks below it. At wider widths, `maxWidth: '250px'` keeps the sidebar narrow while the content takes the rest.
-
-**Toolbar buttons.** A row of buttons that does not wrap will also overflow. Use `Flex wrap="wrap" gap={2}` for toolbars. Buttons then flow to a new line at narrow widths.
-
-**Test it.** Open browser DevTools, set the viewport to 320px wide, and confirm no horizontal scrollbar appears.
-
-### HTML lang attribute (WCAG 3.1.1 A)
-
-Every page must declare its language on `<html>`.
-
-```html
-<!DOCTYPE html>
-<html lang="en">
-  <head>...</head>
-  <body>...</body>
-</html>
-```
-
-In a Vite project, this is set in `index.html`. Make sure the file includes `lang="en"` (or the correct language code) on the `<html>` element.
-
----
-
-## Changelog
-
-| Date | Reviewer | Action |
-| --- | --- | --- |
-| 2025-01-20 | Accessibility Expert (initial) | Created file. Defined 15 standards across 9 categories. Audited 11 component docs. Identified 2 critical violations (box.md, flex.md missing accessibility sections entirely), 2 high-priority gaps (card.md, layouts.md), and 6 medium-priority gaps. |
-| 2025-03-18 | Accessibility Expert | Added consolidated accessibility checklist (section 13). 58 checkable items across 10 categories, each mapped to a standard number and WCAG level. |
-| 2025-03-18 | Accessibility Expert, reviewed by Writer | Added "Implementation patterns" section with 7 code patterns addressing the most common automated test failures: missing landmarks (5/6 iterations), missing headings (4/6), icon-only buttons without aria-label (4/6), inputs without labels (4/6), aria-haspopup misuse (5/6), motion not respecting prefers-reduced-motion (6/6), and layout overflow at 320px (6/6). Added "Common mistake" callouts to standards 1.2, 4.1, 5.1, 7.1, 9.1, and 11.3. |
-| 2025-03-18 | Accessibility Expert, reviewed by Writer | Second round of improvements from automated test run (3 training iterations). Landmarks (0/3 failing) and headings (0/3 failing) now pass — previous guidance worked. Four persistent failures addressed: (1) §4.1 and MenuButton pattern: added "Known Sanity UI issue" callout — `MenuButton` emits `aria-haspopup="true"` at the library level, agents cannot fix it. (2) §6.1: added "Known theme contrast gap" — `tone="primary"` buttons produce 4.3:1 ratio, below AA; guidance to use `tone="default"` or `mode="ghost"`. (3) §7.1 and reduced motion pattern: reframed the global CSS override as required, not optional; noted that Sanity UI's own 0.1s Button transitions are the source; added import example. (4) §11.3 and reflow pattern: replaced generic `wrap` example with a sidebar-stacking pattern using `flex: '1 1 100%'` and `maxWidth`; added toolbar wrap note. |
-
-
-# Box
-
-Used as the lowest-level building block for containing UI elements.
-
-### **API documentation**
-
-_Refer to TypeDocs in Box.tsx_
-
-### **Usage guidelines**
-
-**When to use:**
-
-- As a container for child elements
-- To  apply padding or margin to a group of elements
-- To create basic visual styling (such as background, border, shadow, etc.) for the purposes of composing a custom component
-
-**When not to use:**
-
-- As an interactive element
-- As a way to lay out child elements. Use Flex or Stack or Whatever instead.
-- To act as a container for content that would otherwise be reserved for Card.
-- To center content at a max width. Use **Container** instead — it sets `max-width` and centers itself.
-
-**Choosing between Box, Card, and Container:**
-
-| Component | Purpose | Adds visual styling | Use case |
-| --- | --- | --- | --- |
-| Box | Spacing and structure | No (transparent by default) | Wrapping elements with padding or margin |
-| Card | Content surface | Yes (background, border, shadow, tone) | Grouping related content on a distinct surface |
-| Container | Centered column | No | Constraining content width and centering it |
-
-### **Best practices**
-
-**Do**
-
-- Use padding over margin when possible to avoid spacing issues related to margin collapse
-
-**Don’t**
-
-- Avoid adding margin/padding to individual elements like Buttons or Text to set placement.  Instead, wrap elements in Box with margin/padding.
-- Don’t add onClick to Box
-
-### **Variants**
-
-#### Padding
-
-
-# Box
-
-Used as the lowest-level building block for containing UI elements.
-
-### **API documentation**
-
-_Refer to TypeDocs in Box.tsx_
-
-### **Usage guidelines**
-
-**When to use:**
-
-- As a container for child elements
-- To  apply padding or margin to a group of elements
-- To create basic visual styling (such as background, border, shadow, etc.) for the purposes of composing a custom component
-
-**When not to use:**
-
-- As an interactive element
-- As a way to lay out child elements. Use Flex or Stack or Whatever instead.
-- To act as a container for content that would otherwise be reserved for Card.
-- To center content at a max width. Use **Container** instead — it sets `max-width` and centers itself.
-
-**Choosing between Box, Card, and Container:**
-
-| Component | Purpose | Adds visual styling | Use case |
-| --- | --- | --- | --- |
-| Box | Spacing and structure | No (transparent by default) | Wrapping elements with padding or margin |
-| Card | Content surface | Yes (background, border, shadow, tone) | Grouping related content on a distinct surface |
-| Container | Centered column | No | Constraining content width and centering it |
-
-### **Best practices**
-
-**Do**
-
-- Use padding over margin when possible to avoid spacing issues related to margin collapse
-
-**Don’t**
-
-- Avoid adding margin/padding to individual elements like Buttons or Text to set placement.  Instead, wrap elements in Box with margin/padding.
-- Don’t add onClick to Box
-
-### **Variants**
-
-#### Padding
-
-# Box
-
-
-
-Used as the lowest-level building block for containing UI elements.
-
-### **API documentation**
-
-_Refer to TypeDocs in Box.tsx_
-
-### **Usage guidelines**
-
-**When to use:**
-
-- As a container for child elements
-- To  apply padding or margin to a group of elements
-- To create basic visual styling (such as background, border, shadow, etc.) for the purposes of composing a custom component
-
-**When not to use:**
-
-- As an interactive element
-- As a way to lay out child elements. Use Flex or Stack or Whatever instead.
-- To act as a container for content that would otherwise be reserved for Card.
-- To center content at a max width. Use **Container** instead — it sets `max-width` and centers itself.
-
-**Choosing between Box, Card, and Container:**
-
-| Component | Purpose | Adds visual styling | Use case |
-| --- | --- | --- | --- |
-| Box | Spacing and structure | No (transparent by default) | Wrapping elements with padding or margin |
-| Card | Content surface | Yes (background, border, shadow, tone) | Grouping related content on a distinct surface |
-| Container | Centered column | No | Constraining content width and centering it |
-
-### **Best practices**
-
-**Do**
-
-- Use padding over margin when possible to avoid spacing issues related to margin collapse
-
-**Don’t**
-
-- Avoid adding margin/padding to individual elements like Buttons or Text to set placement.  Instead, wrap elements in Box with margin/padding.
-- Don’t add onClick to Box
-
-### **Variants**
-
-#### Padding
-
-# Flex
-
-Used as the lowest-level building block for laying out UI elements.
-
-### **API documentation**
-
-_Refer to TypeDocs in Flex.tsx_
-
-### **Usage guidelines**
-
-**When to use:**
-
-- To lay items out in a row. Flex defaults to horizontal direction.
-- To control alignment: center children, space them apart, or push one to the end.
-- To lay items in a column with alignment or wrap control. Use `direction="column"` when you need more control than Stack provides.
-- To create responsive layouts that change direction at breakpoints: `direction={['column', , 'row']}`.
-
-**When not to use:**
-
-- To stack items in a simple vertical column with even spacing. Use **Stack** instead — it is simpler and locks direction to vertical.
-- To create a two-axis grid. Use **Grid** instead.
-- To wrap a single child with spacing or visual styling. Use **Box** instead.
-- To flow inline items that wrap to the next line. Use **Inline** instead.
-
-**Choosing a layout primitive:**
-
-| Component | Direction | Key props | Use case |
-| --- | --- | --- | --- |
-| Flex | Any (default: row) | `direction`, `align`, `justify`, `wrap`, `gap` | Rows, columns with alignment, responsive direction changes |
-| Stack | Vertical only | `gap` | Simple vertical column with even spacing |
-| Grid | Two-axis | `columns`, `rows`, `gap` | Grid-based layouts |
-| Inline | Horizontal | `space` | Tags, chips, inline groups that wrap |
-| Box | None (block) | `padding` | General container for spacing and visual styling |
-
-### **Best practices**
-
-**Do**
-
-- 
-
-**Don’t**
-
--
-
-# Text
-
-Used for the majority of UI copy, including body paragraphs, captions, and metadata. It is distinct from other typography components, such as Code, Heading, KBD, and Label.
-
-### **API documentation**
-
-_Refer to TypeDocs in Text.tsx_
-
-### **Usage guidelines**
-
-**When to use:**
-
-- You are displaying body copy, descriptions, or captions
-
-**When not to use:**
-
-- To label a section within a Menu, side panel, or above headings. Use Label instead.
-- To establish the structural hierarchy of a page (e.g., Page Title). Use Heading instead.
-- To denote a keyboard shortcut or hotkey. Use KBD instead.
-- For displaying inline or block code samples. Use Code instead.
-- As a specific interaction link. Wrap the text in a link component or anchor tag, ensuring the clickable area is accessible.
-
-### **Best practices**
-
-**Do**
-
-- Use `align=”left”` in the majority of cases. Sanity’s typographic system prefers start-aligned text.
-- Use the `muted` prop for helper text or metadata to visually de-emphasize it compared to primary content.
-- Use responsive arrays (e.g., `size={[1,2,3]}`) to ensure text is readable across mobile and desktop viewports.
-- Aim for 55-70 characters per line in a multiline block of text for optimal legibility.
-- Text has all vertical spacing removed. Use Text with Stack or Flex to space vertically stacked Text elements.
-
-**Don’t**
-
-- Don’t center-align long blocks of paragraph text; this disrupts the reading flow and is difficult for users with dyslexia.
-- Don’t rely on color or the `accent` prop to capture attention or convey importance. People with certain visual impairments may not distinguish the change. Pair the text with an icon or badge instead.
-- Don’t italicize or underline to emphasize text. Use Text’s weight prop instead.
-- Don’t truncate text unless it is completely necessary. Text truncation makes information less available to people which can become a point of friction or confusion.
-
-### Variants
-
-#### Muted
-
-Used to visually deemphasize a text element. It’s specifically helpful in situations where the text is objectively less important than other text in a composition. Examples include captions or subheadings. Muting text can be an effective method to increase focus on the most important textual information on the screen.
-
-Deemphasizing secondary information is the preferred method for increasing focus compared to over-reliance on bolding text using `weight`. It’s recommended to begin with muting text to aid in emphasis before attempting treatments such as using `accent` or `weight`.
-
-#### Weight
-
-Sets the typographic weight of text.
-
-| **Value** | **Description** | **Purpose** | **Use case(s)** |
-| --- | --- | --- | --- |
-| `"regular"` | Regular font weight (400) | For general body text. The preferred weight for text above `size=0`. | General paragraphs and normal body copy. |
-| `"medium"` | Medium font weight (500) | To create visual separation from general body copy as well as improve general legibility for small text. | The default text treatment in interactive elements. Use semibold for labels in custom interactive UI components. General text treatments using Text’s `size=0`. |
-| `"semibold"` | Semibold font weight (600) | For emphasizing text  above `size=0`. | Emphasizing a term or phrase within paragraphs and normal body copy.  |
-| `"bold"` | Bold font weight (700) | Specifically to emphasize Text components with `size=0 `to aid in legibility. | For emphasized  text treatments using Text’s smallest size. |
-
-#### Size
-
-| **Value** | **Description** | **Purpose** | **Use case(s)** |
-| --- | --- | --- | --- |
-| `0` | Text’s smallest size | To act as a way to deemphasize content and/or accommodate for extreme high-density compositions. | For fine print and legal text (check with local laws to ensure compliance) Situations where text is required in a small space |
-| `1` | Text’s small size | The default size for UI text and UI labels, such as Buttons, MenuItems, and Tabs. | Text or UI labels that are **not** specifically related to content editing. Text that acts as non-critical messaging to the user, such as Toasts and empty states. |
-| `2` | Text’s medium size | The default size for text related to content editing | Text or UI labels that are specifically related to content editing (ex: text fields, selects, etc.). Calls to action where visual emphasis is essential (ex: calling out important steps in a workflow) |
-| `3` | Text’s large size | For adding significant emphasis. Use is not generally advised. | No common use cases. Most uses are better supported by  the Header component. |
-| `4` | Text’s extra large size | For adding extreme emphasis. Use is not generally advised. | No common use cases. Most uses are better supported by  the Header component. |
-
-#### Accent
-
-Accent is deprecated and should be avoided. Use `weight` and/or `size` instead of accent to increase emphasis.
-
-#### Align
-
-| **Value** | **Description** | **Purpose** | **Use case(s)** |
-| --- | --- | --- | --- |
-| `"left"` | Text that is left/start aligned. | Acts as the primary alignment for text within Sanity UI within LTR languages. | Displaying body copy for LTR languages. Headers and content for numeric data within table cells in RTL languages. |
-| `"center"` | Text that is center aligned. | Used rarely in situations where the text element’s parent is centered. | Copy within a pure-center content block, such as an empty state. Labels within UI elements, such as Buttons, Tabs, etc. |
-| `"right"` | Text that is right/end aligned. | Acts as the primary alignment for text within Sanity UI within RTL languages. | Displaying body copy for RTL languages. Headers and content for numeric data within table cells in LTR languages. |
-
-#### TextOverflow
-
-Determines whether the Text component truncates as opposed to wrapping. This should be used as a last resort. Some examples where TextOverflow should be used are:
-
-- Text used within a grid of elements where text wrapping would cause irregular sizes or shifts in content.
-- Extremely long strings, like UUIDs, in small areas where the text won’t wrap elegantly and will push the container to unsupported widths.
-- Situations where text is user/machine generated and extreme edge cases may exist.
-
-Before truncating, attempt to shorten the text if possible. The ideal kind of truncation is no truncation. When truncation is necessary, make sure the full text string is available via `Tooltip` component or `title `attribute.
-
-### Accessibility
-
-To ensure content is accessible to all users, including those using assistive technologies:
-
-- **Contrast Compliance:** Ensure that the text color maintains a contrast ratio of at least **4.5:1** against the background for standard text, and **3:1** for large text. Be particularly careful when using `muted` or `accent` props on non-standard backgrounds.
-- **Don't rely on color:** Do not use the `accent` prop as the _only_ way to indicate status (e.g., errors or success). Always pair color with text labels or icons.
-- **Semantic Structure:** While the `Text` component defaults to a `div`, use the `as` prop to render semantically appropriate tags (e.g., `as="p"`) to help screen readers understand the content structure.
-- **Scaling:** Ensure text remains legible when the browser is zoomed up to 200%. Avoid using fixed pixel units if overriding styles manually.
-
-### **Content**
-
-- **Sentence case:** Use sentence case for UI labels and body text (e.g., "Edit profile" not "Edit Profile").
-- **Clear language:** Avoid jargon, acronyms, and complex sentence structures. Aim for an 8th-grade reading level to maximize comprehension.
-- **Conciseness:** Be succinct. Avoid "filling space" with flowery language. Users scan text rather than reading word-for-word.
-- **Actionable:** When Text is used for instructions, frame the content as actionable steps rather than passive descriptions.
-- **Labels (P1).** When Text serves as a UI label (inside a button, tab, or menu item), start with a verb that names the action. See product-content-standards.md P1.
-- **Translation (P9).** Text can grow 30–50% in other languages. Test layouts with longer strings. RTL scripts flip inline direction — use the `align` prop's responsive values to handle both LTR and RTL.
-
-
-# Menu
-
-The Menu component family is a set of interactive primitives used to build navigation and dropdown menus. It operates as a composition of several subcomponents that handle triggering, positioning, focus management, and item selection.
-
-**Components:**
-
-- **Menu:** The container element. It holds the items and manages focus flow (up/down navigation) .
-- **MenuGroup:** A specialized item that triggers a nested submenu.
-- **MenuItem:** The individual actionable element within the menu.
-- **MenuDivider:** A visual separator used to group related items.
-
-**Purpose** Menus are used to present a list of actions or options to the user in a temporary surface, saving screen real estate. They are typically triggered by a button and are best suited for secondary actions, settings, or command lists.
-
-### API Documentation
-
-#### Menu
-
-The container for menu items.
-
-_Refer to TypeDocs in Menu.tsx_
-
-#### **MenuGroup**
-
-A nested menu trigger.
-
-_Refer to TypeDocs in MenuGroup.tsx_
-
-#### **MenuItem**
-
-An individual action within the menu.
-
-_Refer to TypeDocs in MenuItem.tsx_
-
-#### **MenuDivider**
-
-An individual action within the menu.
-
-_Refer to TypeDocs in MenuDivider.tsx_
-
-### **Usage guidelines**
-
-**When to use:**
-
-- You have a set of secondary actions (like "Edit", "Delete", "Duplicate") that would clutter the UI if displayed individually .
-- You need to display a list of settings or preferences triggered by a single button.
-
-**When not to use:**
-
-- You have fewer than 3 actions; consider displaying them inline as buttons or links for better discoverability.
-
-### **Best practices**
-
-**Do	**
-
-- Use `MenuDivider` to group related actions (e.g., separating "Edit" actions from "Destructive" actions).
-- Use the `hotkeys` prop to indicate keyboard shortcuts for power users.
-- Use `tone="critical"` on `MenuItem`s that perform destructive actions like deletion.
-
-**Don’t**
-
-- Use caution when nesting `MenuGroup`s more than 2 levels deep. Deeply nested menus are difficult to navigate and prone to closing accidentally.
-- Don’t put complex forms or interactive inputs inside a `MenuItem`. The Menu is designed for simple "one-click" actions or boolean toggles.
-- Don’t use the `hotkeys` for keyboard shortcuts when the MenuItem’s purpose is navigational.
-
-### **Variants**
-
-#### Menu
-
-##### Spacing
-
-Menu uses a fixed internal padding. You do not set spacing on Menu directly. To add visual separation between groups of items, use `MenuDivider`.
-
-#### MenuGroup
-
-#### MenuItem
-
-##### Icon
-
-Use `icon` to add a leading icon. If one item in a group has an icon, all items in that group should have icons for visual alignment.
-
-##### IconRight
-
-Used exclusively for communicating what navigation action the user should expect.
-
-- Don’t use an icon when a menu item sends a person to another page
-- Use `<ChevronRightIcon />` when a menu item drills into child menu items
-- Use `<LaunchIcon />` when the icon take a person to an external link or a new tab/window
-
-##### Tone
-
-Use `tone='critical'` for destructive actions like 'Delete' or 'Remove.' Place critical items at the bottom of the menu, after a `MenuDivider`. Do not use tone for navigation items.
-
-##### Selected
-
-MenuItem supports `selected` via a visual highlight (the item's background shifts to the selected color). Unlike Button, MenuItem does not support `pressed` as a persistent visual state. Use `selected` to mark the currently active item in a navigation menu. Do not use `selected` and `tone` together on the same item — `selected` overrides the tone's visual treatment.
-
-##### Hotkeys
-
-Use the `hotkeys` prop to display keyboard shortcuts. Pass an array of key names: `hotkeys={['Ctrl', 'S']}`. Hotkeys are display-only — they do not add keyboard event handlers.
-
-### MenuButton
-
-MenuButton combines a Button trigger with a Menu popover. It handles focus, keyboard control, and `aria` state.
-
-**Usage:**
-MenuButton takes two required props:
-- `button` — a `<Button>` element that acts as the trigger.
-- `menu` — a `<Menu>` element that appears when the trigger is pressed.
-
-Set `iconRight={ChevronDownIcon}` on the trigger button to signal that it opens a menu.
-
-**Popover placement:**
-MenuButton passes props to an internal Popover. Set placement through the `popover` prop: `popover={{placement: 'bottom-start'}}`. Common values: `'bottom-start'` (default), `'bottom-end'`, `'top-start'`, `'top-end'`.
-
-**When to use:**
-- To open a menu from a button. Use MenuButton instead of building a custom trigger + popover.
-
-**When not to use:**
-- For a standalone menu without a trigger. Use Menu directly.
-- For a button that opens a dialog or panel. Use Button with an `onClick` handler.
-
-### **Accessibility Guidelines**
-
-The Sanity UI Menu components are built to WAI-ARIA specifications .
-
-- **Keyboard Navigation:**
-  - **Enter / Space / ArrowDown:** When focused on the `MenuButton`, these keys open the menu and focus the first item.
-  - **ArrowUp:** Opens the menu and focuses the _last_ item.
-  - **Arrow Up/Down:** Navigates between items within the open menu.
-  - **Arrow Right:** Opens a nested `MenuGroup`.
-  - **Arrow Left:** Closes a nested `MenuGroup` and returns focus to the parent menu.
-  - **Escape:** Closes the menu and restores focus to the trigger button.
-- **ARIA Roles:** The component automatically handles `role="menu"`, `role="menuitem"`, `aria-expanded`, and `aria-haspopup`.
-- **Focus Management:** The menu acts as a focus trap while open. Clicking outside or pressing Tab usually closes the menu to preserve logical document flow.
-
-### **Content Guidelines**
-
-- **Concise Labels:** Keep `MenuItem` text short (1-3 words). Use verbs that describe the action (e.g., "Rename", not "Change the name").
-- **Sentence Case:** Use sentence case for all menu items (e.g., "Open in new tab").
-- **Predictable Grouping:** Place destructive actions (like Delete) at the bottom of the list, ideally separated by a `MenuDivider` to prevent accidental clicks.
-- **Consistent Icons:** If you use icons for some items in a group, try to use icons for all items in that group to maintain visual alignment.
-- **Confirm dialogs (P5).** Destructive menu items (`tone='critical'`) should open a confirm dialog before running the action. The confirm button repeats the action verb. The cancel button says 'Cancel.' See product-content-standards.md P5.
-- **Translation (P9).** Menu item labels can grow 30–50% in other languages. Menu items in fixed-width containers are sensitive to label length. Test with longer strings. Keep base labels at 1–3 words to leave room for growth.
-
-
-# Button
-Used to trigger an action, such as submitting a form, opening a dialog, or running a command.
-
-[Figma component](https://www.figma.com/design/5mhVqXlldJEEB2VWZeKQ4i/%F0%9F%A7%AC-Sanity-UI?node-id=25-769&m=dev) ·
-[React component](https://github.com/sanity-io/ui/blob/v4-beta/packages/ui/src/primitives/button/Button.tsx)
-
-### API documentation
-
-Button takes the following props:
-
-| Attribute | Type | Accepted values | Default | Optional | Description |
-| --- | --- | --- | --- | --- | --- |
-| `as` | `Component` | `'a'`, `'button'`, `'label'`, custom component | `'button'` | Yes | Sets the rendered HTML element or custom component. |
-| `children` | `ReactNode` | — | `undefined` | Yes | Renders raw content with no `Text` wrapper. |
-| `disabled` | `Boolean` | `true`, `false` | `false` | Yes | Removes the button from tab order and blocks interaction. |
-| `fontSize` | `Number/Array` | `0`, `1`, `2`, `3`, `4` | `1` | Yes | Sets the text and icon size. Accepts responsive values. |
-| `gap` | `Number/Array` | `0`–`9` | Falls back to `padding`, then `3` | Yes | Sets the space between icon and text. Accepts responsive values. |
-| `icon` | `Component/ReactNode` | Any icon component or element | `undefined` | Yes | Adds a leading icon. Prefer passing a component type: `icon={AddIcon}`. |
-| `iconRight` | `Component/ReactNode` | Any icon component or element | `undefined` | Yes | Adds a trailing icon. Prefer passing a component type. |
-| `loading` | `Boolean` | `true`, `false` | `undefined` | Yes | Overlays a spinner and disables the button. Beta feature. |
-| `mode` | `String` | `'default'`, `'ghost'`, `'bleed'` | `'default'` | Yes | Sets the visual weight. See the mode section. |
-| `muted` | `Boolean` | `true`, `false` | `undefined` | Yes | Lowers the visual weight of the text label only. |
-| `padding` | `Number/Array` | `0`–`9` | `3` | Yes | Sets inner padding. Accepts responsive values. |
-| `paddingX` | `Number/Array` | `0`–`9` | `undefined` | Yes | Overrides inline padding. Accepts responsive values. |
-| `paddingY` | `Number/Array` | `0`–`9` | `undefined` | Yes | Overrides block padding. Accepts responsive values. |
-| `radius` | `Number/Array` | `0`–`6`, `'full'` | `3` | Yes | Sets border radius. Accepts responsive values. |
-| `selected` | `Boolean` | `true`, `false` | `undefined` | Yes | Marks the button as active. Sets `data-selected`. |
-| `text` | `ReactNode` | — | `undefined` | Yes | Sets the label. Wraps content in a `Text` component. |
-| `textAlign` | `String` | `'left'`, `'right'`, `'center'`, `'justify'` | `undefined` | Yes | Sets text alignment within the button. |
-| `textOverflow` | `String` | `'ellipsis'`, `'clip'` | `'ellipsis'` | Yes | Sets how text overflows: truncate or clip. |
-| `textWeight` | `String` | `'regular'`, `'medium'`, `'semibold'`, `'bold'` | `'medium'` | Yes | Sets the font weight of the text label. |
-| `tone` | `String` | `'default'`, `'neutral'`, `'primary'`, `'suggest'`, `'positive'`, `'caution'`, `'critical'` | `undefined` | Yes | Sets the color tone. See the tone section. |
-| `tooltip` | `Object` | `TooltipProps` (without `as` and `children`) | `undefined` | Yes | Wraps the button in a lazy-loaded `Tooltip`. |
-| `type` | `String` | `'button'`, `'submit'`, `'reset'` | `'button'` | Yes | Sets the HTML button type. See the type section. |
-| `width` | `Number/String/Array` | `0`–`5`, `'auto'`, `'fill'`, `'stretch'`, `'min'`, `'max'` | `undefined` | Yes | Controls button width. Accepts responsive values. |
-
-**Responsive props.** Props marked "accepts responsive values" take arrays or objects for breakpoint control. Example: `padding={[2, 3]}` sets `padding=2` on small screens and `padding=3` on large screens.
-
-**`text` vs `children`.** The `text` prop wraps its content in a styled `Text` component. The `children` prop renders raw content with no wrapper. Use `text` for standard labels. Use `children` when you need full control over the inner markup.
-
-**`as` prop.** Use `as="a"` to render a button as a link element. When `disabled` is true and `as="a"`, the `href` attribute is stripped.
-
-### Usage guidelines
-
-**When to use:**
-
-- To trigger an action in the interface. Examples: "Publish", "Delete", "Save".
-- To submit data in a form context. Set `type="submit"`.
-
-**When not to use:**
-
-- To navigate to a new view or URL within running text. Use **Link** instead. Users of assistive technology expect buttons to perform actions and links to navigate.
-- To switch between views on a screen. Use **Tab** instead. The Tab component has `aria` attributes that make view switching accessible.
-- To toggle a menu open. Use **MenuButton** instead. It manages focus, keyboard control, and `aria` state.
-
-### Best practices
-
-**Do**
-
-- Set `tone="critical"` for destructive actions such as delete.
-- Keep buttons in a logical tab order within the document flow.
-- Favor text labels over icon-only buttons for clarity.
-- Limit default-mode buttons to one per logical section (a toolbar, a card, a dialog).
-- Add tooltips to icon-only buttons. Use the `tooltip` prop or wrap in a `Tooltip`, and set `aria-label`.
-- Set `iconRight={ChevronDownIcon}` when using `Button` inside `MenuButton`.
-- Pair `positive`, `caution`, or `critical` tones with a matching icon to support users with color vision differences.
-
-**Don't**
-
-- Don't rely on color alone to convey meaning. Pair color with an icon or text label.
-- Don't use vague labels like "Click here." Use labels that describe the action: "Upload image."
-- Don't disable buttons to block progress. Users may not know why the button is disabled. Keep the button enabled and show feedback when pressed.
-- Don't hide buttons for critical actions. Primary actions should stay visible at all times.
-- Don't combine icon and text in more than three buttons in one group. Overuse reduces scannability.
-
-### Variants
-
-#### Mode
-
-Mode sets the visual weight of the button. It signals how important an action is.
-
-| Value | Description | Purpose | Use case |
-| --- | --- | --- | --- |
-| `'default'` | Solid fill background, full visual weight | Primary actions — the most critical action in a workflow | Publish, Log in |
-| `'ghost'` | Tinted fill background with a 1px border | Secondary actions — common, but not the most critical | Cancel in dialogs, Save as draft |
-| `'bleed'` | White or clear fill at rest, tinted fill on hover | Tertiary actions — rare or background actions | Close/dismiss, Forgot password |
-
-Most buttons in an interface should use `'bleed'`, then `'ghost'`, with `'default'` used least. A rough ratio is 60% bleed, 30% ghost, 10% default.
-
-All three modes work with all seven tones. The mode sets the visual weight. The tone sets the color. A `ghost` + `critical` button shows a red-tinted border and background — the same meaning as `default` + `critical` but with less visual weight. Choose mode based on the action's importance. Choose tone based on the action's meaning.
-
-#### Tone
-
-Tone sets the color of the button. It signals the meaning of the action.
-
-| Value | Description | Purpose | Use case |
-| --- | --- | --- | --- |
-| `'default'` | Neutral gray | General actions | Publish, Save, Cancel |
-| `'neutral'` | Neutral gray (v4) | General actions with no semantic meaning | UI chrome, toolbar actions |
-| `'primary'` | Brand blue. **Legacy — avoid in new work.** | Brand moments | Account setup |
-| `'suggest'` | Brand blue (v4 replacement for `'primary'`) | Brand-aligned actions | Onboarding, account setup |
-| `'positive'` | Green | Confirming or celebrating success | Confirm, Complete |
-| `'caution'` | Yellow/orange | Actions with high consequences | Changing a role, overwriting data |
-| `'critical'` | Red | Destructive or permanent actions | Delete, Remove |
-
-Pair `'positive'`, `'caution'`, or `'critical'` with icons: `CheckmarkIcon`, `WarningOutlineIcon`, or `ErrorOutlineIcon`. This supports users with color vision differences.
-
-#### Type
-
-Type sets the HTML role of the button element.
-
-| Value | Description | Use case |
-| --- | --- | --- |
-| `'button'` | Standard button (default) | Actions outside a form |
-| `'submit'` | Submits the parent form | Form submit |
-| `'reset'` | Resets the parent form | Form reset |
-
-#### Padding
-
-Padding controls the inner spacing of the button.
-
-| Value | Rendered size | Use case |
-| --- | --- | --- |
-| `2` | 8px on all sides, 8px gap | Compact contexts like toolbars |
-| `3` (default) | 12px on all sides, 12px gap | Standard buttons |
-
-The `padding` prop accepts values from `0` to `9` and takes responsive arrays. The `gap` prop falls back to the `padding` value when not set. Override padding on one axis with `paddingX`, `paddingY`, or side-specific props like `paddingTop`.
-
-#### Font size
-
-`fontSize` controls the text and icon size. The default value is `1`, which maps to Inter Medium 13px (Text 1/Medium). Values range from `0` to `4`. This prop accepts responsive arrays.
-
-#### Radius
-
-`radius` controls border rounding. The default value is `3` (3px). Values range from `0` to `6`, plus `'full'` for pill-shaped buttons. This prop accepts responsive arrays.
-
-**v4 change:** The default `radius` changed from `2` in v3 to `3` in v4.
-
-#### Icon
-
-Use `icon` to add a leading icon. Icon-only buttons (no `text` prop) are valid in dense layouts like toolbars. Icon-only buttons should always have a tooltip and an `aria-label`.
-
-Prefer passing a component type over a rendered element:
-- Do: `icon={AddIcon}`
-- Avoid: `icon={<AddIcon />}`
-
-Icons scale with the `fontSize` prop. At `fontSize={1}` (the default), icons render at 21px. At `fontSize={2}`, icons render at 25px. See the iconography doc for the full size table. Do not set `width`, `height`, or `fontSize` on the icon itself — the Button component handles sizing.
-
-Limit icon-plus-text buttons to two cases:
-1. Reinforcing tone. Pair `tone="critical"` with `icon={ErrorOutlineIcon}`.
-1. Adding stress to a primary action. Reserve this for the most key button on screen.
-
-The Figma component does not include icon child nodes. Add icons at the instance level.
-
-#### Icon right
-
-Use `iconRight` for trailing icons that hint at behavior:
-
-- `ChevronDownIcon` — dropdown or menu trigger
-- `LaunchIcon` — link to an outside page
-- `ArrowRightIcon` — goes to a new page
-- `ChevronRightIcon` — drills into nested column navigation
-- Dynamic chevrons — expand and collapse
-
-#### Tooltip
-
-Button has built-in tooltip support via the `tooltip` prop. Pass `TooltipProps` (without `as` or `children`), and the button wraps itself in a lazy-loaded `Tooltip`.
-
-Example: `<Button icon={AddIcon} tooltip={{content: 'Add item'}} aria-label="Add item" />`
-
-The `tooltip` prop does not auto-populate from `aria-label`. Set both when needed: `aria-label` for screen readers, `tooltip` for sighted users.
-
-This is the preferred method for icon-only buttons. For buttons with text labels, tooltips are rarely needed.
-
-### States
-
-#### Enabled
-
-The default state. The button responds to pointer and keyboard input.
-
-#### Hovered
-
-Triggered when the cursor rests over the button. The background darkens to signal interactivity.
-
-#### Pressed
-
-Triggered during an active click, tap, or key press. The background darkens further.
-
-#### Focused
-
-Triggered when the button gets keyboard focus. A visible focus ring appears. Do not suppress the focus ring unless you provide a high-contrast option.
-
-#### Selected
-
-Marks the button as "on" or active. Set `selected={true}`. Use this for toggles — for example, bold or italic buttons in a rich-text toolbar.
-
-- Pair with a label change when the action name differs between states.
-- Combine with `mode="bleed"` for a clean toggle look.
-
-#### Disabled
-
-Removes the button from the tab order. Blocks all input. Tone color is stripped — disabled buttons turn gray across all tones and modes.
-
-Use disabled states with care. Users should know why a button is disabled. Provide context through a nearby status message, info icon, or tooltip on a nearby element. Do not place tooltips on disabled buttons — keyboard users cannot reach them.
-
-A common use: marking a button disabled during a `loading` state.
-
-#### Loading
-
-Beta feature. Set `loading={true}` to show a spinner over the button. The button is disabled while loading. Its size stays the same to avoid layout shifts.
-
-Use loading only for tasks that take a clear amount of time (over 500ms). For tasks over three seconds, trigger a `Toast` when the action finishes.
-
-**Data attribute equivalents.** CSS pseudo-class states can be set with data attributes for styling control:
-
-| Pseudo-class | Data attribute |
-| --- | --- |
-| `:hover` | `[data-hovered]` |
-| `:active` | `[data-pressed]` |
-| `:disabled` | `[data-disabled]` |
-
-**Disabled color behavior.** All tones lose their color when disabled. A `'critical'` button and a `'positive'` button look the same when disabled — both turn to a light gray fill. Do not rely on tone to show state for disabled buttons.
-
-**State colors (default tone, default mode):**
-
-| State | Background |
-| --- | --- |
-| Enabled | `#252837` |
-| Hovered | `#1B1D27` (darker) |
-| Pressed | `#0D0E12` (darkest) |
-| Selected | `#0D0E12` (same as pressed) |
-| Disabled | `#E3E4E8` (light gray) |
-
-All hover, active, and focus styles only apply when `:not(:disabled)`.
-
-### v3 to v4 migration
-
-| Area | v3 | v4 |
-| --- | --- | --- |
-| `space` prop | `space={3}` for icon-text gap | Removed. Use `gap` instead. |
-| `radius` default | `2` | `3` |
-| `tone` values | 5 tones | 7 tones: added `'neutral'` and `'suggest'` |
-| `width` type | `'fill'` only | Full set: `0`–`5`, `'auto'`, `'fill'`, `'stretch'`, `'min'`, `'max'` |
-| `textWeight` default | From theme (`button.textWeight`) | Hardcoded `'medium'` |
-| `forwardRef` | Required | Not needed (React 19 ref-as-prop) |
-| Styling | styled-components | CSS modules |
-
-### Accessibility
-
-- **Accessible names.** Buttons with a `text` prop get an accessible name from the label. Icon-only buttons must have an `aria-label`. Example: `aria-label="Add content"`.
-- **Keyboard interaction.** Buttons are focusable via `Tab`. They activate with both `Enter` and `Space`.
-- **Focus indicators.** A visible focus ring appears on keyboard focus. Do not remove it unless you provide a high-contrast replacement.
-- **Disabled states.** Disabled buttons are removed from the tab order and cannot receive focus. Avoid tooltips on disabled buttons — keyboard users cannot reach them.
-- **Color contrast.** Button text must meet a contrast ratio of 3:1 or higher against the button background (WCAG 1.4.11).
-- **Tone and icons.** Do not rely on tone color alone to convey meaning. Pair `'positive'`, `'caution'`, and `'critical'` tones with icons.
-
-### Content
-
-- **Be concise.** Labels should be short and clear. Use direct language.
-- **Start with verbs.** Describe the action: "Publish", "Edit", "Upload image."
-- **Use sentence case.** Example: "Add item", not "Add Item."
-- **Avoid vague labels.** "Submit" is better than "Click here." Name the action.
-- **Tooltips.** Add a tooltip to icon-only buttons. Keep tooltip text under 75 characters. Start with a verb that names the action. Do not restate the visible label — expand on it.
-- **Confirm dialogs.** Pair `tone='critical'` buttons with a confirm dialog. The confirm button repeats the action verb ('Delete project,' not 'OK'). The cancel button says 'Cancel.' See product-content-standards.md P5.
-- **Translation.** Write labels at 1–3 words, but test with 50% longer forms for translation. Avoid string joining — use full phrases. Account for RTL scripts in icon + text layouts.
-- **Truncation.** Write button labels short enough to never need clipping. If a label comes from user input, clip with an ellipsis and show the full text in a tooltip.
-
-# Card
-
-The Card component is a foundational layout primitive that serves as a container for content. It functions similarly to a Box but includes specific properties for managing background color, foreground text color, borders, radii, and shadows. It’s used to create distinct zones or "surfaces" within the UI.
-
-### API Documentation
-
-_Refer to TypeDocs in Card.tsx_
-
-### **When to Use / When Not to Use**
-
-**When to use:**
-
-- You need to group related content together on a distinct background surface.
-- You need to invert the color scheme of a specific section (e.g., a dark card inside a light view) using the `scheme` prop.
-
-**When not to use:**
-
-- You simply need to group elements for layout without visible boundaries or background colors. Use **Box** or **Flex** instead to avoid unnecessary DOM nesting and style calculations.
-- You are building a button. While `pressed` and `selected` props exist, use the **Button** component for interactive actions to ensure full keyboard accessibility and semantic validity.
-- As a layout element. Use Box, Flex, Grid, Inline, or Stack instead.
-
-### **Usage Dos and Don’ts**
-
-**Do	**
-
-- Use the `tone` prop to communicate the semantic state of the content (e.g., use `'critical'` for error messages or destructive zones).
-- Limit the scope of content within a Card to a single topic.
-- Use the `as` prop to change the semantic HTML tag (e.g., `as="article"` or `as="section"`) to improve document structure and navigation for screen readers.
-
-**Don’t**
-
-- Don’t manually set text colors inside a Card unless absolutely necessary. Rely on the Card to automatically provide high-contrast text colors based on the selected `tone`.
-- Don’t rely on color alone to convey meaning (e.g., a red card background) for users with color blindness; ensure text labels or icons accompany the color change.
-- Use caution when nesting cards. Cards are intended to be an atomic composition. Use Box, Flex, Grid, Inline, or Stack instead.
-- Don’t add interactive elements to Card when paired with an onClick event.
-
-### **Variants & Examples**
-
-#### Tone
-
-Sets the color of the Card. Should be set to `default` in typical use cases.
-
-| **Value** | **Description** | **Purpose** | **Use case(s)** |
-| --- | --- | --- | --- |
-| `default` | Uses the default background color. | For general use to display content with no emphasis or semantic meaning. This represents the vast majority of use cases. | A normal item in a dashboard. |
-| `transparent` | DO NOT USE | DO NOT USE | DO NOT USE |
-| `positive` | Uses a green background color. | For indicating content associated with success or completion. | Representing a successful billing transaction.. Representing a process that is healthy. |
-| `caution` | Uses a yellow background color. | For indicating content that needs attention, but is not critical or blocking. | Representing a credit card that is no longer valid for the next billing cycle. Representing a process that is at risk. |
-| `critical` | Uses a red background color. | For indicating content that represents a critical or blocking error. | Representing a recent transaction that failed. Representing a process that is not working. |
-| `primary` | Uses a blue background color. | For indicating high-priority or branded content. | Displaying content as an upsell. Providing contextual, educational, or onboarding information. |
-| `brand` | DO NOT USE | DO NOT USE | DO NOT USE |
-
-**Note: **Card's semantic tone values should be paired with an associated icon (ex: `ErrorOutlineIcon` for `critical `to visually reinforce the semantic meaning of the content.
-
-Card tones set the background, border, and foreground colors for the Card and all its children. Text, icons, and badges inside a toned Card inherit the tone's color scheme. Nesting a `tone='critical'` Card inside a `tone='default'` Card is valid — the inner Card overrides the color context for its subtree.
-
-#### Muted
-
-**Use with caution.**This prop darkens Card’s background. Use in rare situations when greater emphasis is needed when using a tone of `positive`, `caution`, `critical`, or `primary`.
-
-#### Border
-
-Provides a visual border for the Card. Should be enabled in Card’s typical use cases. Border should be used instead of `shadow={0}.`
-
-Individual borders can be set with `borderLeft`, `borderRight`, `borderTop`, `bottomBottom`, `borderX`, or `borderY`. These props should be used with caution.
-
-#### Radius
-
-Sets the corner radius for Card. Should be set to `2` in typical use cases.
-
-| **Value** | **Description** | **Purpose** | **Use case(s)** |
-| --- | --- | --- | --- |
-| `0` | No border radius | To act as a container of content with a specific background. | Creating visual separation of specific content with the background. Providing a semantically toned background to content in order to provide visual meaning. |
-| `1` | Hairline border radius | USE WITH CAUTION | USE WITH CAUTION |
-| `2` | Extra-small border radius | Used in the majority of cases–typically where Card’s padding is set to `3` or below. | The majority of Card use cases–specifically in normal to high density compositions. |
-| `3` | Small border radius | To create greater visual balance in cases where Card’s padding is set to `4` or above. | In lower-density compositions. |
-| `4` | Medium border radius | USE WITH CAUTION | USE WITH CAUTION |
-| `5` | Large border radius | USE WITH CAUTION | USE WITH CAUTION |
-| `6` | Extra-large border radius | USE WITH CAUTION | USE WITH CAUTION |
-| `“full”` | A pill shaped border-radius. | USE WITH CAUTION | USE WITH CAUTION |
-
-#### Shadow
-
-Shadow is intended to denote elevation. Cards that are floating above the base UI layer should have a shadow applied. The higher the elevation, the larger the shadow. Note: Avoid using `shadow={0}` as a substitute for a border. It’s not recommended to use shadow for the purpose of visual emphasis. Use `tone={transparent}` instead.
-
-| **Value** | **Description** | **Purpose** | **Use case(s)** |
-| --- | --- | --- | --- |
-| `0` | A hairline shadow. | USE WITH CAUTION | USE WITH CAUTION |
-| `1` | A low-elevation shadow for when a card is displayed directly above the base layer. | To create visual separation between a floating Card and the immediate background. | When a Card is used as a makeshift notification or floating message. |
-| `2` | A mid-elevation shadow for when a card is displayed directly above low-elevation elements and the base layer. | USE WITH CAUTION | USE WITH CAUTION |
-| `3` | A high-elevation shadow for when a card is displayed at the highest elevation. | USE WITH CAUTION | USE WITH CAUTION |
-
-#### Scheme
-
-**Use with caution. **Used to explicitly set the color scheme to light or dark. This can be used to invert the palette for a card. Inverting the scheme can be used to create greater emphasis–when `muted` is not enough.
-
-#### Pressed
-
-**Use with caution. **Applies a pressed visual state to the card. Card’s primary use case is to contain content. Consider other options unless absolutely necessary.
-
-#### Selected
-
-Sets the Card to a selected visual state. The background shifts to the tone's selected color. Use `selected` when the Card represents a chosen item in a list or grid — for example, a selected document in a document list. Do not use `selected` as a substitute for `tone` — selected is a state, not a semantic meaning. When `selected` is paired with a `tone`, the tone's selected color variant is used.
-
-#### Padding
-
-Sets the internal padding for content within Card.
-
-| **Value** | **Description** | **Purpose** | **Use case(s)** |
-| --- | --- | --- | --- |
-| `0` | No padding | USE WITH CAUTION | USE WITH CAUTION |
-| `1` | Smallest padding | USE WITH CAUTION | USE WITH CAUTION |
-| `2` | Extra-extra-small padding | Displaying a chunk of content in very high density compositions. | Displaying a high-volume list of content in a sidebar |
-| `3` | Extra-small padding | Displaying a chunk of content in medium to high density compositions. | Displaying a collection of cards in a grid, such as Canvas templates |
-| `4` | Small padding | Displaying a chunk of content in low to medium density compositions. | Displaying a collection of content within a dashboard |
-| `5` | Medium padding | Displaying a chunk of content in very low density compositions. | Displaying form fields within an auth flow |
-| `6` | Large padding | USE WITH CAUTION | USE WITH CAUTION |
-| `7` | Extra-large padding | USE WITH CAUTION | USE WITH CAUTION |
-| `8` | Extra-extra large padding | USE WITH CAUTION | USE WITH CAUTION |
-| `9` | Largest padding | USE WITH CAUTION | USE WITH CAUTION |
-
-Padding values map to the spacing scale. Common values: `2` = 8px (compact, like sidebar items), `3` = 12px (standard, like content cards), `4` = 20px (spacious, like form sections), `5` = 28px (generous, like onboarding cards). Values 0–1 and 6–9 are available but seldom needed.
-
-Individual padding can be set with `paddingLeft`, `paddingRight`, `paddingTop`, `paddingBottom`, `paddingX`, or `paddingY`. These props should be used with caution.
-
-### **Accessibility Guidelines**
-
-To ensure Cards are accessible to all users:
-
-- **Landmarks:** When a Card represents a major section of the page, use `as="section"` or `as="article"`. This creates **Landmark** regions that screen reader users can navigate to quickly.
-- **Interactive Cards:** If a Card is interactive (clickable):
-  - It must have a valid `tabindex` to be focusable.
-  - It must respond to `Enter` and `Space` key events, not just mouse clicks.
-  - It should ideally use `as="button"` or act as a container for a stretched link, rather than adding click handlers to a `div`.
-- **Contrast:** The Card component automatically handles text color contrast against its background. However, if you nest custom components, verify that text maintains a **4.5:1** contrast ratio against the Card's `tone`.
-- **Focus Indication:** Ensure the Card has a visible focus style if it is interactive. Do not suppress the outline without providing an alternative high-contrast indicator.
-
-### **Content Guidelines**
-
-- **Hierarchy:** Cards often act as containers for grouped information. Ensure the heading levels (H2, H3, etc.) inside the card respect the page's overall outline. Do not start with an H1 inside a card if the page already has a main title.
-- **Grouping:** Content within a card should be logically related. If the content describes different distinct topics, split them into separate cards to reduce cognitive load.
-- **Error content (P3).** When using `tone='critical'`, the card text should state what went wrong and what the user can do. Use plain language. Do not use error codes or jargon. See product-content-standards.md P3.
-- **Empty states (P4).** When a card holds a list or group that can be empty, include empty state text. State what is missing and offer an action to fix it. Example: 'No documents yet. Create your first document.'
-- **Casing (P8).** Use sentence case for all text in cards — headings, labels, and body text.
-
 
 # Layout guidelines
 
@@ -3049,3 +2531,1333 @@ The layouts doc covers content rules across several subsections. This section co
 - **Confirm dialogs (P5).** Destructive actions in layouts should open a confirm dialog. The confirm button repeats the action verb. See product-content-standards.md P5.
 - **Status messages (P7).** Toast messages and inline status text lead with the outcome. Use past tense for completed actions. Include a next step when applicable. See product-content-standards.md P7.
 - **Casing (P8).** Use sentence case for all labels, group names, and status text in layouts.
+
+### Accessibility
+
+- **Landmark structure.** Map layout regions to HTML landmark elements (WCAG 1.3.1 A, 2.4.1 A):
+
+  | Layout region | Landmark element | Labeling |
+  | --- | --- | --- |
+  | Navigation sidebar | `<nav>` | `aria-label` required (e.g. "Main navigation") |
+  | Content area | `<main>` | One per page. No extra labeling needed. |
+  | Inspection sidebar | `<aside>` | `aria-label` required (e.g. "Document inspector") |
+  | Content toolbar | `<header>` within `<main>` | Scoped to `<main>`, not a separate page landmark. |
+
+  Without landmarks, screen reader users experience the layout as a flat list of elements with no structural cues.
+
+- **Visual-to-DOM order.** The inline-start → center → inline-end layout order must match DOM order. Do not use CSS `order`, `flex-direction: row-reverse`, or grid placement to reorder layout columns. Screen readers and keyboard navigation follow DOM order (WCAG 1.3.2 A, 2.4.3 A).
+- **Reflow at 320px.** Layouts must work at 320px viewport width without horizontal scrolling (WCAG 1.4.10 AA). A three-column layout that does not collapse will overflow. Hide sidebars behind toggle buttons at narrow widths, or stack the layout into a single column. Use `Flex` with `wrap="wrap"` and avoid fixed `px` widths on layout columns.
+- **Sidebar focus management.** When a sidebar opens, move focus to the first focusable element inside it. When it closes, return focus to the toggle button. Hidden sidebar content must be removed from tab order (WCAG 2.4.3 A).
+- **Heading hierarchy.** Each layout region should use headings that fit the page hierarchy. The content area heading should be `<h1>`. Sidebar headings should be `<h2>` or lower. Do not skip heading levels across regions (WCAG 2.4.6 AA).
+
+# Box
+
+
+
+Used as the lowest-level building block for containing UI elements.
+
+### **API documentation**
+
+_Refer to TypeDocs in Box.tsx_
+
+### **Usage guidelines**
+
+**When to use:**
+
+- As a container for child elements
+- To  apply padding or margin to a group of elements
+- To create basic visual styling (such as background, border, shadow, etc.) for the purposes of composing a custom component
+
+**When not to use:**
+
+- As an interactive element
+- As a way to lay out child elements. Use Flex or Stack or Whatever instead.
+- To act as a container for content that would otherwise be reserved for Card.
+- To center content at a max width. Use **Container** instead — it sets `max-width` and centers itself.
+
+**Choosing between Box, Card, and Container:**
+
+| Component | Purpose | Adds visual styling | Use case |
+| --- | --- | --- | --- |
+| Box | Spacing and structure | No (transparent by default) | Wrapping elements with padding or margin |
+| Card | Content surface | Yes (background, border, shadow, tone) | Grouping related content on a distinct surface |
+| Container | Centered column | No | Constraining content width and centering it |
+
+### **Best practices**
+
+**Do**
+
+- Use padding over margin when possible to avoid spacing issues related to margin collapse
+
+**Don't**
+
+- Avoid adding margin/padding to individual elements like Buttons or Text to set placement.  Instead, wrap elements in Box with margin/padding.
+- Don't add onClick to Box
+
+### **Variants**
+
+#### Padding
+
+### Accessibility
+
+- **Layout only.** Box provides spacing and structure. It does not add keyboard handling, focus management, or ARIA state. If you render Box as a semantic element via `as`, you are responsible for the behavior that element requires.
+- **Semantic elements via `as`.** Box accepts an `as` prop. Use it to render semantic HTML when the content requires it:
+  - `as="nav"` — requires `aria-label` when more than one `<nav>` exists on the page (WCAG 1.3.1 A).
+  - `as="section"` — requires a heading child or `aria-label` to register as a landmark (WCAG 1.3.1 A).
+  - `as="form"` — requires an accessible name via `aria-label`, `aria-labelledby`, or `<legend>` (WCAG 1.3.1 A).
+  - `as="main"` — should appear once per page.
+  - `as="aside"` — should have `aria-label` when the role is not clear from context.
+- **Behavioral elements.** Do not use `as` to render `<button>`, `<dialog>`, `<select>`, `<details>`, `<summary>`, or `<fieldset>`. Box does not fulfil the keyboard, focus, or ARIA contracts those elements require (WCAG 4.1.2 A). Use the matching Sanity UI component instead.
+- **Lists.** When rendering `as="ul"` or `as="ol"`, add `role="list"` if `list-style: none` is applied. WebKit strips list semantics without it (WCAG 1.3.1 A). Children must be `<li>` elements.
+- **Visual-to-DOM order.** Do not use CSS `order` or grid placement on Box children to reorder them from source order. Screen readers and keyboard navigation follow DOM order, not visual order (WCAG 1.3.2 A).
+- **Spacing and reflow.** Box spacing tokens use `rem` units and scale with user font-size settings. Content inside Box must reflow at 320px viewport width without horizontal scrolling (WCAG 1.4.10 AA).
+
+### Content
+
+- **Box does not set text styles.** Box provides spacing and structure. It does not set font size, line height, weight, or color. Use Text, Heading, or Label for text styling.
+- **Casing (P8).** All text inside Box must use sentence case. The child components (Text, Heading, Button) own the styling. Box does not override it.
+
+# Flex
+
+Used as the lowest-level building block for laying out UI elements.
+
+### **API documentation**
+
+_Refer to TypeDocs in Flex.tsx_
+
+### **Usage guidelines**
+
+**When to use:**
+
+- To lay items out in a row. Flex defaults to horizontal direction.
+- To control alignment: center children, space them apart, or push one to the end.
+- To lay items in a column with alignment or wrap control. Use `direction="column"` when you need more control than Stack provides.
+- To create responsive layouts that change direction at breakpoints: `direction={['column', , 'row']}`.
+
+**When not to use:**
+
+- To stack items in a simple vertical column with even spacing. Use **Stack** instead — it is simpler and locks direction to vertical.
+- To create a two-axis grid. Use **Grid** instead.
+- To wrap a single child with spacing or visual styling. Use **Box** instead.
+- To flow inline items that wrap to the next line. Use **Inline** instead.
+
+**Choosing a layout primitive:**
+
+| Component | Direction | Key props | Use case |
+| --- | --- | --- | --- |
+| Flex | Any (default: row) | `direction`, `align`, `justify`, `wrap`, `gap` | Rows, columns with alignment, responsive direction changes |
+| Stack | Vertical only | `gap` | Simple vertical column with even spacing |
+| Grid | Two-axis | `columns`, `rows`, `gap` | Grid-based layouts |
+| Inline | Horizontal | `space` | Tags, chips, inline groups that wrap |
+| Box | None (block) | `padding` | General container for spacing and visual styling |
+
+### **Best practices**
+
+**Do**
+
+- 
+
+**Don't**
+
+-
+
+### Accessibility
+
+- **Layout only.** Flex provides layout along an axis. It does not add keyboard handling, focus management, or ARIA state. If you render Flex as a semantic element via `as`, you are responsible for the behavior that element requires.
+- **Semantic elements via `as`.** Flex accepts an `as` prop. Use it to render semantic HTML when the content requires it:
+  - `as="nav"` — requires `aria-label` when more than one `<nav>` exists on the page (WCAG 1.3.1 A).
+  - `as="section"` — requires a heading child or `aria-label` to register as a landmark (WCAG 1.3.1 A).
+  - `as="form"` — requires an accessible name via `aria-label`, `aria-labelledby`, or `<legend>` (WCAG 1.3.1 A).
+  - `as="main"` — should appear once per page.
+  - `as="aside"` — should have `aria-label` when the role is not clear from context.
+- **Behavioral elements.** Do not use `as` to render `<button>`, `<dialog>`, `<select>`, `<details>`, `<summary>`, or `<fieldset>`. Flex does not fulfil the keyboard, focus, or ARIA contracts those elements require (WCAG 4.1.2 A). Use the matching Sanity UI component instead.
+- **Lists.** When rendering `as="ul"` or `as="ol"`, add `role="list"` if `list-style: none` is applied. WebKit strips list semantics without it (WCAG 1.3.1 A). Children must be `<li>` elements.
+- **Visual-to-DOM order.** Do not use `flex-direction: row-reverse` or `flex-direction: column-reverse` when children contain interactive or readable content. Do not use CSS `order` on Flex children. Screen readers and keyboard navigation follow DOM order, not visual order (WCAG 1.3.2 A, WCAG 2.4.3 A). If visual reordering cannot be avoided, confirm the DOM order produces a logical reading sequence.
+- **Reflow at 320px.** Layouts built with Flex must work at 320px viewport width without horizontal scrolling (WCAG 1.4.10 AA). Use `wrap="wrap"` for content that should flow to the next line. Avoid fixed `px` widths on Flex children — use percentage-based or `flex-grow` sizing. Flex spacing tokens use `rem` and scale with user font-size settings (WCAG 1.4.12 AA).
+
+### Content
+
+- **Flex does not set text styles.** Flex provides layout along an axis. It does not set font size, line height, weight, or color. Use Text, Heading, or Label for text styling.
+- **Casing (P8).** All text inside Flex must use sentence case. The child components (Text, Heading, Button) own the styling. Flex does not override it.
+
+# Stack
+
+Arranges children in a single vertical column with consistent spacing between them.
+
+[Figma component](https://www.figma.com/design/5mhVqXlldJEEB2VWZeKQ4i/%F0%9F%A7%AC-Sanity-UI?node-id=29358-183&m=dev) · [React component](https://github.com/sanity-io/ui/blob/v4-beta/packages/ui/src/primitives/stack/Stack.tsx)
+
+### API documentation
+
+Stack takes the following props:
+
+### Usage guidelines
+
+**When to use:**
+
+- To arrange items in a vertical column with even spacing. Examples: form fields, card lists, text blocks.
+- To stack related content where each child spans the full width of the parent.
+- To create vertical rhythm in a section without writing custom CSS.
+
+**When not to use:**
+
+- To lay out items side by side. Use **Flex** instead.
+- To create a two-axis grid of items. Use **Grid** instead.
+- To flow inline items that wrap to the next line. Use **Inline** instead.
+- To wrap a single child with no spacing needs. Use **Box** instead.
+- To create overlapping layers on the z-axis. Use CSS `position` and `z-index` instead. Stack does not layer items — it lines them up in sequence.
+
+**Layout primitive comparison:**
+
+| **Component** | **Direction** | **Spacing prop** | **Wrapping** | **CSS model** | **Use case** |
+| --- | --- | --- | --- | --- | --- |
+| Stack | Vertical only | `gap` | None | CSS Grid | Vertical column of items |
+| Flex | Any | `gap` + alignment | Optional | Flexbox | Rows, columns, or mixed layouts |
+| Grid | Two-axis | `gap` + columns/rows | Implicit | CSS Grid | Grid-based layouts |
+| Inline | Horizontal | `space` | Wraps by default | Flexbox | Tags, chips, inline groups |
+
+### Best practices
+
+**Do**
+
+- Use `gap` to control spacing. Stack is built for this. Avoid adding margins to children.
+- Match `gap` to content density. Use `1`–`2` for tightly grouped items. Use `3`–`4` for distinct siblings. Use `5`+ for section-level breaks.
+- Set `as="ul"` or `as="ol"` when children form a list. Add `role="list"` and wrap each child in an `<li>`. See the accessibility section for details.
+- Set `as="nav"` when children form a set of navigation links.
+- Nest Stacks to create grouped layouts. A form can use an outer Stack with `gap={5}` for field groups, and inner Stacks with `gap={2}` for label-input pairs.
+
+**Don't**
+
+- Don't add `margin-bottom` or `margin-top` to children to create spacing. Use `gap` on the Stack. Manual margins conflict with the grid gap and cause uneven results.
+- Don't use Stack when items need to sit side by side. Use **Flex** or **Inline** instead.
+- Don't set `as` to a semantic element without meeting its contract. A `<nav>` needs navigation links. A `<fieldset>` needs a `<legend>`. A `<section>` needs a heading. See the accessibility section.
+- Don't use `as="button"` or `as="dialog"` on Stack. Stack provides layout, not behavior. Use the **Button** or **Dialog** components for those roles.
+- Don't reorder children with CSS `order`. This breaks the link between visual order and DOM order, which harms screen reader and keyboard users.
+
+### Variants
+
+#### Gap
+
+`gap` sets the vertical space between children. Values map to the spacing scale. The prop accepts responsive values.
+
+| **Value** | **Size** | **Content pattern** | **Use case** |
+| --- | --- | --- | --- |
+| `0` | 0px | No gap | Items that must touch (rare) |
+| `1` | 4px | Tight grouping | Label paired with its input |
+| `2` | 8px | Tight grouping | Icon paired with a text line |
+| `3` | 12px | Standard spacing | Form fields in a group |
+| `4` | 20px | Standard spacing | Cards in a list, paragraphs |
+| `5` | 28px | Generous spacing | Sections within a view |
+| `6` | 36px | Generous spacing | Major content blocks |
+| `7` | 44px | Generous spacing | Page-level sections |
+| `8` | 52px | Generous spacing | Reserved for large layouts |
+| `9` | 60px | Generous spacing | Reserved for large layouts |
+
+**Content density tiers:**
+
+- **Tight (1–2).** Items that form a single unit. A label and its input. An icon and its caption. The gap should feel like a pause, not a break.
+- **Standard (3–4).** Distinct items that belong to the same group. Form fields, paragraphs, cards. The gap should feel like a clear separator.
+- **Generous (5+).** Major sections that need visual distance. Use this to create breaks without adding a divider. The gap should feel like a new section.
+
+**Responsive example:** `<Stack gap={[2, , 4]}>` — uses `2` at the smallest breakpoint and `4` at the 600px breakpoint.
+
+#### As (semantic element)
+
+`as` sets the rendered HTML element. The default is `'div'`.
+
+| **Value** | **When to use** | **Requirements** |
+| --- | --- | --- |
+| `'div'` | Generic vertical layout (default) | None |
+| `'ul'` | An unordered list of items | Add `role="list"`. Children must be `<li>` elements. |
+| `'ol'` | An ordered list of items | Add `role="list"`. Children must be `<li>` elements. |
+| `'nav'` | A group of navigation links | Add `aria-label` when the page has more than one `<nav>`. |
+| `'section'` | A themed group with a heading | Add a heading child. Without one, `<section>` has no landmark role. |
+| `'fieldset'` | A group of related form controls | Add a `<legend>` as the first child. |
+| `'form'` | A form container | Add an `aria-label` or visible heading. |
+| `'header'` | Page or section header | Should contain heading and nav elements. |
+| `'footer'` | Page or section footer | Should contain metadata or nav elements. |
+
+Avoid `as="button"`, `as="dialog"`, or `as="select"`. These elements carry behavior contracts that Stack does not fulfil. Use the matching component instead.
+
+#### Padding
+
+`padding` adds inner spacing around all children. It does not affect the gap between them. The prop accepts responsive values.
+
+Use `paddingX` and `paddingY` to set inline and block padding one by one. Use side-specific props (`paddingTop`, `paddingBottom`, `paddingLeft`, `paddingRight`) for fine control.
+
+Example: `<Stack gap={3} padding={4}>` — 12px between children, 20px of inner padding.
+
+#### Border
+
+`border` adds a visible border around the Stack. Use `borderTop` or `borderBottom` alone to create visual dividers at the edges of a section.
+
+Example: `<Stack gap={3} padding={3} border>` — a bordered vertical group.
+
+#### Overflow
+
+`overflow` controls how content behaves when it exceeds the Stack's bounds. Set `overflow="auto"` on a Stack with a fixed `height` to create a scrollable vertical region.
+
+### Accessibility
+
+**Semantic elements and landmarks.** Stack renders a `<div>` by default. This is correct for most cases. When the content has a semantic role, change the element with `as`. Each semantic element has rules:
+
+- `as="nav"` creates a navigation landmark. Add `aria-label` when two or more `<nav>` elements exist on the same page. Without a label, screen readers cannot tell them apart (WCAG 1.3.1).
+- `as="section"` only registers as a landmark when it has an accessible name. Add a heading inside it, or set `aria-label`. Without either, `<section>` is the same as `<div>` to screen readers (WCAG 1.3.1).
+- `as="fieldset"` requires a `<legend>` as its first child. The `<legend>` gives the group its accessible name.
+
+**List semantics and VoiceOver.** When using `as="ul"` or `as="ol"`, add `role="list"` to the Stack. WebKit and Safari strip list semantics from `<ul>` and `<ol>` elements when `list-style: none` is applied via CSS. Adding `role="list"` restores the behavior. Without it, VoiceOver does not announce the element as a list or report the item count (WCAG 1.3.1).
+
+Each child of a list Stack must be an `<li>` element. Wrap each child in `<li>` or use `as="li"` on child components that support it.
+
+Example:
+
+`<Stack as="ul" role="list" gap={2}>`
+
+`  <li>First item</li>`
+
+`  <li>Second item</li>`
+
+`  <li>Third item</li>`
+
+`</Stack>`
+
+
+
+**Reading order.** Stack places items in DOM order. Visual order and DOM order match by default. Do not use CSS `order` on children. It breaks the link between what users see and what screen readers announce. Keyboard navigation also follows DOM order, not visual order (WCAG 1.3.2).
+
+**Content spacing.** For text content, use `gap` of `3` (12px) or higher. Smaller values can make text blocks feel cramped. This harms readability for users with cognitive or visual needs (WCAG 1.4.12).
+
+**Reflow.** Stack uses a single-column layout with `minmax(0, 1fr)` width. Content reflows well on narrow screens. No extra work is needed for WCAG 1.4.10 (Reflow).
+
+**Zoom.** Spacing tokens use `rem` values. Content scales when users adjust browser zoom or font size settings.
+
+### Content
+
+**Common children patterns:**
+
+- **Form field groups.** Label, input, and help text stacked with `gap={2}`.
+- **Text content blocks.** Heading followed by body paragraphs, stacked with `gap={3}` or `gap={4}`.
+- **Card or item lists.** Repeated items of the same type, stacked with `gap={3}`.
+- **Navigation groups.** Vertical nav links stacked with `gap={2}`.
+- **Mixed content sections.** Heading, body text, form, and action buttons stacked with `gap={5}`.
+
+**Spacing choices.** Pick `gap` based on the relationship between items, not the pixel value. Tightly related items (label + input) use a small gap. Distinct peers (form fields) use a medium gap. Separate sections use a large gap. See the gap section for the full tier breakdown.
+
+**Width behavior.** Stack fills its parent's width. Each child stretches to the full width of the Stack. This is not adjustable — if you need children with varied widths, use **Flex** or **Grid**.
+
+**No text styling.** Stack is a layout primitive. It does not set font size, line height, or color. Use **Text**, **Heading**, or **Label** inside the Stack to style text content.
+
+### v3 to v4 migration
+
+| **Area** | **v3** | **v4** |
+| --- | --- | --- |
+| Spacing prop | `space={3}` | `gap={3}` (renamed) |
+| Responsive format | Array only: `space={[2, 3]}` | Array, object, or scalar: `gap={3}`, `gap={[2, , 4]}`, `gap={{sm: 2, lg: 4}}` |
+| List handling | `as="ul"` applied `list-style: none` on its own | Removed. Apply `list-style: none` and `role="list"` yourself. |
+| Styling engine | styled-components | CSS class composition |
+| `forwardRef` | Required for ref forwarding | Not needed (React 19 ref-as-prop) |
+| Breakpoints | Theme-driven (varied) | Fixed: `[0, 360, 600, 900, 1200, 1800, 2400]` px |
+
+**Rename **`space`** to **`gap`**.** Find all uses of `<Stack space={…}>` and change them to `<Stack gap={…}>`. The values (0–9) stay the same.
+
+**Update list Stacks.** In v3, `as="ul"` stripped list markers on its own. In v4, you must add `role="list"` and style `list-style: none` yourself. Without `role="list"`, VoiceOver does not treat the element as a list.
+
+**Check responsive values.** v3 only accepted arrays. v4 accepts arrays, objects, and scalars. No changes are needed — arrays still work. Objects and scalars are new options.
+
+# Text
+
+
+
+Used for the majority of UI copy, including body paragraphs, captions, and metadata. It is distinct from other typography components, such as Code, Heading, KBD, and Label.
+
+### **API documentation**
+
+_Refer to TypeDocs in Text.tsx_
+
+### **Usage guidelines**
+
+**When to use:**
+
+- You are displaying body copy, descriptions, or captions
+
+**When not to use:**
+
+- To label a section within a Menu, side panel, or above headings. Use Label instead.
+- To establish the structural hierarchy of a page (e.g., Page Title). Use Heading instead.
+- To denote a keyboard shortcut or hotkey. Use KBD instead.
+- For displaying inline or block code samples. Use Code instead.
+- As a specific interaction link. Wrap the text in a link component or anchor tag, ensuring the clickable area is accessible.
+
+### **Best practices**
+
+**Do**
+
+- Use `align=”left”` in the majority of cases. Sanity’s typographic system prefers start-aligned text.
+- Use the `muted` prop for helper text or metadata to visually de-emphasize it compared to primary content.
+- Use responsive arrays (e.g., `size={[1,2,3]}`) to ensure text is readable across mobile and desktop viewports.
+- Aim for 55-70 characters per line in a multiline block of text for optimal legibility.
+
+**Don’t**
+
+- Don’t center-align long blocks of paragraph text; this disrupts the reading flow and is difficult for users with dyslexia.
+- Don’t rely on color or the `accent` prop to capture attention or convey importance. People with certain visual impairments may not distinguish the change. Pair the text with an icon or badge instead.
+- Don’t italicize or underline to emphasize text. Use Text’s weight prop instead.
+- Don’t truncate text unless it is completely necessary. Text truncation makes information less available to people which can become a point of friction or confusion.
+
+### Variants
+
+#### Muted
+
+Used to visually deemphasize a text element. It’s specifically helpful in situations where the text is objectively less important than other text in a composition. Examples include captions or subheadings. Muting text can be an effective method to increase focus on the most important textual information on the screen.
+
+Deemphasizing secondary information is the preferred method for increasing focus compared to over-reliance on bolding text using `weight`. It’s recommended to begin with muting text to aid in emphasis before attempting treatments such as using `accent` or `weight`.
+
+#### Weight
+
+Sets the typographic weight of text.
+
+| **Value** | **Description** | **Purpose** | **Use case(s)** |
+| --- | --- | --- | --- |
+| `"regular"` | Regular font weight (400) | For general body text. The preferred weight for text above `size=0`. | General paragraphs and normal body copy. |
+| `"medium"` | Medium font weight (500) | To create visual separation from general body copy as well as improve general legibility for small text. | The default text treatment in interactive elements. Use semibold for labels in custom interactive UI components. General text treatments using Text’s `size=0`. |
+| `"semibold"` | Semibold font weight (600) | For emphasizing text  above `size=0`. | Emphasizing a term or phrase within paragraphs and normal body copy.  |
+| `"bold"` | Bold font weight (700) | Specifically to emphasize Text components with `size=0 `to aid in legibility. | For emphasized  text treatments using Text’s smallest size. |
+
+#### Size
+
+| **Value** | **Description** | **Purpose** | **Use case(s)** |
+| --- | --- | --- | --- |
+| `0` | Text’s smallest size | To act as a way to deemphasize content and/or accommodate for extreme high-density compositions. | For fine print and legal text (check with local laws to ensure compliance) Situations where text is required in a small space |
+| `1` | Text’s small size | The default size for UI text and UI labels, such as Buttons, MenuItems, and Tabs. | Text or UI labels that are **not** specifically related to content editing. Text that acts as non-critical messaging to the user, such as Toasts and empty states. |
+| `2` | Text’s medium size | The default size for text related to content editing | Text or UI labels that are specifically related to content editing (ex: text fields, selects, etc.). Calls to action where visual emphasis is essential (ex: calling out important steps in a workflow) |
+| `3` | Text’s large size | For adding significant emphasis. Use is not generally advised. | No common use cases. Most uses are better supported by  the Header component. |
+| `4` | Text’s extra large size | For adding extreme emphasis. Use is not generally advised. | No common use cases. Most uses are better supported by  the Header component. |
+
+#### Accent
+
+Accent is deprecated and should be avoided. Use `weight` and/or `size` instead of accent to increase emphasis.
+
+#### Align
+
+| **Value** | **Description** | **Purpose** | **Use case(s)** |
+| --- | --- | --- | --- |
+| `"left"` | Text that is left/start aligned. | Acts as the primary alignment for text within Sanity UI within LTR languages. | Displaying body copy for LTR languages. Headers and content for numeric data within table cells in RTL languages. |
+| `"center"` | Text that is center aligned. | Used rarely in situations where the text element’s parent is centered. | Copy within a pure-center content block, such as an empty state. Labels within UI elements, such as Buttons, Tabs, etc. |
+| `"right"` | Text that is right/end aligned. | Acts as the primary alignment for text within Sanity UI within RTL languages. | Displaying body copy for RTL languages. Headers and content for numeric data within table cells in LTR languages. |
+
+#### TextOverflow
+
+Determines whether the Text component truncates as opposed to wrapping. This should be used as a last resort. Some examples where TextOverflow should be used are:
+
+- Text used within a grid of elements where text wrapping would cause irregular sizes or shifts in content.
+- Extremely long strings, like UUIDs, in small areas where the text won’t wrap elegantly and will push the container to unsupported widths.
+- Situations where text is user/machine generated and extreme edge cases may exist.
+
+Before truncating, attempt to shorten the text if possible. The ideal kind of truncation is no truncation. When truncation is necessary, make sure the full text string is available via `Tooltip` component or `title `attribute.
+
+### Accessibility
+
+- **Semantic elements via `as`.** Text defaults to a `<div>`. Use `as` to render the correct element:
+  - `as="p"` — for paragraph text.
+  - `as="span"` — for inline text within another element.
+  - `as="label"` — for form labels. Pair with `htmlFor` to link to an input.
+  - Do not use `as` for behavioral elements like `<button>` or `<a>`. Text does not add keyboard handling or ARIA roles (WCAG 4.1.2 A).
+- **Color contrast.** Text must maintain **4.5:1** contrast against its background for standard sizes, and **3:1** for large text (24px+ regular or 19px+ bold) (WCAG 1.4.3 AA). Take care with `muted` or `accent` on non-standard backgrounds.
+- **Color independence.** Do not use the `accent` prop as the only way to mark status. Pair color with text labels or icons (WCAG 1.4.1 A).
+- **Zoom and reflow.** Text must remain legible at 400% zoom / 320px viewport width (WCAG 1.4.10 AA). Text spacing must hold up when users override line height to 1.5×, paragraph spacing to 2×, letter spacing to 0.12×, and word spacing to 0.16× (WCAG 1.4.12 AA). Spacing tokens use `rem` units and scale with user font-size settings. Do not use fixed `px` units when overriding styles.
+
+### **Content**
+
+- **Sentence case:** Use sentence case for UI labels and body text (e.g., "Edit profile" not "Edit Profile").
+- **Clear language:** Avoid jargon, acronyms, and complex sentence structures. Aim for an 8th-grade reading level to maximize comprehension.
+- **Conciseness:** Be succinct. Avoid "filling space" with flowery language. Users scan text rather than reading word-for-word.
+- **Actionable:** When Text is used for instructions, frame the content as actionable steps rather than passive descriptions.
+
+# Heading
+
+
+
+Headings are used to create a logical hierarchy and page structure. They guide the user's eye, group related content, and enable users of assistive technologies to navigate the interface quickly.
+
+### API documentation
+
+_Refer to TypeDocs in Heading.tsx_
+
+### Usage guidelines
+
+**When to use:**
+
+- You need to establish the semantic structure of a page (e.g., Page Title, Section Header).
+- You need to group text and elements into logical sections.
+
+**When not to use:**
+
+- Don’t use Heading for large text for a number or a callout that does not define a section. Use the **Text** component with a `size` prop instead.
+- Don’t use Heading to emphasize text inside a paragraph. Use **Text** with a `weight="bold"` prop.
+
+### Best practices
+
+**Do**
+
+- Use a logical hierarchy. Start with H1 for the main page title and descend to H2, H3, etc., based on the depth of the content.
+- Use the `as` prop (e.g., `as="h2"`) to ensure the visual size matches the semantic tag. The component defaults to a `div` if not specified, which provides no semantic value.
+- Start-align headings (left-aligned in LTR languages) for easier reading. This provides a consistent starting edge for the eye.
+
+**Don’t**
+
+- Avoid center-aligning headings–especially when the text is long. This disrupts the reading flow and can be difficult for users with dyslexia.
+- Don’t skip heading levels (e.g., jumping from H1 to H3) simply to achieve a specific visual size. Use the `size` prop to adjust visuals while keeping the `as` prop semantically correct.
+- Don’t use Headings for visual differentiation. Headings are functional in nature.
+
+### Variants
+
+#### Size
+
+| **Value** | **Description** | **Purpose** | **Use case(s)** |
+| --- | --- | --- | --- |
+| `0` | Heading’s smallest size | To act as a way to deemphasize content and/or accommodate for extreme high-density compositions. | No common use cases.  Most uses are better supported by  the Text component. |
+| `1` | Heading’s small size | The default size for Headings within the UI chrome. | Adding title for toolbars and sidebars. Titles for groups of elements, like menuitems. |
+| `2` | Heading’s medium size | The emphasized size for Headings within the UI chrome. | Subheadings within Studio editor |
+| `3` | Heading’s large size | For adding titles within high density layouts. | Content titles within a sidebar. |
+| `4` | Heading’s extra large size | For adding titles within moderate density layouts. | Document titles within Studio editor content. |
+| `5` | Heading’s largest size | For adding titles within low density layouts. | Document titles within Canvas editor content. |
+
+#### Align
+
+Sets the Heading’s horizontal alignment. **Use with caution. **Headings should almost always be left/start aligned. In certain cases on mobile devices `align=”center”` may be preferable.
+
+#### Weight
+
+Adjusts the Heading’s font weight. **Use with caution. **Maintaining a consistent typographic weight for headings helps establish visual markers in the interface. It’s recommended to not set a custom weight for Heading.
+
+#### Muted
+
+Used to visually deemphasize a heading element. **Use with caution. **Heading’s purpose is to be emphasized above regular text. Setting Heading to muted reduces the visual separation.
+
+#### Accent
+
+Accent should only be used in rare circumstances where adding color is considered essential to communication. Use `size` ahead of accent.
+
+#### TextOverflow
+
+Determines whether the Heading component truncates as opposed to wrapping. This should be used as a last resort. Some examples where TextOverflow should be used are:
+
+- Titles used within a grid of elements where text wrapping would cause irregular sizes or shifts in content.
+- Situations where text is user/machine generated and extreme edge cases may exist.
+
+Before truncating, attempt to shorten the text if possible. The ideal kind of truncation is no truncation. When truncation is necessary, make sure the full text string is available via `Tooltip` component or `title `attribute.
+
+### Accessibility
+
+- **Navigation and orientation.** Screen reader users rely on headings to navigate complex interfaces. Headings address common orientation issues in Sanity Studio.
+- **Semantic structure.** Always use the `as` prop to render `<h1>`–`<h6>` tags. The default `<div>` rendering provides no heading role. Screen readers will skip it.
+- **Logical order.** Heading levels must descend in sequence (H1 → H2 → H3). Do not skip levels (e.g. H1 to H4). Screen reader users navigate by heading level — a gap breaks their mental model.
+- **Color contrast.** `muted` or `accent` headings must maintain **3:1** contrast against the background for large text (24px+ regular or 19px+ bold) and **4.5:1** for smaller text (WCAG 1.4.3 AA).
+- **Zoom and reflow.** Heading sizes must remain legible at 400% zoom / 320px viewport width (WCAG 1.4.10 AA). Long headings should wrap, not clip. When using `textOverflow="ellipsis"`, verify clipped headings still make sense in context. Spacing tokens use `rem` and scale with user font-size settings (WCAG 1.4.12 AA).
+
+### **Content**
+
+- **Concise:** Keep headings short and glanceable. Avoid overly long titles that wrap to multiple lines if possible.
+- **Sentence case:** Use sentence case for headings (e.g., "Page settings" rather than "Page Settings") to maintain a conversational tone and improve scanability.
+- **No punctuation:** Do not use punctuation (periods) at the end of headings unless the heading is a direct question.
+- **Descriptive:** Headings should clearly describe the content of the section they introduce.
+
+# Tooltip
+
+**Description** The Tooltip is a floating text label that displays information when a user hovers, focuses, or taps on an element. Its purpose is to provide helpful, non-essential context to a UI element. It succinctly describes the function of an element (like an icon-only button) or enhances baseline understanding without cluttering the interface.
+
+### **API Documentation**
+
+The Tooltip component accepts the following specific properties. It extends `LayerProps` (excluding `as`) .
+
+| **Attribute** | **Type** | **Accepted Values** | **Default** | **Optional** | **Description** |
+| --- | --- | --- | --- | --- | --- |
+| **content** | ReactNode | `ReactNode` | `undefined` | Yes | The content to be displayed inside the floating tooltip card . |
+| **children** | ReactElement | `ReactElement` | `undefined` | Yes | The anchor element (trigger) that the tooltip is attached to . |
+| **placement** | String | `'top'`, `'bottom'`, `'left'`, `'right'`, etc. | `'bottom'` | Yes | The preferred position relative to the reference element . |
+| **fallbackPlacements** | Array | `Placement[]` | `undefined` | Yes | A list of alternative positions to try if the primary `placement` does not fit in the viewport . |
+| **delay** | Number / Object | `number` \|`{ open: number; close: number }` | `0` | Yes |  |
+| **arrow** | Boolean | `true` \|`false` | `false` | Yes |  |
+| **animate** | Boolean | `true` \|`false` | `false` | Yes |  |
+| **disabled** | Boolean | `true` \|`false` | `false` | Yes |  |
+| **portal** | Boolean / String | `boolean` \|`string` | `undefined` | Yes |  |
+| **padding** | Number / Array | `number` \|`number[]` | `2` | Yes |  |
+| **radius** | Number / Array | `number` \|`number[]` | `2` | Yes |  |
+| **shadow** | Number / Array | `number` \|`number[]` | `2` | Yes |  |
+| **scheme** | String | `'light'`, `'dark'` | `undefined` | Yes | Forces a specific color scheme for the tooltip . |
+| **boundaryElement** | HTMLElement | `HTMLElement` | `null` | Yes | Defines the element boundary that the tooltip should not overflow . |
+
+### **When to Use / When Not to Use**
+
+- **Use when:** You need to explain the function of an icon-only button (e.g., a "Trash" icon meaning "Delete").
+- **Use when:** You need to provide supplementary information that enhances the understanding of a feature but is not critical for the task.
+- **Do not use when:** The information is critical for the user to complete a task or understand an error. Use inline text or banners instead.
+- **Do not use when:** You are restating text that is already visible on the screen. This creates redundancy and cognitive noise.
+- **Do not use when:** The element is disabled. Disabled elements cannot receive focus, making the tooltip inaccessible to keyboard users.
+
+### **Usage Dos and Don’ts**
+
+- **Do** use the `arrow` prop to visually link the tooltip to small triggers like icons, helping users identify which element is being described.
+- **Do** use `delay` to prevent tooltips from flickering open/closed as the user moves their mouse rapidly across the screen (hover intent).
+- **Don’t** put interactive content like links or buttons inside a Tooltip. If you need interactive content, use a **Popover** instead.
+- **Don’t** use lengthy text. Tooltips are for quick scanning; if the text is long, consider if it belongs in a modal or helper text.
+
+### **Variants & Examples**
+
+**1. Basic Tooltip** A simple text label for an icon button.
+
+`<Tooltip content={<Text>Edit Profile</Text>}>`
+
+`  <Button icon={EditIcon} mode="ghost" />`
+
+`</Tooltip>`
+
+
+
+**2. With Arrow and Animation** Provides a smoother visual transition and clearer connection to the trigger.
+
+`<Tooltip`
+
+`  arrow`
+
+`  animate`
+
+`  content={<Box padding={2}><Text>Helpful information</Text></Box>}`
+
+`>`
+
+`  <Button text="Hover me" />`
+
+`</Tooltip>`
+
+
+
+**3. Delayed Interaction** Adds a 500ms delay before opening to prevent accidental triggers.
+
+`<Tooltip`
+
+`  delay={{ open: 500, close: 0 }}`
+
+`  content={<Text>Delayed tip</Text>}`
+
+`>`
+
+`  <Button icon={InfoIcon} />`
+
+`</Tooltip>`
+
+
+
+### Accessibility
+
+- **Keyboard trigger.** Tooltips must appear on keyboard focus, not only on mouse hover. The child element must be interactive (a `<button>`, `<a href>`, or other focusable element).
+- **Escape to dismiss.** Pressing `Escape` must hide the tooltip without moving focus.
+- **Tab behavior.** The tooltip is not a Tab stop. When the user presses Tab, focus moves to the next focusable element and the tooltip closes. The tooltip should close on Tab away from the trigger (per the APG Tooltip pattern).
+- **Disabled elements.** Never attach a tooltip to a disabled button (`<button disabled>`). Disabled elements leave the tab order. Keyboard users will never reach the tooltip. Place the tooltip on a wrapper element instead, or provide context through nearby text.
+- **Reduced motion.** The `animate` prop respects the user's `prefers-reduced-motion` setting. When reduced motion is on, the tooltip appears and hides with no transition.
+- **Screen readers.** Tooltip content must not repeat the trigger's `aria-label`. If the button is labeled "Settings," the tooltip should add context or be omitted.
+
+### **Content Guidelines**
+
+- **Concise:** Limit text to a maximum of 60–75 characters where possible. Tooltips should be succinct .
+- **Action-Oriented:** Start with a verb if describing an action (e.g., "Edit profile" rather than "Profile editor") .
+- **Sentence Case:** Use sentence case for tooltip labels (e.g., "Save to board" not "Save To Board") .
+- **No Punctuation:** Avoid periods at the end of fragments. Only use punctuation if the tooltip contains full sentences .
+
+# Button
+
+
+
+Used to trigger an action–like submitting a form, opening a dialog, or performing a command.
+
+### API documentation
+
+_Refer to TypeDocs in Button.tsx_
+
+### Usage guidelines
+
+**When to use:**
+
+- To trigger an action within the application (e.g., "Publish", "Delete", "Save").
+- `.` To submit data in a form context. In such cases, set Button to `type="submit"`.
+
+**When not to use:**
+
+- To navigate the user to a new view or URL within  a line of text or paragraph. Use **Link** instead. Users of assistive technology expect buttons to perform actions and links to navigate.
+- To switch between different views on a screen. Use **Tab** instead. The Tab component family has several `aria` tags that make navigation accessible for people relying on assistive technology.
+
+### Best practices
+
+**Do**
+
+- Use the `tone=”critical”` when an action is destructive, such as delete actions.
+- Ensure buttons have a logical tab order in the document flow (left to right, top to bottom).
+- Bias towards using text labels in buttons to aid in comprehension.
+- Limit the number of primary buttons on the screen. Display one primary action per logical section (example: actions in a toolbar, or a card).
+- Add tooltips to icon-icon buttons. Wrap the button in a tooltip, and use `aria-label` – `<Tooltip text="Text"><Button aria-label="Text" icon={...} />`
+- Set `iconRight` to `chevron-down` when using `Button` in `MenuButton`
+
+**Don’t**
+
+- Don’t rely on color alone to convey the button's meaning (e.g., an error state should not just be red; use icons or text).
+- Don’t use vague labels. Avoid terms like "Click here"; use descriptive labels that explain the action.
+- Don’t disable buttons as a blocking function, such as disabling a submit button until all required fields are filled. People may not immediately understand what’s causing the button to be disabled. Instead, allow buttons to be pressed and provide appropriate feedback in response.
+- Don’t hide buttons that represent critical actions. Actions that represent primary actions should be visible at all times.
+- Don’t overuse icons and text together in buttons. Only use when it doesn't prevent scannability–typically in situations where 3 or less buttons are grouped together.
+
+### States
+
+| **Value** | **Description** | **Purpose** | **Use case(s)** |
+| --- | --- | --- | --- |
+| `"enabled"` | Button’s standard state (default) | To represent that a button is clickable |  |
+| `"hovered"` | Provides a visual cue that the cursor is resting over the component |  |  |
+| `“pressed”` | Provides a visual cue that the button is actively being pressed via keyboard input, finger tap, or mouse press. |  |  |
+| `“focused”` | Provides a visual cue that the button is in a focused state and is interactable with keyboard inputs |  |  |
+| `"disabled"` | Removes the ability to interact with the button in any way | To remove the ability to interact with an action. | When allowing the user to perform an action can cause destructive or harmful outcomes When button is set to a `loading` state |
+| `“selected”` | Provides a visual cue that the button has been set as “activated” or “on” | To allow Button to act as a toggle between two states. | Text formatting options within a rich-text editor toolbar |
+| `“loading”` | Provides a visual cue that the button’s action is initiated and in the process of completing | To show that a button’s action is in progress when an action is asynchronous or where there is a perceivable delay (+300ms). | Sync actions with large volumes of data Intensive processes like publishing content |
+
+**Note: **It's possible to pass `data-{state}` props to achieve the same styling as CSS pseudo classes. These are equal:
+
+`:hover / [data-hovered]`
+
+`:active / [data-pressed]`
+
+`:disabled / [data-disabled]`
+
+
+
+#### Selected
+
+When a button opens a panel or activates an action
+
+- Pair with label change
+- **Combine with **`mode="bleed"` for clean toggle appearance
+
+#### Disabled
+
+Used to prevent a person from performing an action or to show when an action is unavailable. A common use case is marking Button as disabled when `loading={true}`.
+
+Disabled should be used sparingly and only when there’s a high degree of confidence that a person will understand why the button is disabled. For example, buttons for submitting information should remain enabled at all times–even when required fields are not filled.
+
+People should know why an action is disabled. Provide context through an info icon, tooltip, or status message that describes why an action is disabled and steps they can take to enable it.
+
+#### Loading
+
+Used to show that the action initiated is in the process of completing. Loading should only be used for processes that take a noticeable amount of time to complete (typically a process that’s consistently longer than 500ms). The action should be `disabled `until the action has completed. For processes that take over three seconds to complete, consider triggering a Toast to reinforce that the action has been completed.
+
+### **Variants**
+
+The Sanity UI Button supports high-level modes and tones to fit different contexts:
+
+#### Mode
+
+Used to indicate the importance of an action.
+
+| **Value** | **Description** | **Purpose** | **Use case(s)** |
+| --- | --- | --- | --- |
+| `"bleed"` | No background, minimal visual weight | Used for tertiary actions–which represent uncommon or background actions in a workflow | Forgot password at authentication Close/dismiss in a sheet or modal |
+| `"ghost"` | Outlined/bordered appearance | Used for secondary actions–which represent common, but not the most critical action in a workflow. | Cancel button in dialogs Save as draft button when editing content |
+| `"default"` | Solid background, full visual weight | Used for primary actions–which represent the most critical action in a workflow. | Publish button when editing content Log in button at authentication |
+
+As a rule of thumb, bleed should represent the majority of actions, followed by ghost, with default being the least used. A common ratio is 60%/30%/10% of bleed/ghost/default.
+
+#### Tone
+
+Used to indicate the semantic meaning of an action.
+
+| **Value** | **Description** | **Purpose** | **Use case** |
+| --- | --- | --- | --- |
+| `"default"` | Neutral gray | Used to represent general actions within the product. | General actions, Publish |
+| `"primary"` | Brand blue | THIS IS TONE IS DEPRECATED. DO NOT USE. | Brand moments, Account creation |
+| `"positive"` | Green | Used for celebratory moments or actions that reinforce success | Success, Publish, Confirm positive |
+| `"caution"` | Yellow/Orange | Used for actions that may have high consequences. | Warning states, Changing a role |
+| `"critical"` | Red | Used for destructive or dangerous actions. | Destructive actions, Delete |
+
+Buttons using `positive`, `caution`, or `critical `should utilize the `icon `prop with `<CheckmarkIcon />`,` <WarningOutlineIcon />`, or `<ErrorOutlineIcon />` respectively to reinforce state for people with color vision issues.
+
+#### Type
+
+Used to represent the type of action that will occur.
+
+| **Value** | **Description** | **Purpose** | **Use case** |
+| --- | --- | --- | --- |
+| `"button"` | Standard button (default) | Used to represent all actions outside of the form context. | General functionality not associated with form submission or resetting. |
+| `"submit"` | Form submission | Used exclusively for submitting form data. | Form submission. |
+| `"reset"` | Form reset | Used exclusively for resetting form data. | Form resetting. |
+
+#### Icon
+
+Typically used to represent an icon button within the interface. Icon buttons should be used in high-density spaces, such as toolbars, or button groups with a large number of actions. Icon buttons should never be used in critical situations where clarity is a must. Decision-based prompts, such as dialogs are another use case where icon buttons should be avoided. Icon buttons should **always** be paired with a tooltip which provides additional context of the button’s action.
+
+While `icon` can be used in conjunction with text, `icon` plus `text` should only be used in two specific circumstances. First, to visually reinforce buttons with a `tone` of `positive`, `caution`, or `critical`. Second, to create even greater emphasis on a primary action. The second use case should be reserved for only the most critical use cases.
+
+#### IconRight
+
+Used to reinforce specific actions within an interface–specifically as visual hints for navigational actions. Examples include:
+
+1. **Use ChevronDownIcon** for dropdown/menu triggers
+1. **Use LaunchIcon** for external links
+1. **Use ArrowRightIcon** to navigate to a new page
+1. **Use ChevronRightIcon** for to drill into nested, column-based navigation
+1. **Use chevrons for expand/collapse** with dynamic direction
+
+### **Content**
+
+- **Be concise:** Button labels should be short and predictable. Use simple and direct language.
+- **Start with verbs:** Labels should describe the action taken (example: "Publish", "Edit", "Upload"). For extra clarity, add the subject of the action, (example: Upload image).
+- **Sentence case:** Use sentence case for button labels (example: "Add item").
+
+### Accessibility
+
+- **Accessible names.** Buttons with a `text` prop get their accessible name from the label. Icon-only buttons must have an `aria-label`. The `tooltip` prop does not set an accessible name. Example: `aria-label="Add content"`.
+- **Keyboard interaction.** Buttons are focusable via `Tab`. They activate with both `Enter` and `Space`. `Space` activates on key-up and must not scroll the page on key-down. Disabled buttons are removed from the tab order via HTML `disabled`.
+- **`as` prop and keyboard behavior.** When `as="a"`, the element activates with `Enter` only — `Space` does not trigger links. Other `as` values may change the implicit ARIA role. Do not use `as` for elements whose behavioral contract Button does not fulfil.
+- **Disabled strategy.** Button uses HTML `disabled`, which removes it from tab order. For cases where the user must discover the disabled element, consider `aria-disabled="true"` instead — it keeps the element focusable but blocks activation (WCAG 2.1.1 A). Do not place tooltips on disabled buttons. Keyboard users cannot reach them.
+- **Focus indicators.** A visible focus ring appears on keyboard focus. Do not suppress it without a high-contrast replacement.
+- **Color contrast.** Button text vs. background must meet **4.5:1** for standard-size text (WCAG 1.4.3 AA). The button's visual edge against nearby colors must meet **3:1** (WCAG 1.4.11 AA). These are separate criteria — do not conflate them.
+- **Minimum target size.** Button's default padding produces targets that meet the **24×24 CSS px** minimum (WCAG 2.5.8 AA). Custom padding values must not shrink the target below this size.
+- **Tone and icons.** Do not rely on tone color alone to convey meaning. Pair `'positive'`, `'caution'`, and `'critical'` tones with icons.
+
+# TextInput
+
+Used to accept a single line of text from the user.
+
+### API documentation
+
+_Refer to TypeDocs in TextInput.tsx_
+
+### Usage guidelines
+
+**When to use:**
+
+- For short text fields: names, titles, search queries, URLs.
+
+**When not to use:**
+
+- For multi-line text. Use **TextArea** instead.
+- For selecting from a fixed list. Use **Select** instead.
+- For toggling a setting. Use **Switch** or **Checkbox** instead.
+
+### Content
+
+- **Placeholder text (P6).** Placeholder text shows the format or a brief hint, not the field name. Write "Search by title or ID" — not "Search." It must not replace a visible label.
+- **Labels are required.** Every TextInput must have a visible label above or beside it. Use `<Label htmlFor="...">` or `aria-label`. A placeholder alone is not a label (see accessibility-standards.md §3).
+- **Error messages (P3).** Inline error text appears below the input. Name the problem in plain words. Tell the user what to do. Example: "Title is required. Enter a title to continue." Do not show codes or jargon.
+- **Casing (P8).** Use sentence case for labels, placeholder text, and error messages.
+- **Keep placeholder text short (P6).** One phrase that fits inside the input at its default width with no clipping.
+- **Do not use placeholder text for rules (P6).** If the user must know rules before typing (e.g. "Must be at least 8 characters"), put help text below the input — not in the placeholder.
+- **Translation (P9).** Placeholder text and labels can grow 30–50% in other languages. Test with longer strings. Do not use string joining to build labels.
+
+### Accessibility
+
+- **Label association.** Every TextInput must have a `<label>` via `for`/`id` or wrapping, or an `aria-label`. A `placeholder` is not a label (WCAG 4.1.2 A).
+- **Error state.** When invalid, the input must have an associated error message. Use `aria-describedby` to link the input to the error text.
+- **Keyboard interaction.** TextInput is focusable via `Tab`. Standard text editing keys apply.
+
+# Toast
+
+Used to show brief status messages about completed actions, warnings, or errors. Toasts appear at the edge of the screen and disappear after a short time.
+
+### API documentation
+
+_Refer to TypeDocs in Toast.tsx_
+
+### Usage guidelines
+
+**When to use:**
+
+- To confirm an action that completed in the background (e.g. "Document published").
+- To report an error from an async task (e.g. "Upload failed. Try a smaller file.").
+- To warn about a non-blocking issue.
+
+**When not to use:**
+
+- For actions that need a response. Use **Dialog** instead.
+- For inline form errors. Show the error next to the input instead.
+- For persistent information. Use a **Card** with a tone instead.
+
+### Content
+
+- **Name the action and its result (P7).** Write "Document published" — not "Success." Write "3 items deleted" — not "Done." Users must know what happened without thinking back to what they clicked.
+- **Use past tense for done actions (P7).** Write "Published," "Saved," "Deleted." Use "-ing" for actions not yet done: "Publishing…," "Saving…"
+- **Keep status messages under one sentence (P7).** Toast messages must be easy to read at a glance. If more is needed, add a link to the item or a "Details" link.
+- **Use `tone` to match the status (P7).** Good outcomes use `tone="positive"`. Warnings use `tone="caution"`. Failures use `tone="critical"`. Pair each tone with its matching icon.
+- **Loading messages must name the task (P7).** Write "Publishing document…" or "Uploading image…" when the task is known. Use "Loading…" only when the task is unknown.
+- **Use Text `size={1}` for toast messages (P7).** Status messages are low-rank, short-lived text.
+- **Casing (P8).** Use sentence case for all toast text.
+- **Translation (P9).** Toast text can grow 30–50% in other languages. Keep base text short to leave room for growth.
+
+### Accessibility
+
+- **Live region.** Toast containers must use `aria-live="polite"` for status messages and `aria-live="assertive"` for errors. Screen readers announce the text when it appears (WCAG 4.1.3 AA).
+- **Do not rely on color alone.** Pair `tone="critical"` with `ErrorOutlineIcon` and `tone="positive"` with `CheckmarkCircleIcon` (WCAG 1.4.1 A).
+- **Auto-dismiss timing.** Toasts that auto-dismiss must stay visible long enough to be read. Allow at least 5 seconds.
+
+# Card
+
+
+
+The Card component is a foundational layout primitive that serves as a container for content. It functions similarly to a Box but includes specific properties for managing background color, foreground text color, borders, radii, and shadows. It’s used to create distinct zones or "surfaces" within the UI.
+
+### API Documentation
+
+_Refer to TypeDocs in Card.tsx_
+
+### **When to Use / When Not to Use**
+
+**When to use:**
+
+- You need to group related content together on a distinct background surface.
+- You need to invert the color scheme of a specific section (e.g., a dark card inside a light view) using the `scheme` prop.
+
+**When not to use:**
+
+- You simply need to group elements for layout without visible boundaries or background colors. Use **Box** or **Flex** instead to avoid unnecessary DOM nesting and style calculations.
+- You are building a button. While `pressed` and `selected` props exist, use the **Button** component for interactive actions to ensure full keyboard accessibility and semantic validity.
+- As a layout element. Use Box, Flex, Grid, Inline, or Stack instead.
+
+### **Usage Dos and Don’ts**
+
+**Do	**
+
+- Use the `tone` prop to communicate the semantic state of the content (e.g., use `'critical'` for error messages or destructive zones).
+- Limit the scope of content within a Card to a single topic.
+- Use the `as` prop to change the semantic HTML tag (e.g., `as="article"` or `as="section"`) to improve document structure and navigation for screen readers.
+
+**Don’t**
+
+- Don’t manually set text colors inside a Card unless absolutely necessary. Rely on the Card to automatically provide high-contrast text colors based on the selected `tone`.
+- Don’t rely on color alone to convey meaning (e.g., a red card background) for users with color blindness; ensure text labels or icons accompany the color change.
+- Use caution when nesting cards. Cards are intended to be an atomic composition. Use Box, Flex, Grid, Inline, or Stack instead.
+- Don’t add interactive elements to Card when paired with an onClick event.
+
+### **Variants & Examples**
+
+#### Tone
+
+Sets the color of the Card. Should be set to `default` in typical use cases.
+
+| **Value** | **Description** | **Purpose** | **Use case(s)** |
+| --- | --- | --- | --- |
+| `default` | Uses the default background color. | For general use to display content with no emphasis or semantic meaning. This represents the vast majority of use cases. | A normal item in a dashboard. |
+| `transparent` | DO NOT USE | DO NOT USE | DO NOT USE |
+| `positive` | Uses a green background color. | For indicating content associated with success or completion. | Representing a successful billing transaction.. Representing a process that is healthy. |
+| `caution` | Uses a yellow background color. | For indicating content that needs attention, but is not critical or blocking. | Representing a credit card that is no longer valid for the next billing cycle. Representing a process that is at risk. |
+| `critical` | Uses a red background color. | For indicating content that represents a critical or blocking error. | Representing a recent transaction that failed. Representing a process that is not working. |
+| `primary` | Uses a blue background color. | For indicating high-priority or branded content. | Displaying content as an upsell. Providing contextual, educational, or onboarding information. |
+| `brand` | DO NOT USE | DO NOT USE | DO NOT USE |
+
+**Note: **Card’s semantic tone values should be paired with an associated icon (ex: `ErrorOutlineIcon` for `critical `to visually reinforce the semantic meaning of the content.
+
+#### Muted
+
+**Use with caution.**This prop darkens Card’s background. Use in rare situations when greater emphasis is needed when using a tone of `positive`, `caution`, `critical`, or `primary`.
+
+#### Border
+
+Provides a visual border for the Card. Should be enabled in Card’s typical use cases. Border should be used instead of `shadow={0}.`
+
+Individual borders can be set with `borderLeft`, `borderRight`, `borderTop`, `bottomBottom`, `borderX`, or `borderY`. These props should be used with caution.
+
+#### Radius
+
+Sets the corner radius for Card. Should be set to `2` in typical use cases.
+
+| **Value** | **Description** | **Purpose** | **Use case(s)** |
+| --- | --- | --- | --- |
+| `0` | No border radius | To act as a container of content with a specific background. | Creating visual separation of specific content with the background. Providing a semantically toned background to content in order to provide visual meaning. |
+| `1` | Hairline border radius | USE WITH CAUTION | USE WITH CAUTION |
+| `2` | Extra-small border radius | Used in the majority of cases–typically where Card’s padding is set to `3` or below. | The majority of Card use cases–specifically in normal to high density compositions. |
+| `3` | Small border radius | To create greater visual balance in cases where Card’s padding is set to `4` or above. | In lower-density compositions. |
+| `4` | Medium border radius | USE WITH CAUTION | USE WITH CAUTION |
+| `5` | Large border radius | USE WITH CAUTION | USE WITH CAUTION |
+| `6` | Extra-large border radius | USE WITH CAUTION | USE WITH CAUTION |
+| `“full”` | A pill shaped border-radius. | USE WITH CAUTION | USE WITH CAUTION |
+
+#### Shadow
+
+Shadow is intended to denote elevation. Cards that are floating above the base UI layer should have a shadow applied. The higher the elevation, the larger the shadow. Note: Avoid using `shadow={0}` as a substitute for a border. It’s not recommended to use shadow for the purpose of visual emphasis. Use `tone={transparent}` instead.
+
+| **Value** | **Description** | **Purpose** | **Use case(s)** |
+| --- | --- | --- | --- |
+| `0` | A hairline shadow. | USE WITH CAUTION | USE WITH CAUTION |
+| `1` | A low-elevation shadow for when a card is displayed directly above the base layer. | To create visual separation between a floating Card and the immediate background. | When a Card is used as a makeshift notification or floating message. |
+| `2` | A mid-elevation shadow for when a card is displayed directly above low-elevation elements and the base layer. | USE WITH CAUTION | USE WITH CAUTION |
+| `3` | A high-elevation shadow for when a card is displayed at the highest elevation. | USE WITH CAUTION | USE WITH CAUTION |
+
+#### Scheme
+
+**Use with caution. **Used to explicitly set the color scheme to light or dark. This can be used to invert the palette for a card. Inverting the scheme can be used to create greater emphasis–when `muted` is not enough.
+
+#### Pressed
+
+**Use with caution. **Applies a pressed visual state to the card. Card’s primary use case is to contain content. Consider other options unless absolutely necessary.
+
+#### Selected
+
+**Use with caution.  **Applies a selected visual state to the card. Card’s primary use case is to contain content. Consider other options unless absolutely necessary.
+
+#### Padding
+
+Sets the internal padding for content within Card.
+
+| **Value** | **Description** | **Purpose** | **Use case(s)** |
+| --- | --- | --- | --- |
+| `0` | No padding | USE WITH CAUTION | USE WITH CAUTION |
+| `1` | Smallest padding | USE WITH CAUTION | USE WITH CAUTION |
+| `2` | Extra-extra-small padding | Displaying a chunk of content in very high density compositions. | Displaying a high-volume list of content in a sidebar |
+| `3` | Extra-small padding | Displaying a chunk of content in medium to high density compositions. | Displaying a collection of cards in a grid, such as Canvas templates |
+| `4` | Small padding | Displaying a chunk of content in low to medium density compositions. | Displaying a collection of content within a dashboard |
+| `5` | Medium padding | Displaying a chunk of content in very low density compositions. | Displaying form fields within an auth flow |
+| `6` | Large padding | USE WITH CAUTION | USE WITH CAUTION |
+| `7` | Extra-large padding | USE WITH CAUTION | USE WITH CAUTION |
+| `8` | Extra-extra large padding | USE WITH CAUTION | USE WITH CAUTION |
+| `9` | Largest padding | USE WITH CAUTION | USE WITH CAUTION |
+
+Individual padding can be set with `paddingLeft`, `paddingRight`, `paddingTop`, `paddingBottom`, `paddingX`, or `paddingY`. These props should be used with caution.
+
+### Accessibility
+
+- **Semantic elements via `as`.** Card accepts an `as` prop. Choose the value based on the content:
+  - `as="section"` — creates a landmark, but only if it has a heading child or `aria-label`. Without an accessible name, `<section>` is the same as `<div>` (WCAG 1.3.1 A).
+  - `as="article"` — marks self-contained content. Does not require a label to be a landmark.
+  - `as="aside"` — marks supplementary content. Add `aria-label` when the role is not clear from context.
+  - `as="form"` — requires an accessible name via `aria-label`, `aria-labelledby`, or `<legend>`.
+- **Behavioral elements.** Card does not fulfil the behavioral contract of `<button>`, `<dialog>`, `<form>`, or `<fieldset>` (WCAG 4.1.2 A). Using `as="button"` on Card does not add keyboard activation, focus management, or the implicit ARIA button role. Use the Button component for interactive actions.
+- **Interactive cards.** If a Card is clickable:
+  - It must have a valid `tabindex` to be focusable.
+  - It must respond to `Enter` and `Space` key events.
+  - It must have an accessible name. A clickable card with only visual content is announced as a plain container. Add `aria-label` or include a text element that names the action (WCAG 4.1.2 A).
+  - Prefer a stretched link inside the Card over adding `onClick` to the Card itself.
+- **Contrast.** Card handles text color contrast for its tones. If you nest custom components, verify text maintains a **4.5:1** ratio against the Card's `tone` (WCAG 1.4.3 AA).
+- **Focus indication.** If Card is interactive, it must have a visible focus style. Do not suppress the outline without a high-contrast replacement.
+- **Heading hierarchy.** Heading levels inside a Card must follow the page hierarchy. Do not start with `<h1>` inside a Card if the page already has a main title (WCAG 1.3.1 A, 2.4.6 AA).
+
+### **Content Guidelines**
+
+- **Hierarchy:** Cards often act as containers for grouped information. Ensure the heading levels (H2, H3, etc.) inside the card respect the page's overall outline. Do not start with an H1 inside a card if the page already has a main title.
+- **Grouping:** Content within a card should be logically related. If the content describes different distinct topics, split them into separate cards to reduce cognitive load.
+
+# Menu
+
+
+
+The Menu component family is a set of interactive primitives used to build navigation and dropdown menus. It operates as a composition of several subcomponents that handle triggering, positioning, focus management, and item selection.
+
+**Components:**
+
+- **Menu:** The container element. It holds the items and manages focus flow (up/down navigation) .
+- **MenuGroup:** A specialized item that triggers a nested submenu.
+- **MenuItem:** The individual actionable element within the menu.
+- **MenuDivider:** A visual separator used to group related items.
+
+**Purpose** Menus are used to present a list of actions or options to the user in a temporary surface, saving screen real estate. They are typically triggered by a button and are best suited for secondary actions, settings, or command lists.
+
+### API Documentation
+
+#### Menu
+
+The container for menu items.
+
+_Refer to TypeDocs in Menu.tsx_
+
+#### **MenuGroup**
+
+A nested menu trigger.
+
+_Refer to TypeDocs in MenuGroup.tsx_
+
+#### **MenuItem**
+
+An individual action within the menu.
+
+_Refer to TypeDocs in MenuItem.tsx_
+
+#### **MenuDivider**
+
+An individual action within the menu.
+
+_Refer to TypeDocs in MenuDivider.tsx_
+
+### **Usage guidelines**
+
+**When to use:**
+
+- You have a set of secondary actions (like "Edit", "Delete", "Duplicate") that would clutter the UI if displayed individually .
+- You need to display a list of settings or preferences triggered by a single button.
+
+**When not to use:**
+
+- You have fewer than 3 actions; consider displaying them inline as buttons or links for better discoverability.
+
+### **Best practices**
+
+**Do	**
+
+- Use `MenuDivider` to group related actions (e.g., separating "Edit" actions from "Destructive" actions).
+- Use the `hotkeys` prop to indicate keyboard shortcuts for power users.
+- Use `tone="critical"` on `MenuItem`s that perform destructive actions like deletion.
+
+**Don’t**
+
+- Use caution when nesting `MenuGroup`s more than 2 levels deep. Deeply nested menus are difficult to navigate and prone to closing accidentally.
+- Don’t put complex forms or interactive inputs inside a `MenuItem`. The Menu is designed for simple "one-click" actions or boolean toggles.
+- Don’t use the `hotkeys` for keyboard shortcuts when the MenuItem’s purpose is navigational.
+
+### **Variants**
+
+#### Menu
+
+##### Spacing
+
+#### MenuGroup
+
+#### MenuItem
+
+##### Icon
+
+Used as a visual
+
+##### IconRight
+
+Used exclusively for communicating what navigation action the user should expect.
+
+- Don’t use an icon when a menu item sends a person to another page
+- Use `<ChevronRightIcon />` when a menu item drills into child menu items
+- Use `<LaunchIcon />` when the icon take a person to an external link or a new tab/window
+
+##### Tone
+
+- MenuItems used for Navigation should not utilize tone
+- 
+
+##### Selected
+
+- `Selected` should be set to true for the currently active menu item
+
+##### Hotkeys
+
+- Menu hotkeys should be used explicitly when representing an action. MenuItems used for Navigation should not utilize hotkeys
+- 
+
+### Accessibility
+
+- **Keyboard navigation:**
+  - **Enter / Space / ArrowDown:** Opens the menu and focuses the first item.
+  - **ArrowUp:** Opens the menu and focuses the last item.
+  - **Arrow Up/Down:** Moves between items within the open menu.
+  - **Arrow Right:** Opens a nested `MenuGroup`.
+  - **Arrow Left:** Closes a nested `MenuGroup` and returns focus to the parent.
+  - **Escape:** Closes the menu and restores focus to the trigger button.
+- **ARIA roles.** Menu handles `role="menu"`, `role="menuitem"`, `aria-expanded`, and `aria-haspopup` on its own. The `role="menu"` replaces list semantics. Do not add `role="list"` alongside `role="menu"` — they conflict.
+- **Accessible names.** Each MenuItem gets its accessible name from its visible text content. If a MenuItem uses only an icon, add `aria-label`.
+- **Focus management.** The menu acts as a focus trap while open. Tab closes the menu to preserve document flow. Escape closes the menu and returns focus to the trigger.
+- **Color independence.** MenuItems with `tone="critical"` must pair with an icon (e.g. `ErrorOutlineIcon`). Do not rely on the red color alone to convey the destructive meaning (WCAG 1.4.1 A).
+
+### **Content Guidelines**
+
+- **Concise Labels:** Keep `MenuItem` text short (1-3 words). Use verbs that describe the action (e.g., "Rename", not "Change the name").
+- **Sentence Case:** Use sentence case for all menu items (e.g., "Open in new tab").
+- **Predictable Grouping:** Place destructive actions (like Delete) at the bottom of the list, ideally separated by a `MenuDivider` to prevent accidental clicks.
+- **Consistent Icons:** If you use icons for some items in a group, try to use icons for all items in that group to maintain visual alignment.
+
+# Popover
+
+**Description** The Popover is a floating container used to display content on top of other UI elements. It is positioned relative to a reference element (usually a button or an input) and serves as a foundational primitive for building complex interactive components like menus, date pickers, and dropdowns,.
+
+**Purpose** The Popover’s primary purpose is to present secondary information or lightweight tasks without cluttering the main interface or forcing the user to leave the current context. It manages its own positioning, collision detection (flipping/shifting), and stacking context (z-index),.
+
+### **API Documentation**
+
+### **When to Use / When Not to Use**
+
+- **Use when:** You need to display a list of actions (menus), a date picker, or additional details related to a specific element on the screen.
+- **Use when:** You need to conserve screen real estate by hiding secondary controls until requested.
+- **Do not use when:** You need to display critical error information. Use inline form validation or banners instead to ensure visibility.
+- **Do not use when:** The content is complex or requires a significant amount of user attention/input. Use a **Dialog** or **Modal** instead.
+
+### **Usage Dos and Don’ts**
+
+- **Do** use `portal={true}` (or let it default) if the popover is inside a container with `overflow: hidden`, ensuring the popover isn't clipped.
+- **Do** use `matchReferenceWidth` for inputs like "Select" or "Autocomplete" dropdowns to maintain visual alignment with the field.
+- **Don’t** overuse the `arrow` prop. It is helpful for tooltips or tutorials but often unnecessary for standard dropdown menus.
+- **Don’t** place critical actions solely inside a popover if they block the user's primary workflow.
+
+### **Variants & Examples**
+
+**1. Basic Popover** A standard popover triggered by a button.
+
+`<Popover`
+
+`  content={<Box padding={3}><Text>Popover Content</Text></Box>}`
+
+`  open={isOpen}`
+
+`  placement="bottom"`
+
+`>`
+
+`  <Button onClick={toggle} text="Open Popover" />`
+
+`</Popover>`
+
+
+
+**2. With Arrow and Animation** Useful for contextual help or onboarding tips.
+
+`<Popover`
+
+`  arrow`
+
+`  animate`
+
+`  content={<Box padding={2}><Text>Helpful tip!</Text></Box>}`
+
+`  open={true}`
+
+`  tone="primary"`
+
+`>`
+
+`  <Button icon={InfoIcon} />`
+
+`</Popover>`
+
+
+
+**3. Dropdown Behavior (Match Width)** Ensures the popover is exactly as wide as the trigger element.
+
+`<Popover`
+
+`  matchReferenceWidth`
+
+`  placement="bottom-start"`
+
+`  content={<Menu>...</Menu>}`
+
+`  open={isOpen}`
+
+`>`
+
+`  <SelectButton />`
+
+`</Popover>`
+
+
+
+### Accessibility
+
+- **Focus management.** When a modal popover opens, focus must move into the popover. When it closes, focus must return to the trigger element (WCAG 2.4.3 A). For modal popovers, focus must be trapped inside — Tab should cycle within the popover, not escape to the page behind it. For non-modal popovers, focus may leave freely.
+- **Focus target.** State where focus lands inside the popover. Options: the first focusable element, the popover container, or a named element.
+- **Escape to dismiss.** Pressing `Escape` must close the popover and return focus to the trigger.
+- **ARIA attributes on the trigger.** The trigger element must have `aria-haspopup` set to the popup type — `"dialog"`, `"menu"`, or `"listbox"`. Do not use `"true"` (it maps to `"menu"`). The trigger must also have `aria-expanded` set to `true` when open and `false` when closed (WCAG 4.1.2 A).
+- **Accessible name for content.** The popover content must have an accessible name. Use `role="dialog"` with `aria-label` or `aria-labelledby` when the popover contains interactive content. Use `role="menu"` when the popover contains menu items.
+- **Reduced motion.** The `animate` prop respects the user's `prefers-reduced-motion` setting.
+
+### **Content Guidelines**
+
+- **Concise:** Keep content brief. Popovers are for quick interactions, not long-form reading.
+- **Action-Oriented:** If the popover contains a menu, use verbs for labels (e.g., "Edit," "Delete").
+- **Sentence Case:** Use sentence case for any text headers or descriptions inside the popover (e.g., "Sort by date" not "Sort By Date").
+
+# Tooltip
+
+**Description** The Tooltip is a floating text label that displays information when a user hovers, focuses, or taps on an element. Its purpose is to provide helpful, non-essential context to a UI element. It succinctly describes the function of an element (like an icon-only button) or enhances baseline understanding without cluttering the interface.
+
+### **API Documentation**
+
+The Tooltip component accepts the following specific properties. It extends `LayerProps` (excluding `as`) .
+
+| **Attribute** | **Type** | **Accepted Values** | **Default** | **Optional** | **Description** |
+| --- | --- | --- | --- | --- | --- |
+| **content** | ReactNode | `ReactNode` | `undefined` | Yes | The content to be displayed inside the floating tooltip card . |
+| **children** | ReactElement | `ReactElement` | `undefined` | Yes | The anchor element (trigger) that the tooltip is attached to . |
+| **placement** | String | `'top'`, `'bottom'`, `'left'`, `'right'`, etc. | `'bottom'` | Yes | The preferred position relative to the reference element . |
+| **fallbackPlacements** | Array | `Placement[]` | `undefined` | Yes | A list of alternative positions to try if the primary `placement` does not fit in the viewport . |
+| **delay** | Number / Object | `number` \|`{ open: number; close: number }` | `0` | Yes |  |
+| **arrow** | Boolean | `true` \|`false` | `false` | Yes |  |
+| **animate** | Boolean | `true` \|`false` | `false` | Yes |  |
+| **disabled** | Boolean | `true` \|`false` | `false` | Yes |  |
+| **portal** | Boolean / String | `boolean` \|`string` | `undefined` | Yes |  |
+| **padding** | Number / Array | `number` \|`number[]` | `2` | Yes |  |
+| **radius** | Number / Array | `number` \|`number[]` | `2` | Yes |  |
+| **shadow** | Number / Array | `number` \|`number[]` | `2` | Yes |  |
+| **scheme** | String | `'light'`, `'dark'` | `undefined` | Yes | Forces a specific color scheme for the tooltip . |
+| **boundaryElement** | HTMLElement | `HTMLElement` | `null` | Yes | Defines the element boundary that the tooltip should not overflow . |
+
+### **When to Use / When Not to Use**
+
+- **Use when:** You need to explain the function of an icon-only button (e.g., a "Trash" icon meaning "Delete").
+- **Use when:** You need to provide supplementary information that enhances the understanding of a feature but is not critical for the task.
+- **Do not use when:** The information is critical for the user to complete a task or understand an error. Use inline text or banners instead.
+- **Do not use when:** You are restating text that is already visible on the screen. This creates redundancy and cognitive noise.
+- **Do not use when:** The element is disabled. Disabled elements cannot receive focus, making the tooltip inaccessible to keyboard users.
+
+### **Usage Dos and Don’ts**
+
+- **Do** use the `arrow` prop to visually link the tooltip to small triggers like icons, helping users identify which element is being described.
+- **Do** use `delay` to prevent tooltips from flickering open/closed as the user moves their mouse rapidly across the screen (hover intent).
+- **Don’t** put interactive content like links or buttons inside a Tooltip. If you need interactive content, use a **Popover** instead.
+- **Don’t** use lengthy text. Tooltips are for quick scanning; if the text is long, consider if it belongs in a modal or helper text.
+
+### **Variants & Examples**
+
+**1. Basic Tooltip** A simple text label for an icon button.
+
+`<Tooltip content={<Text>Edit Profile</Text>}>`
+
+`  <Button icon={EditIcon} mode="ghost" />`
+
+`</Tooltip>`
+
+
+
+**2. With Arrow and Animation** Provides a smoother visual transition and clearer connection to the trigger.
+
+`<Tooltip`
+
+`  arrow`
+
+`  animate`
+
+`  content={<Box padding={2}><Text>Helpful information</Text></Box>}`
+
+`>`
+
+`  <Button text="Hover me" />`
+
+`</Tooltip>`
+
+
+
+**3. Delayed Interaction** Adds a 500ms delay before opening to prevent accidental triggers.
+
+`<Tooltip`
+
+`  delay={{ open: 500, close: 0 }}`
+
+`  content={<Text>Delayed tip</Text>}`
+
+`>`
+
+`  <Button icon={InfoIcon} />`
+
+`</Tooltip>`
+
+
+
+### Accessibility
+
+- **Keyboard trigger.** Tooltips must appear on keyboard focus, not only on mouse hover. The child element must be interactive (a `<button>`, `<a href>`, or other focusable element).
+- **Escape to dismiss.** Pressing `Escape` must hide the tooltip without moving focus.
+- **Tab behavior.** The tooltip is not a Tab stop. When the user presses Tab, focus moves to the next focusable element and the tooltip closes. The tooltip should close on Tab away from the trigger (per the APG Tooltip pattern).
+- **Disabled elements.** Never attach a tooltip to a disabled button (`<button disabled>`). Disabled elements leave the tab order. Keyboard users will never reach the tooltip. Place the tooltip on a wrapper element instead, or provide context through nearby text.
+- **Reduced motion.** The `animate` prop respects the user's `prefers-reduced-motion` setting. When reduced motion is on, the tooltip appears and hides with no transition.
+- **Screen readers.** Tooltip content must not repeat the trigger's `aria-label`. If the button is labeled "Settings," the tooltip should add context or be omitted.
+
+### **Content Guidelines**
+
+- **Concise:** Limit text to a maximum of 60–75 characters where possible. Tooltips should be succinct .
+- **Action-Oriented:** Start with a verb if describing an action (e.g., "Edit profile" rather than "Profile editor") .
+- **Sentence Case:** Use sentence case for tooltip labels (e.g., "Save to board" not "Save To Board") .
+- **No Punctuation:** Avoid periods at the end of fragments. Only use punctuation if the tooltip contains full sentences .

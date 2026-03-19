@@ -1173,18 +1173,36 @@ for (const iteration of iterations) {
           animationDuration: string;
         }> = [];
 
+        // Parse a CSS duration string (e.g. "0.1s", "100ms", "1e-05s")
+        // to milliseconds. Handles comma-separated lists by taking the
+        // largest value. Returns 0 for unparseable values.
+        function parseDurationMs(raw: string): number {
+          if (!raw || raw === "none") return 0;
+          const parts = raw.split(",").map((s) => s.trim());
+          let max = 0;
+          for (const part of parts) {
+            const num = parseFloat(part);
+            if (isNaN(num)) continue;
+            const ms = part.endsWith("ms") ? num : num * 1000;
+            if (ms > max) max = ms;
+          }
+          return max;
+        }
+
+        // Anything under 1ms is effectively instant. The recommended
+        // prefers-reduced-motion override uses 0.01ms (browsers render
+        // this as "1e-05s"), which must not be flagged.
+        const INSTANT_THRESHOLD_MS = 1;
+
         for (const el of document.querySelectorAll("*")) {
           const cs = window.getComputedStyle(el);
-          const hasTrans =
-            cs.transitionDuration &&
-            cs.transitionDuration !== "0s" &&
-            cs.transitionDuration !== "0ms";
+          const transMs = parseDurationMs(cs.transitionDuration);
+          const animMs = parseDurationMs(cs.animationDuration);
+          const hasTrans = transMs >= INSTANT_THRESHOLD_MS;
           const hasAnim =
             cs.animationName &&
             cs.animationName !== "none" &&
-            cs.animationDuration &&
-            cs.animationDuration !== "0s" &&
-            cs.animationDuration !== "0ms";
+            animMs >= INSTANT_THRESHOLD_MS;
           if (hasTrans || hasAnim) {
             animated.push({
               html: (el as HTMLElement).outerHTML.slice(0, 100),
