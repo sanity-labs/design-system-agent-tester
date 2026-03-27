@@ -26,6 +26,8 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "axe-core": "^4.11.1",
+    "pixelmatch": "^7.1.0",
+    "pngjs": "^7.0.0",
     "puppeteer": "^24.2.0"
   },
   "devDependencies": {

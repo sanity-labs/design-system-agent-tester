@@ -1,7 +1,10 @@
 Create a simple interface that mimics Sanity Studio using Sanity UI.  
 
 # Instructions
-* Use the latest version of Sanity Icons and Sanity UI v3.1.14 for the interface. 
+* DO NOT USE OLDER VERSIONS OF SANITY ICONS OR SANITY UI.
+* Use the latest version of Sanity Icons and Sanity UI for the interface. YOU ARE NOT ALLOWED INSTALL A SPECIFIC VERSION. YOU HAVE TO EXPLICITLY INSTALL THE LATEST VERSION OF EACH PACKAGE WITH THE FOLLOWING COMMANDS:
+  * Sanity icons: `npm i @sanity/icons@latest`
+  * Sanity UI: `npm i @sanity/ui@latest`
 * Rely on [Sanity UI's documentation site](https://www.sanity.io/ui) and the guidelines below for guidance on how to use the UI library.
 * The project should be built on top of Vite
 * Use as few NPM packagess as possible 
@@ -81,6 +84,10 @@ Sanity UI buttons and interactive parts apply `transition-duration: 0.1s` throug
 
 Wrap the app in `ThemeProvider` with `studioTheme`. This gives every child component access to colors, spacing, and typography tokens. Import `reduced-motion.css` here.
 
+**`studioTheme` vs `buildTheme()`.** The quick-start uses `studioTheme` from `@sanity/ui` — a ready-made theme. You can also use `buildTheme()` from `@sanity/ui/theme`, which produces the same result. Use `buildTheme()` when you need to pass custom options.
+
+**Toast support.** If you use `useToast()` in your app, wrap the tree in a `ToastProvider` alongside `ThemeProvider`. `ThemeProvider` does not include a toast context by default.
+
 ```tsx
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -133,7 +140,7 @@ function App() {
           <Stack>
             <Card padding={3} borderBottom>
               <Flex align="center" justify="space-between">
-                <Heading as="h2" size={1}>Studio</Heading>
+                <Heading as="h1" size={0}>Studio</Heading>
                 <Button
                   mode="bleed"
                   icon={CloseIcon}
@@ -181,7 +188,7 @@ function App() {
                   onClick={() => setSidebarOpen(true)}
                 />
               )}
-              <Heading as="h1" size={2} style={{ overflowWrap: 'break-word', wordBreak: 'break-word' }}>All Documents</Heading>
+              <Heading as="h2" size={0} style={{ overflowWrap: 'break-word', wordBreak: 'break-word' }}>All Documents</Heading>
             </Flex>
             <Button text="New document" icon={AddIcon} tone="default" />
           </Flex>
@@ -195,10 +202,10 @@ function App() {
                 <Card key={title} padding={3} border radius={2}>
                   <Flex align="center" justify="space-between">
                     <Stack space={2}>
-                      <Heading as="h2" size={1}>{title}</Heading>
+                      <Heading as="h2" size={0}>{title}</Heading>
                       <Text size={1} muted>Last edited 2 hours ago</Text>
                     </Stack>
-                    <Badge tone="positive" text="Published" />
+                    <Badge tone="positive">Published</Badge>
                   </Flex>
                 </Card>
               ),
@@ -271,12 +278,11 @@ Card renders a styled container with background, border, and optional tone. Use 
 ```
 
 ### Stack spaces children in a vertical column
-
-Stack adds even spacing between children. Use `space` to set the gap.
+Stack adds even spacing between children. Use `space` to set the gap. Always stack Text/Heading pairings with `<Stack>` or `<Flex>`. Text and Heading components require explicit vertical spacing between them because they have all vertical spacing stripped.
 
 ```tsx
 <Stack space={3}>
-  <Heading as="h2" size={1}>Title</Heading>
+  <Heading as="h2" size={0}>Title</Heading>
   <Text size={1}>Description</Text>
 </Stack>
 ```
@@ -287,7 +293,7 @@ Flex defaults to horizontal direction. Use `align`, `justify`, `gap`, and `wrap`
 
 ```tsx
 <Flex align="center" justify="space-between" wrap="wrap" gap={2}>
-  <Heading as="h1" size={2}>Page Title</Heading>
+  <Heading as="h1" size={0}>Page Title</Heading>
   <Button text="Action" />
 </Flex>
 ```
@@ -298,10 +304,10 @@ The Heading component renders a `<div>` by default. That has no heading role. Al
 
 ```tsx
 {/* ✗ No heading role — screen readers skip it */}
-<Heading size={2}>Title</Heading>
+<Heading size={0}>Title</Heading>
 
 {/* ✓ Renders as <h1> with heading role */}
-<Heading as="h1" size={2}>Title</Heading>
+<Heading as="h1" size={0}>Title</Heading>
 ```
 
 ### Icon-only buttons need aria-label
@@ -338,7 +344,71 @@ A `placeholder` is not a label. Use `<Label>` with `htmlFor` or set `aria-label`
 
 This document helps designers and developers build accessible interfaces with Sanity UI components. It covers the rules you need to follow, the mistakes to avoid, and tested code patterns you can copy.
 
+**Start here → [Full page scaffold](#full-page-scaffold).** Copy the scaffold at the bottom of this document as your starting point. It passes all automated accessibility tests. Then read the rules below to understand why each piece matters.
+
 For guidelines on building or documenting Sanity UI components themselves, see `component-authoring-accessibility.md`.
+
+---
+
+## Do / Don't quick reference
+
+Scan this list before building. Each rule links to a section below with full details and code examples.
+
+**Landmarks and structure (§1)**
+
+- ✓ Do wrap your content area in `Card as="main"`.
+- ✓ Do wrap sidebars in `Card as="nav"` with `aria-label`.
+- ✗ Don't build a page with only `<div>` containers and no landmark elements.
+
+**Headings (§2)**
+
+- ✓ Do set `as="h1"` on the page title and `as="h2"` on list items below it.
+- ✓ Do use `size` for visual sizing — it is independent of the heading level.
+- ✓ Do use `as="h2"` for the sidebar/app name. Only the content area title is h1.
+- ✗ Don't skip from `h1` to `h3`. Use `h2` for the next level down.
+- ✗ Don't use two `h1` elements. One page, one h1.
+- ✗ Don't omit the `as` prop on Heading. The default `<div>` has no heading role.
+
+**Accessible names (§3)**
+
+- ✓ Do add `aria-label` to every icon-only Button and MenuButton trigger.
+- ✓ Do link every TextInput to a `<Label>` via `htmlFor`/`id`, or set `aria-label`.
+- ✗ Don't rely on `tooltip` to name a button. It does not set `aria-label`.
+- ✗ Don't use `placeholder` as the only label for an input.
+
+**Color contrast (§4)**
+
+- ✓ Do use `tone="default"` for primary action buttons.
+- ✓ Do pair every semantic tone (`positive`, `caution`, `critical`) with an icon.
+- ✓ Do use the Sanity UI `Avatar` component for user initials — it handles contrast.
+- ✗ Don't use `tone="primary"` in default mode. It produces 4.29:1 contrast — below AA.
+- ✗ Don't hardcode `background: #556bfc` with white text. It fails the same contrast check.
+
+**Reduced motion (§5)**
+
+- ✓ Do create `reduced-motion.css` and import it in your entry file. Every project needs it.
+- ✗ Don't skip the global override. Sanity UI's own hover transitions do not respect `prefers-reduced-motion`.
+
+**Touch targets (§6)**
+
+- ✓ Do use Sanity UI `Checkbox`, `Radio`, or `Switch` for toggle inputs.
+- ✓ Do use `gap={2}` or higher between adjacent buttons in toolbars.
+- ✗ Don't use bare `<input type="checkbox">` or `<input type="radio">`. They render at 13×13px.
+- ✗ Don't use bare `<input type="text">` with custom styling. Use `TextInput` instead.
+- ✗ Don't place buttons with `gap={1}`. Target zones overlap below 24px spacing.
+
+**Responsive reflow (§7)**
+
+- ✓ Do add `wrap="wrap"` to every horizontal `Flex` that holds more than one child.
+- ✓ Do set `overflow: 'hidden'` on the content Card.
+- ✓ Do use `flex: '1 1 100%'` with `maxWidth` on sidebars.
+- ✗ Don't use `width` with `flexShrink: 0` on sidebars. It creates a rigid column.
+- ✗ Don't use `height: '100vh'` on the outer Flex. Use `minHeight: '100vh'`.
+- ✗ Don't build a toolbar `Flex` without `wrap="wrap"`. It overflows at 320px.
+
+**HTML lang (§8)**
+
+- ✓ Do set `<html lang="en">` (or the correct code) in `index.html`.
 
 ---
 
@@ -371,9 +441,21 @@ Use the `as` prop on Card to render landmark elements:
 
 ## 2. Headings
 
-### Every page needs at least one heading
+### Every page needs exactly one h1
 
 Headings give screen reader users an outline of the page. A page with zero headings forces users to read every element in sequence. Use `<Heading as="h1">` for the page title and `<Heading as="h2">` for each major section.
+
+**Only one h1 per page.** The h1 is the main content title — not the app name or studio label. If your sidebar has a heading like "My Studio," make it `<Heading as="h2">`. The content area title ("All Documents") is the h1. Two h1 elements confuse screen readers about which heading represents the page.
+
+```jsx
+/* ✗ Two h1 elements — screen readers cannot determine the page title */
+<Card as="nav"><Heading as="h1" size={1}>My Studio</Heading></Card>
+<Card as="main"><Heading as="h1" size={2}>Documents</Heading></Card>
+
+/* ✓ One h1 for the page title — sidebar heading is h2 */
+<Card as="nav"><Heading as="h2" size={1}>My Studio</Heading></Card>
+<Card as="main"><Heading as="h1" size={2}>Documents</Heading></Card>
+```
 
 ### Always set the `as` prop
 
@@ -391,14 +473,20 @@ The Heading component renders a `<div>` by default. That has no heading role. Sc
 
 Heading levels must descend in sequence: H1 → H2 → H3. Do not skip from H1 to H3. The `as` prop sets the semantic level. The `size` prop sets the visual size. They are independent.
 
-```jsx
-/* ✗ Skips h2 — breaks the heading outline */
-<Heading as="h1" size={3}>All Documents</Heading>
-<Heading as="h3" size={1}>Getting Started</Heading>
+**Rule: items in a list under an h1 are h2, not h3.** This is the most common heading skip. When a page title is `<Heading as="h1">` and you show a list of documents below it, each document heading must be `<Heading as="h2" size={1}>`. Use `size={1}` to make h2 look small. Never match `as` to the visual weight.
 
-/* ✓ No levels skipped — use size for visual sizing */
+```jsx
+/* ✗ Skips h2 — agents default to h3 for "small" list items */
 <Heading as="h1" size={3}>All Documents</Heading>
-<Heading as="h2" size={1}>Getting Started</Heading>
+<Card padding={3} border>
+  <Heading as="h3" size={1}>Getting Started Guide</Heading>
+</Card>
+
+/* ✓ h2 follows h1 — use size={1} to make it look small */
+<Heading as="h1" size={3}>All Documents</Heading>
+<Card padding={3} border>
+  <Heading as="h2" size={1}>Getting Started Guide</Heading>
+</Card>
 ```
 
 ---
@@ -475,20 +563,41 @@ If a button already has `aria-label="Settings"`, a tooltip that also says "Setti
 
 ### Do not use `tone="primary"` in default mode
 
-The default Sanity UI theme produces white text (`#fff`) on a blue background (`#556bfc`) for `tone="primary"` buttons in default mode. The contrast ratio is 4.29:1 — below the 4.5:1 AA threshold. Automated tests flag this every time.
+The default Sanity UI theme uses `#556bfc` as the background for `tone="primary"` in default mode and for any selected/active state that resolves to the primary blue. White text on this background produces a 4.29:1 ratio — below the 4.5:1 AA threshold. Automated tests flag this every time.
 
-The fix: **use `tone="default"`** for primary actions. If you need a blue button, use `mode="ghost"` with `tone="primary"` — this renders dark text on a light blue tint and passes AA.
+**This applies to more than Buttons.** The same blue background appears on selected MenuItems, selected Cards, and any element that enters the primary selected state. If the element displays standard-size text on the primary blue, it fails contrast.
+
+**Do not hardcode the primary blue hex.** Agents sometimes build custom avatar circles or status badges using `background: #556bfc` (or `rgb(85, 107, 252)`) with white text. This produces the same 4.29:1 failure. Use the Sanity UI `Avatar` component instead — it handles contrast. If you must build a custom element, do not use the primary blue with white text at standard font sizes.
+
+The fix: **use `tone="default"`** for primary actions. For navigation menus, avoid using `selected` on MenuItems that display text content. Use a left border accent or bold text to mark the active item instead.
+
+**`mode="ghost"` with `tone="primary"` does NOT always pass.** At 13px normal weight, the primary blue text (`#556bfc`) on the light blue ghost tint (`#e5edff`) produces 3.65:1 — below 4.5:1 AA. Ghost mode only passes for large or bold text. Do not use it for standard-size nav item text.
 
 ```jsx
-/* ✗ Fails contrast — 4.29:1 */
+/* ✗ Fails contrast — 4.29:1 (white on primary blue) */
 <Button tone="primary" text="New document" />
 
-/* ✓ Passes contrast */
-<Button tone="default" text="New document" />
+/* ✗ Fails contrast — selected MenuItem uses primary blue background */
+<MenuItem text="Documents" selected />
 
-/* ✓ Also passes — ghost mode with primary tone */
-<Button tone="primary" mode="ghost" text="New document" />
+/* ✗ May fail contrast — ghost primary at standard font sizes (3.65:1) */
+<Button tone="primary" mode="ghost" text="Nav item" />
+
+/* ✓ Passes — use tone="default" for buttons */
+<Button tone="default" text="New document" />
 ```
+
+### Do not build custom colored elements with white text
+
+Agents sometimes build custom avatar circles, status badges, or nav items using hardcoded background colors from the palette with white text. Many palette colors fail contrast at small text sizes:
+
+| Color | Hex | White text contrast | Passes AA at 13px? |
+| --- | --- | --- | --- |
+| Primary blue | `#556bfc` | 4.29:1 | ✗ No |
+| Positive green | `#04b97a` | 2.55:1 | ✗ No |
+| Caution yellow | `#d28a04` | 2.96:1 | ✗ No |
+
+Use the Sanity UI `Avatar` component for user initials — it handles contrast. For status indicators, use `Badge` with a `tone` prop. Do not build custom elements with `background: <palette color>` and `color: white`.
 
 ### Pair semantic color with a non-color indicator
 
@@ -501,6 +610,16 @@ Color must not be the only way to convey meaning. Every use of `tone="positive"`
 /* ✓ Icon reinforces the meaning */
 <Button tone="critical" text="Delete" icon={TrashIcon} />
 ```
+
+### Do not add `aria-selected` to plain `<div>` elements
+
+The `aria-selected` attribute is only valid on elements with roles like `option`, `row`, `tab`, `gridcell`, or `treeitem`. A `<div>` with no explicit role cannot carry `aria-selected`. Automated tests flag this as a critical violation (WCAG 4.1.2 A).
+
+Card's `selected` prop sets `data-selected` for styling. It does NOT set `aria-selected`. If you need a selectable list of Cards, either:
+
+- Use `role="listbox"` on the container and `role="option"` on each Card, which allows `aria-selected`.
+- Or skip `aria-selected` and use `aria-current="true"` to mark the active item. `aria-current` is valid on any element.
+
 
 ---
 
@@ -542,17 +661,49 @@ Without this file, every Button on the page will fail the motion accessibility t
 
 All interactive targets must meet 24×24 CSS pixels (WCAG 2.5.8 AA). Inline links within paragraph text are exempt.
 
-### Do not use bare native checkboxes or radios
+### Keep 24px spacing between adjacent targets
+
+The 24×24px rule applies to the clickable area, not only the visual size. When buttons sit next to each other in a toolbar, each button must have at least 24px of unobscured clickable space. Buttons placed with `gap={1}` (4px) may overlap each other's target zones. Use `gap={2}` (8px) or higher between adjacent buttons in toolbars and action rows.
+
+```jsx
+/* ✗ Buttons too close — target zones overlap */
+<Flex gap={1}>
+  <Button icon={AddIcon} mode="bleed" aria-label="New document" />
+  <Button icon={CloseIcon} mode="bleed" aria-label="Hide navigation" />
+</Flex>
+
+/* ✓ Enough space between targets */
+<Flex gap={2}>
+  <Button icon={AddIcon} mode="bleed" aria-label="New document" />
+  <Button icon={CloseIcon} mode="bleed" aria-label="Hide navigation" />
+</Flex>
+```
+
+### Do not use bare native inputs
 
 Browser-default `<input type="checkbox">` and `<input type="radio">` render at about 13×13px. Use the Sanity UI `Checkbox`, `Radio`, or `Switch` components instead — they render at compliant sizes.
 
-If you must use a native input, wrap it in a `<label>` with enough padding to reach 24×24px, or set `width` and `height` via CSS.
+Bare `<input type="text">` elements with custom styling can also fall below the 24px minimum height. Use `TextInput` from `@sanity/ui` instead — it renders at compliant sizes and handles theming. If you must use a native input, set `min-height: 24px` and use `padding` to reach the target size.
+
+If you must use a native checkbox or radio, wrap it in a `<label>` with enough padding to reach 24×24px, or apply CSS to set `width` and `height` to at least 24px.
 
 ---
 
 ## 7. Responsive layout — 320px reflow
 
 Layouts must work at 320px viewport width with no horizontal scrolling (WCAG 1.4.10 AA). This simulates 400% zoom on a 1280px screen.
+
+**Every `<Flex>` with more than one child must have `wrap="wrap"`.** This applies at every level of the component tree — the outer layout Flex, the toolbar Flex inside the content area, the actions row inside a card, and any other horizontal row. A single non-wrapping Flex is enough to cause overflow at 320px. There are no exceptions.
+
+**Reflow checklist.** Before shipping, confirm each of these. A single missed item causes the test to fail.
+
+- [ ] Outer layout Flex has `wrap="wrap"`
+- [ ] Sidebar uses `flex: '1 1 100%'` with `maxWidth`, not `width` with `flexShrink: 0`
+- [ ] Content Card has `overflow: 'hidden'`
+- [ ] Toolbar Flex (heading + buttons) has `wrap="wrap"` and `gap={2}`
+- [ ] Every actions row inside a Card has `wrap="wrap"`
+- [ ] Outer Flex uses `minHeight: '100vh'`, not `height: '100vh'`
+- [ ] No Flex child uses a fixed `px` width without a `maxWidth` fallback
 
 ### The pattern that fails every time
 
@@ -600,23 +751,33 @@ At 320px, the 260px sidebar plus any content exceeds the viewport.
 
 **Always set `overflow: 'hidden'`** on the content Card. Long headings or button rows can push the page `scrollWidth` past the viewport.
 
-### Toolbar rows must wrap
+### Toolbar rows must wrap — this is the most common remaining failure
 
-Any horizontal `Flex` that holds a heading, buttons, or other inline content must use `wrap="wrap"`. A heading + button toolbar is the second most common overflow source.
+**Every test run fails this check.** The toolbar Flex inside the content Card overflows at 320px because agents forget `wrap="wrap"` on the inner Flex even when the outer layout Flex has it. The outer layout handles sidebar stacking. The inner toolbar handles heading + button wrapping. Both need `wrap="wrap"` independently.
+
+**Copy this exact toolbar pattern into every content area:**
 
 ```jsx
-/* ✗ Heading + button exceed 320px in one line */
-<Flex align="center" justify="space-between">
-  <Heading as="h1" size={2}>All Documents</Heading>
-  <Button text="New document" icon={AddIcon} />
-</Flex>
+/* ✗ FAILS EVERY TIME — no wrap on toolbar Flex */
+<Card as="main" style={{ flex: '1 1 0', minWidth: 0, overflow: 'hidden' }} padding={4}>
+  <Flex align="center" justify="space-between">
+    <Heading as="h1" size={2}>All Documents</Heading>
+    <Button text="New document" icon={AddIcon} />
+  </Flex>
+</Card>
 
-/* ✓ Button wraps to next line at narrow widths */
-<Flex align="center" justify="space-between" wrap="wrap" gap={2}>
-  <Heading as="h1" size={2}>All Documents</Heading>
-  <Button text="New document" icon={AddIcon} />
-</Flex>
+/* ✓ PASSES — wrap="wrap" and gap={2} on toolbar Flex */
+<Card as="main" style={{ flex: '1 1 0', minWidth: 0, overflow: 'hidden' }} padding={4}>
+  <Flex align="center" justify="space-between" wrap="wrap" gap={2}>
+    <Heading as="h1" size={2}>All Documents</Heading>
+    <Button text="New document" icon={AddIcon} tone="default" />
+  </Flex>
+</Card>
 ```
+
+The difference is one prop: `wrap="wrap"` on the toolbar `Flex`. Without it, the heading and button sit in a single non-breaking row that exceeds 320px. With it, the button flows to the next line at narrow widths.
+
+**If you build a toolbar row with a heading and a button, add `wrap="wrap"` and `gap={2}`.** This applies to every toolbar in the app — the content header, card action rows, and any other horizontal grouping of heading + buttons.
 
 ---
 
@@ -644,9 +805,13 @@ These are library-level issues you cannot fix through props. Automated tests wil
 
 The `MenuButton` component emits `aria-haspopup="true"` instead of `aria-haspopup="menu"`. The value `"true"` is an alias for `"menu"`, but screen readers may announce it as "has popup" instead of "has popup menu." This requires a fix in `@sanity/ui` itself.
 
-### `tone="primary"` contrast in default mode
+### Palette colors fail contrast with white text at small sizes
 
-White text on `tone="primary"` default-mode buttons produces a 4.29:1 ratio. This is below the 4.5:1 AA threshold. Use `tone="default"` or `mode="ghost"` with `tone="primary"` instead. See §4 above.
+White text on `tone="primary"` default-mode buttons produces a 4.29:1 ratio. The primary blue (`#556bfc`) on the ghost-mode light tint (`#e5edff`) produces 3.65:1. The positive green (`#04b97a`) with white text produces 2.55:1. All fail the 4.5:1 AA threshold at standard font sizes. Use `tone="default"` for actions. Do not build custom elements with palette colors and white text. See §4 above.
+
+### ToastProvider renders `<ul>` without `role="list"`
+
+The `ToastProvider` component renders a `<ul>` element with `list-style: none`. WebKit strips list semantics from unstyled lists. VoiceOver does not announce the element as a list. This is a library-level issue. Automated tests may flag it under the `semantic-structure` check.
 
 ---
 
@@ -677,7 +842,15 @@ This scaffold passes all automated accessibility tests. Use it as a starting poi
         <Heading as="h1" size={2}>Page Title</Heading>
         <Button text="New document" icon={AddIcon} tone="default" />
       </Flex>
-      {/* page content */}
+
+      {/* Document list — h2 follows h1, not h3 */}
+      <Stack space={3} marginTop={4}>
+        {documents.map(doc => (
+          <Card key={doc.id} padding={3} border radius={2}>
+            <Heading as="h2" size={1}>{doc.title}</Heading>
+          </Card>
+        ))}
+      </Stack>
     </Card>
   </Flex>
 </ThemeProvider>
@@ -688,11 +861,12 @@ This scaffold passes all automated accessibility tests. Use it as a starting poi
 | Feature | How |
 | --- | --- |
 | Landmarks | `Card as="nav"` and `Card as="main"` |
-| Heading hierarchy | `<h1>` for the page title, `<h2>` for sections |
+| Heading hierarchy | One `<h1>` for the page title. `<h2>` for sidebar heading, list items, and sections. Never skip to `<h3>`. Never use two `<h1>` elements. |
 | Page language | Set `<html lang="en">` in `index.html` |
 | Responsive reflow | `wrap="wrap"` + flex sizing (no fixed widths) |
 | Toolbar wrap | `wrap="wrap"` on toolbar Flex |
-| Contrast | `tone="default"` instead of `tone="primary"` |
+| Target spacing | `gap={2}` or higher between adjacent buttons in toolbars |
+| Contrast | `tone="default"` instead of `tone="primary"`. Do not hardcode `#556bfc` with white text. |
 | Overflow clip | `overflow: 'hidden'` on content Card |
 
 ---
@@ -709,6 +883,10 @@ This scaffold passes all automated accessibility tests. Use it as a starting poi
 | 2025-03-18 | Accessibility Expert, reviewed by Writer | Third round: fixed motion test false positive. Added native checkbox warning. Added heading level skip guidance. |
 | 2025-03-19 | Accessibility Expert, reviewed by Writer | Fourth round: rewrote reflow pattern with overflow: hidden and toolbar wrap. Strengthened tone="primary" warning. Added MenuButton aria-label example. |
 | 2025-03-19 | Accessibility Expert, reviewed by Writer | Separated library-authoring standards into `component-authoring-accessibility.md`. Rewrote this document for consumers who use existing Sanity UI components. Removed documentation-requirement rules, cross-component pattern tracking, and library-internal design decisions. Kept all guidance on landmarks, headings, accessible names, contrast, motion, touch targets, reflow, and lang attribute. |
+| 2025-03-24 | Accessibility Expert, reviewed by Writer | Fifth round from automated tests (3 training iterations). Heading skip h1→h3 (2/3 fail): added explicit "items in a list under h1 are h2, not h3" rule with inline code showing both levels in context; added document list items to the scaffold. Reflow at 320px (3/3 fail): promoted wrap="wrap" to a top-level principle — every Flex with more than one child must wrap. Contrast on selected MenuItems (1/3 fail): expanded §4 and §9 warnings to cover selected states beyond Buttons (same #556bfc background). Updated menu.md accessibility section with selected-state contrast warning. |
+| 2025-03-25 | Accessibility Expert, reviewed by Writer | Sixth round: applied pending edits from prior session (aria-selected on Card, reflow checklist, ToastProvider known issue, studioTheme callout, MenuButton id/popover, tooltip ref forwarding, TextInput onChange, icon table). Added multiple-h1 warning, touch target spacing, bare input warning, hardcoded hex warning. Fixed Stack gap pixel values. Fixed Badge text prop in quick-start. |
+| 2025-03-26 | Accessibility Expert, reviewed by Writer | Seventh round (3 training iterations, 8/9/6 pass). Headings now pass 3/3 (single h1, proper h2). Contrast passes 3/3. Reflow still fails 3/3 — toolbar overflow. New: nested-interactive from misused role="listbox" pattern (iter 3). Changes: (1) Rewrote toolbar wrap section as "most common remaining failure" with full Card-wrapped ✗/✓ code showing the toolbar inside the content Card. (2) Added nested-interactive warning to card.md selectable list pattern with code showing actions outside the role="option" element. (3) Added rem values column to space.md spacing table. (4) Added horizontal divider pattern to card.md (Card borderBottom). (5) Fixed quick-start Badge from text prop to children. |
+| 2025-03-26 | Accessibility Expert, reviewed by Writer | Eighth round (3 training iterations, 6/8/8 pass). New contrast failures: custom avatar with green #04b97a (2.55:1) and ghost+primary nav text on light tint #556bfc/#e5edff (3.65:1). Refined §4: (1) Corrected misleading claim that mode="ghost" + tone="primary" passes AA — it fails at 13px normal weight. (2) Added contrast table for palette colors (primary blue, positive green, caution yellow) showing all fail with white text. (3) Added "Do not build custom colored elements with white text" subsection. (4) Updated §9 known issues to cover all palette colors, not only primary blue. (5) Added scaffold link at top of document so agents find it first. No new content added to reflow section — existing guidance is correct, the failure is an adoption gap not a documentation gap. |
 
 # Product content standards
 
@@ -1188,6 +1366,102 @@ The `@sanity/color` package includes a `contrastRatio` utility function that the
 
 These ratios hold across all semantic tones. Positive, caution, and critical foregrounds on their tinted backgrounds all meet AA minimums.
 
+# Space
+
+The spacing scale controls padding, margin, and gap across all Sanity UI components. Every spacing prop maps to the same scale of 10 values.
+
+## The spacing scale
+
+| Value | Pixels | rem | Common use |
+| --- | --- | --- | --- |
+| `0` | 0px | 0 | No spacing |
+| `1` | 4px | 0.25rem | Tight gaps — label paired with its input, icon next to text |
+| `2` | 8px | 0.5rem | Compact padding — toolbars, sidebar items, dense lists |
+| `3` | 12px | 0.75rem | Standard padding — content cards, buttons, form fields |
+| `4` | 20px | 1.25rem | Spacious padding — form sections, dashboard cards |
+| `5` | 32px | 2rem | Generous padding — onboarding cards, auth forms |
+| `6` | 52px | 3.25rem | Large spacing — section breaks (use with caution) |
+| `7` | 84px | 5.25rem | Extra-large spacing (use with caution) |
+| `8` | 136px | 8.5rem | Page-level spacing (use with caution) |
+| `9` | 220px | 13.75rem | Largest step (use with caution) |
+
+The pixel values assume `1rem = 16px` (the browser default). When users change their browser font size, the `rem` values scale with it. If you inspect computed styles in DevTools, you will see `rem` values, not `px`.
+
+The scale follows a Fibonacci-like progression. Each step grows by adding the two previous steps. This creates a scale that feels even at small values and spreads out at large values.
+
+## Why numbers instead of named sizes
+
+Sanity UI uses numeric keys (`padding={3}`) instead of named keys (`padding="md"`).
+
+- **Fewer names to learn.** Ten numbers are easier to scan than ten size names.
+- **Math works.** You can write `padding={basePadding - 1}` or `margin={-2}`. Named keys do not support arithmetic.
+- **Consistent across props.** The same number means the same size on `padding`, `gap`, `paddingX`, `margin`, and every other spacing prop.
+
+## Which props use the scale
+
+These props accept spacing scale values on Box, Card, Flex, Stack, and other layout components:
+
+| Prop | What it controls |
+| --- | --- |
+| `padding` | Inner spacing on all sides |
+| `paddingX` | Inner spacing on left and right |
+| `paddingY` | Inner spacing on top and bottom |
+| `paddingTop`, `paddingRight`, `paddingBottom`, `paddingLeft` | Inner spacing on one side |
+| `margin` | Outer spacing on all sides |
+| `marginX`, `marginY` | Outer spacing on one axis |
+| `marginTop`, `marginRight`, `marginBottom`, `marginLeft` | Outer spacing on one side |
+| `gap` | Space between children (Stack, Flex, Grid) |
+| `space` | Space between children (Inline) |
+
+Prefer `padding` over `margin` to avoid margin collapse issues. Prefer `gap` on the parent over `margin` on individual children.
+
+## Responsive values
+
+Every spacing prop accepts an array for responsive breakpoints. The array maps to the breakpoints defined in the theme.
+
+```jsx
+/* padding={2} at small screens, padding={4} at 600px+ */
+<Card padding={[2, , 4]}>Content</Card>
+
+/* gap={2} at small screens, gap={3} at medium, gap={4} at large */
+<Stack gap={[2, 3, 4]}>
+  {items}
+</Stack>
+```
+
+An empty slot (`, ,`) means "keep the previous value."
+
+## Choosing a spacing value
+
+Pick spacing based on content density:
+
+**Tight (1–2).** Items that form a single unit. A label and its input. An icon and its caption. The gap should feel like a pause, not a break.
+
+**Standard (3–4).** Distinct items in the same group. Form fields, cards in a list, paragraphs. The gap should feel like a clear separator. Most UI uses these values.
+
+**Generous (5+).** Sections that need visual distance. Use these to create breaks without adding a divider. Values 6–9 are rarely needed outside of page-level layouts.
+
+### Common patterns
+
+| Context | Prop | Value | Pixels |
+| --- | --- | --- | --- |
+| Label + input pair | `gap` | `1`–`2` | 4–8px |
+| Form fields in a group | `gap` | `3` | 12px |
+| Cards in a list | `gap` | `3`–`4` | 12–20px |
+| Content card padding | `padding` | `3` | 12px |
+| Dashboard card padding | `padding` | `4` | 20px |
+| Section break | `gap` | `5` | 32px |
+| Button default padding | `padding` | `3` | 12px |
+| Compact button padding | `padding` | `2` | 8px |
+
+## Units and accessibility
+
+The spacing scale uses `rem` units under the hood, not fixed `px`. The pixel column in the table above shows the defaults at `1rem = 16px`. The `rem` column shows the actual values the components render. When users change their browser font size, spacing scales with the text.
+
+This matters for WCAG 1.4.12 (Text Spacing). Spacing must adapt when users override text spacing settings. Using the spacing scale instead of hardcoded `px` values keeps your layout compliant.
+
+Content must also reflow at 320px viewport width without horizontal scrolling (WCAG 1.4.10 AA). Avoid large fixed spacing values that prevent content from fitting in narrow viewports. Use responsive spacing arrays to reduce padding at small breakpoints.
+
 # Iconography
 
 
@@ -1330,7 +1604,44 @@ Icons in `@sanity/icons` use `stroke="currentColor"` (outlined icons) or `fill="
 
 ## Choosing the right icon
 
-The library contains 200+ icons. Choosing the right one starts with knowing the categories of icons and the naming conventions used.
+The library contains 200+ icons. Choosing the right one starts with knowing the categories of icons and the naming conventions used. 
+
+This table lists the most-used icons grouped by purpose. Import them from `@sanity/icons`.
+
+| Purpose | Icon name | When to use |
+| --- | --- | --- |
+| **Navigation** | | |
+| | `ChevronDownIcon` | Dropdown or menu trigger |
+| | `ChevronRightIcon` | Drill into nested navigation |
+| | `ChevronLeftIcon` | Go back |
+| | `ArrowRightIcon` | Navigate to a new page |
+| | `LaunchIcon` | Open an external link or new tab |
+| | `MenuIcon` | Open a sidebar or mobile menu |
+| | `CloseIcon` | Close a panel, dialog, or sidebar |
+| **Actions** | | |
+| | `AddIcon` | Create or add an item |
+| | `EditIcon` | Edit content |
+| | `TrashIcon` | Delete an item |
+| | `CopyIcon` | Duplicate or copy |
+| | `SearchIcon` | Search or filter |
+| | `UploadIcon` | Upload a file |
+| | `PublishIcon` | Publish content |
+| **Status** | | |
+| | `CheckmarkIcon` | Success or completion |
+| | `CheckmarkCircleIcon` | Success in a badge or inline context |
+| | `WarningOutlineIcon` | Caution or warning — pair with `tone="caution"` |
+| | `ErrorOutlineIcon` | Error or critical state — pair with `tone="critical"` |
+| | `InfoOutlineIcon` | Informational note — pair with `tone="primary"` |
+| | `SpinnerIcon` | Loading state |
+| **Editing** | | |
+| | `BoldIcon` | Bold text toggle |
+| | `ItalicIcon` | Italic text toggle |
+| | `LinkIcon` | Insert or edit a link |
+| | `ImageIcon` | Insert or manage an image |
+| | `OlistIcon` | Ordered list |
+| | `UlistIcon` | Unordered list |
+
+For the full list of 200+ icons, see the icon guidelines reference
 
 1. **Use the most specific icon available.** Prefer `DocumentTextIcon` over `DocumentIcon` when representing a text document. Prefer `ImageRemoveIcon` over a generic `CloseIcon` when indicating image removal.
 1. **Don't use a "close enough" icon.** If no icon in the library clearly represents the concept, it's better to use no icon at all than one that could be misinterpreted. Consider requesting a new icon for the specific use case.
@@ -1411,6 +1722,21 @@ function App() {
 
 Without `ThemeProvider`, components have no access to color tokens, spacing scales, or font stacks. Always place it at the root of your app.
 
+**CSS reset.** `ThemeProvider` does not inject global styles for `<body>` or `<html>`. You must manage your own CSS reset. At minimum, add this to your global stylesheet:
+
+```css
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+```
+
+**`styled-components` is a required peer dependency.** Install it alongside `@sanity/ui`:
+
+```sh
+npm install @sanity/ui @sanity/icons styled-components
+```
+
+If `styled-components` is missing, components render with no styles and no error. For Vite projects, use `@vitejs/plugin-react` (Babel). The SWC variant does not support the Babel plugin that `styled-components` uses for display names and SSR. If you see flash-of-unstyled-content in production, add `babel-plugin-styled-components` to your Vite config.
+
 ### buildTheme
 
 The `buildTheme` function from `@sanity/ui/theme` produces the default Sanity UI theme. Call it with no arguments to get the standard configuration. This is the starting point for all custom themes.
@@ -1423,6 +1749,8 @@ const theme = buildTheme()
 ```
 
 The returned object contains color definitions for every tone, scheme, and state, plus typography scales, spacing values, and shadow definitions.
+
+**`studioTheme` vs `buildTheme()`.** `studioTheme` (from `@sanity/ui`) is a pre-built theme object ready to use. `buildTheme()` (from `@sanity/ui/theme`) builds a fresh theme from defaults. Both produce the same result with no arguments. Use `studioTheme` for the standard look. Use `buildTheme()` when you need to pass custom options.
 
 ### buildLegacyTheme (Sanity Studio)
 
@@ -1458,9 +1786,10 @@ Use `buildLegacyTheme` when theming Sanity Studio. Use `buildTheme` when buildin
 
 The color system supports two schemes: `"light"` and `"dark"`. A scheme controls whether backgrounds are light with dark text, or dark with light text.
 
-- The root scheme is set on `ThemeProvider`.
-- Any `Card` can override the scheme for its subtree using the `scheme` prop. This is how a dark panel appears inside a light interface.
+- The root scheme is set on `ThemeProvider` via the `scheme` prop.
+- Any `Card` can override the scheme for its subtree using its own `scheme` prop. This is how a dark panel appears inside a light interface — the Card sets `scheme="dark"` and all descendants inherit the dark tokens.
 - Every color token stores two values internally: one for light, one for dark. The active scheme picks the right one.
+- Scheme cascades downward through the component tree. A `scheme="dark"` Card inside a light app creates a dark island. Nested Cards inside that dark island inherit dark mode unless they override it again.
 
 #### Light scheme defaults
 
@@ -1496,13 +1825,15 @@ Tones map a semantic intent to a palette hue. They are the primary way to apply 
 | --- | --- | --- |
 | `"default"` | Gray | Standard surface with no semantic meaning |
 | `"neutral"` | Gray | Distinct from default in multi-tone layouts |
-| `"primary"` | Blue | Brand or informational emphasis |
+| `"primary"` | Blue | Brand or informational emphasis — **see contrast warning below** |
 | `"suggest"` | Purple | Suggestions or AI-related content |
 | `"positive"` | Green | Success, completion, health |
 | `"caution"` | Yellow | Attention needed, non-blocking warning |
 | `"critical"` | Red | Error, failure, destructive action |
 
 Not every component supports every tone. Check the component doc for its accepted values. The visual treatment of a tone (hue, saturation, contrast) varies by component. A `"critical"` Button is a solid red fill. A `"critical"` Card is a light red tint. The meaning is the same. The intensity differs.
+
+**`tone="primary"` fails WCAG AA contrast.** The default theme produces white text (`#fff`) on `#556bfc` for `tone="primary"` in default mode. The contrast ratio is 4.29:1 — below the 4.5:1 AA threshold. Automated tests flag this every time. Use `tone="default"` for primary actions. Do not use `tone="primary"` on Buttons, Cards, or MenuItems that display standard-size text. See `accessibility-standards.md` §4 for the full table of palette colors that fail with white text.
 
 ### States
 
@@ -1577,6 +1908,10 @@ Set color at the Card level. Let children inherit. Do not style children one by 
 ### CSS custom properties
 
 The theme generates `--card-*` CSS custom properties for each color context. These are how color reaches every element.
+
+**When to use them.** Reference `--card-*` properties only when you build a custom element that must follow the current Card color context — for example, a custom border, a custom divider, or a status dot that inherits the tone's foreground color. Always prefer component props (`tone`, `muted`, `scheme`) over raw CSS variables. If a Sanity UI component already has a prop for the color you need, use the prop.
+
+**When NOT to use them.** Do not reference `--card-*` variables in global styles, in components outside a Card context, or to override a Sanity UI component's built-in colors. The variables are scoped to the nearest Card ancestor. Outside a Card, they may be undefined.
 
 **Surface colors:**
 
@@ -1653,11 +1988,11 @@ The theme provides a spacing scale that all padding, margin, and gap props refer
 | 2 | 8px | Compact padding (toolbars, sidebar items) |
 | 3 | 12px | Standard padding (content cards, buttons) |
 | 4 | 20px | Spacious padding (form sections) |
-| 5 | 28px | Generous padding (onboarding cards) |
-| 6 | 36px | Large padding (rarely needed) |
-| 7 | 48px | Extra-large (rarely needed) |
-| 8 | 64px | Page-level spacing |
-| 9 | 80px | Largest step (rarely needed) |
+| 5 | 32px | Generous padding (onboarding cards, auth forms) |
+| 6 | 52px | Large spacing (rarely needed) |
+| 7 | 84px | Extra-large (rarely needed) |
+| 8 | 136px | Page-level spacing (rarely needed) |
+| 9 | 220px | Largest step (rarely needed) |
 
 Use scale values, not pixel values. The spacing scale keeps layouts consistent and allows the theme to adjust the base unit if needed.
 
@@ -1695,6 +2030,76 @@ When choosing how to apply color, follow this order of preference:
 ## Dark mode
 
 Dark mode is not a separate theme. It is the second value in every color token pair. When the scheme is `"dark"`, the theme selects the dark variant for each token.
+
+### How to add a dark mode toggle
+
+Pass `scheme` to `ThemeProvider` to set the root scheme. Use React state to toggle it.
+
+```jsx
+import { useState } from 'react'
+import { ThemeProvider, studioTheme, Card, Button } from '@sanity/ui'
+
+function App() {
+  const [scheme, setScheme] = useState('light')
+
+  return (
+    <ThemeProvider theme={studioTheme} scheme={scheme}>
+      <Card padding={4}>
+        <Button
+          text={scheme === 'light' ? 'Switch to dark' : 'Switch to light'}
+          onClick={() => setScheme(s => s === 'light' ? 'dark' : 'light')}
+          mode="ghost"
+        />
+        {/* Rest of your app */}
+      </Card>
+    </ThemeProvider>
+  )
+}
+```
+
+**Match the system setting.** To follow the user's OS preference, read `prefers-color-scheme` on mount:
+
+```jsx
+import { useState, useEffect } from 'react'
+
+function useSystemScheme() {
+  const [scheme, setScheme] = useState('light')
+
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    setScheme(mq.matches ? 'dark' : 'light')
+    const handler = (e) => setScheme(e.matches ? 'dark' : 'light')
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
+  }, [])
+
+  return scheme
+}
+
+// Usage:
+const scheme = useSystemScheme()
+<ThemeProvider theme={studioTheme} scheme={scheme}>
+```
+
+### Invert a section with Card scheme
+
+To create a dark panel inside a light interface, set `scheme="dark"` on a Card. All descendants inherit the dark tokens.
+
+```jsx
+/* Light app with a dark sidebar */
+<ThemeProvider theme={studioTheme} scheme="light">
+  <Flex>
+    <Card scheme="dark" padding={3} style={{ width: '260px' }}>
+      {/* This sidebar and all its children render in dark mode */}
+      <Text>Dark sidebar content</Text>
+    </Card>
+    <Card flex={1} padding={4}>
+      {/* This content stays in light mode */}
+      <Text>Light content area</Text>
+    </Card>
+  </Flex>
+</ThemeProvider>
+```
 
 ### What adapts on its own
 
@@ -1933,13 +2338,18 @@ pnpm add --save-exact styled-components@npm:@sanity/css-in-js
 
 | Task | How |
 | --- | --- |
-| Set up theming | Wrap in `ThemeProvider` with `buildTheme()` |
+| Set up theming | Wrap in `ThemeProvider` with `buildTheme()` or `studioTheme` |
+| Install peer deps | `npm install @sanity/ui @sanity/icons styled-components` |
 | Apply semantic color | Set `tone` on Card, Button, Badge, or other component |
-| Switch to dark mode | Set `scheme="dark"` on a Card or at the root |
+| Toggle dark mode | Pass `scheme` state to `ThemeProvider` — see "How to add a dark mode toggle" |
+| Match system dark mode | Use `matchMedia('(prefers-color-scheme: dark)')` — see code above |
+| Invert one section | Set `scheme="dark"` on a Card |
 | De-emphasize content | Use the `muted` prop on Text or Card |
-| Style a custom component | Use `--card-*` CSS custom properties |
+| Style a custom element | Use `--card-*` CSS custom properties (only inside a Card context) |
 | Override Studio colors | Use `buildLegacyTheme()` in `sanity.config.ts` |
 | Reference raw palette | Import hues from `@sanity/color` (last resort) |
+| Avoid contrast failures | Do not use `tone="primary"` in default mode — 4.29:1 fails AA |
+| CSS reset | Add `box-sizing: border-box` and `body { margin: 0 }` — theme does not inject global styles |
 
 # Layout guidelines
 
@@ -2552,32 +2962,32 @@ The layouts doc covers content rules across several subsections. This section co
 
 # Box
 
+
 
-
-Used as the lowest-level building block for containing UI elements.
+#### Used as the lowest-level building block for containing UI elements.
 
 ### **API documentation**
 
-_Refer to TypeDocs in Box.tsx_
+#### _Refer to TypeDocs in Box.tsx_
 
 ### **Usage guidelines**
 
-**When to use:**
+#### **When to use:**
 
 - As a container for child elements
 - To  apply padding or margin to a group of elements
 - To create basic visual styling (such as background, border, shadow, etc.) for the purposes of composing a custom component
 
-**When not to use:**
+#### **When not to use:**
 
 - As an interactive element
-- As a way to lay out child elements. Use Flex or Stack or Whatever instead.
+- As a way to lay out child elements. Use Flex, Stack, or Inline instead.
 - To act as a container for content that would otherwise be reserved for Card.
 - To center content at a max width. Use **Container** instead — it sets `max-width` and centers itself.
 
-**Choosing between Box, Card, and Container:**
+#### **Choosing between Box, Card, and Container:**
 
-| Component | Purpose | Adds visual styling | Use case |
+| **Component** | **Purpose** | **Adds visual styling** | **Use case** |
 | --- | --- | --- | --- |
 | Box | Spacing and structure | No (transparent by default) | Wrapping elements with padding or margin |
 | Card | Content surface | Yes (background, border, shadow, tone) | Grouping related content on a distinct surface |
@@ -2585,11 +2995,11 @@ _Refer to TypeDocs in Box.tsx_
 
 ### **Best practices**
 
-**Do**
+#### **Do**
 
 - Use padding over margin when possible to avoid spacing issues related to margin collapse
 
-**Don't**
+#### **Don't**
 
 - Avoid adding margin/padding to individual elements like Buttons or Text to set placement.  Instead, wrap elements in Box with margin/padding.
 - Don't add onClick to Box
@@ -2601,7 +3011,7 @@ _Refer to TypeDocs in Box.tsx_
 ### Accessibility
 
 - **Layout only.** Box provides spacing and structure. It does not add keyboard handling, focus management, or ARIA state. If you render Box as a semantic element via `as`, you are responsible for the behavior that element requires.
-- **Semantic elements via `as`.** Box accepts an `as` prop. Use it to render semantic HTML when the content requires it:
+- **Semantic elements via **`as`**.** Box accepts an `as` prop. Use it to render semantic HTML when the content requires it:
   - `as="nav"` — requires `aria-label` when more than one `<nav>` exists on the page (WCAG 1.3.1 A).
   - `as="section"` — requires a heading child or `aria-label` to register as a landmark (WCAG 1.3.1 A).
   - `as="form"` — requires an accessible name via `aria-label`, `aria-labelledby`, or `<legend>` (WCAG 1.3.1 A).
@@ -2619,6 +3029,8 @@ _Refer to TypeDocs in Box.tsx_
 
 # Flex
 
+
+
 Used as the lowest-level building block for laying out UI elements.
 
 ### **API documentation**
@@ -2629,7 +3041,7 @@ _Refer to TypeDocs in Flex.tsx_
 
 **When to use:**
 
-- To lay items out in a row. Flex defaults to horizontal direction.
+- To stack items vertically or horizontally. Flex defaults to horizontal direction.
 - To control alignment: center children, space them apart, or push one to the end.
 - To lay items in a column with alignment or wrap control. Use `direction="column"` when you need more control than Stack provides.
 - To create responsive layouts that change direction at breakpoints: `direction={['column', , 'row']}`.
@@ -2641,39 +3053,37 @@ _Refer to TypeDocs in Flex.tsx_
 - To wrap a single child with spacing or visual styling. Use **Box** instead.
 - To flow inline items that wrap to the next line. Use **Inline** instead.
 
-**Choosing a layout primitive:**
-
-| Component | Direction | Key props | Use case |
-| --- | --- | --- | --- |
-| Flex | Any (default: row) | `direction`, `align`, `justify`, `wrap`, `gap` | Rows, columns with alignment, responsive direction changes |
-| Stack | Vertical only | `gap` | Simple vertical column with even spacing |
-| Grid | Two-axis | `columns`, `rows`, `gap` | Grid-based layouts |
-| Inline | Horizontal | `space` | Tags, chips, inline groups that wrap |
-| Box | None (block) | `padding` | General container for spacing and visual styling |
-
 ### **Best practices**
 
 **Do**
 
-- 
+- Consider responsive breakpoints when stacking items horizontally. In cases where the number of items can vary, make sure to use `wrap="wrap"` so that items do not clip.
 
 **Don't**
 
--
+- Don’t rely on `row-reverse` or `column-reverse` as a way to change sort order or logical order of items. These direction settings only change the visual layer and will not impact tab index or the way screen readers interpret Flex items.
+- Don’t add onClick to Flex. Flex is not intended to be an interactive element.
 
 ### Accessibility
 
 - **Layout only.** Flex provides layout along an axis. It does not add keyboard handling, focus management, or ARIA state. If you render Flex as a semantic element via `as`, you are responsible for the behavior that element requires.
-- **Semantic elements via `as`.** Flex accepts an `as` prop. Use it to render semantic HTML when the content requires it:
+- **Semantic elements via **`as`**.** Flex accepts an `as` prop. Use it to render semantic HTML when the content requires it:
   - `as="nav"` — requires `aria-label` when more than one `<nav>` exists on the page (WCAG 1.3.1 A).
   - `as="section"` — requires a heading child or `aria-label` to register as a landmark (WCAG 1.3.1 A).
   - `as="form"` — requires an accessible name via `aria-label`, `aria-labelledby`, or `<legend>` (WCAG 1.3.1 A).
   - `as="main"` — should appear once per page.
   - `as="aside"` — should have `aria-label` when the role is not clear from context.
-- **Behavioral elements.** Do not use `as` to render `<button>`, `<dialog>`, `<select>`, `<details>`, `<summary>`, or `<fieldset>`. Flex does not fulfil the keyboard, focus, or ARIA contracts those elements require (WCAG 4.1.2 A). Use the matching Sanity UI component instead.
+- **Behavioral elements.** Do not use `as` to render `<button>`, `<dialog>`, `<select>`, `<details>`, `<summary>`, or `<fieldset>`. Flex does not fulfill the keyboard, focus, or ARIA contracts those elements require (WCAG 4.1.2 A). Use the matching Sanity UI component instead.
 - **Lists.** When rendering `as="ul"` or `as="ol"`, add `role="list"` if `list-style: none` is applied. WebKit strips list semantics without it (WCAG 1.3.1 A). Children must be `<li>` elements.
 - **Visual-to-DOM order.** Do not use `flex-direction: row-reverse` or `flex-direction: column-reverse` when children contain interactive or readable content. Do not use CSS `order` on Flex children. Screen readers and keyboard navigation follow DOM order, not visual order (WCAG 1.3.2 A, WCAG 2.4.3 A). If visual reordering cannot be avoided, confirm the DOM order produces a logical reading sequence.
-- **Reflow at 320px.** Layouts built with Flex must work at 320px viewport width without horizontal scrolling (WCAG 1.4.10 AA). Use `wrap="wrap"` for content that should flow to the next line. Avoid fixed `px` widths on Flex children — use percentage-based or `flex-grow` sizing. Flex spacing tokens use `rem` and scale with user font-size settings (WCAG 1.4.12 AA).
+- **Reflow at 320px.** Layouts built with Flex must work at 320px viewport width without horizontal scrolling (WCAG 1.4.10 AA). **Every Flex with more than one child must have `wrap="wrap"`.** This includes the outer layout Flex, toolbar rows, action rows inside cards, and any other horizontal grouping. A single non-wrapping Flex causes the page to overflow. Avoid fixed `px` widths on Flex children — use percentage-based or `flex-grow` sizing. Flex spacing tokens use `rem` and scale with user font-size settings (WCAG 1.4.12 AA).
+
+  **Reflow checklist** — confirm each before shipping:
+  - [ ] Outer layout Flex has `wrap="wrap"`
+  - [ ] Toolbar Flex (heading + buttons) has `wrap="wrap"` and `gap={2}`
+  - [ ] Actions row inside each Card has `wrap="wrap"`
+  - [ ] No Flex child uses a fixed `px` width without a `maxWidth` fallback
+  - [ ] Outer Flex uses `minHeight`, not `height`
 
 ### Content
 
@@ -2682,38 +3092,31 @@ _Refer to TypeDocs in Flex.tsx_
 
 # Stack
 
+
+
 Arranges children in a single vertical column with consistent spacing between them.
 
 [Figma component](https://www.figma.com/design/5mhVqXlldJEEB2VWZeKQ4i/%F0%9F%A7%AC-Sanity-UI?node-id=29358-183&m=dev) · [React component](https://github.com/sanity-io/ui/blob/v4-beta/packages/ui/src/primitives/stack/Stack.tsx)
 
 ### API documentation
 
-Stack takes the following props:
+_Refer to TypeDocs in Flex.tsx_
 
 ### Usage guidelines
 
 **When to use:**
 
-- To arrange items in a vertical column with even spacing. Examples: form fields, card lists, text blocks.
+- To arrange items in a vertical column with even spacing. Examples: form fields, card lists, content blocks.
 - To stack related content where each child spans the full width of the parent.
 - To create vertical rhythm in a section without writing custom CSS.
 
 **When not to use:**
 
-- To lay out items side by side. Use **Flex** instead.
+- To lay out items with custom gaps, alignment, and/or wrapping values. Use Flex instead.
 - To create a two-axis grid of items. Use **Grid** instead.
 - To flow inline items that wrap to the next line. Use **Inline** instead.
 - To wrap a single child with no spacing needs. Use **Box** instead.
 - To create overlapping layers on the z-axis. Use CSS `position` and `z-index` instead. Stack does not layer items — it lines them up in sequence.
-
-**Layout primitive comparison:**
-
-| **Component** | **Direction** | **Spacing prop** | **Wrapping** | **CSS model** | **Use case** |
-| --- | --- | --- | --- | --- | --- |
-| Stack | Vertical only | `gap` | None | CSS Grid | Vertical column of items |
-| Flex | Any | `gap` + alignment | Optional | Flexbox | Rows, columns, or mixed layouts |
-| Grid | Two-axis | `gap` + columns/rows | Implicit | CSS Grid | Grid-based layouts |
-| Inline | Horizontal | `space` | Wraps by default | Flexbox | Tags, chips, inline groups |
 
 ### Best practices
 
@@ -2728,7 +3131,6 @@ Stack takes the following props:
 **Don't**
 
 - Don't add `margin-bottom` or `margin-top` to children to create spacing. Use `gap` on the Stack. Manual margins conflict with the grid gap and cause uneven results.
-- Don't use Stack when items need to sit side by side. Use **Flex** or **Inline** instead.
 - Don't set `as` to a semantic element without meeting its contract. A `<nav>` needs navigation links. A `<fieldset>` needs a `<legend>`. A `<section>` needs a heading. See the accessibility section.
 - Don't use `as="button"` or `as="dialog"` on Stack. Stack provides layout, not behavior. Use the **Button** or **Dialog** components for those roles.
 - Don't reorder children with CSS `order`. This breaks the link between visual order and DOM order, which harms screen reader and keyboard users.
@@ -2741,16 +3143,16 @@ Stack takes the following props:
 
 | **Value** | **Size** | **Content pattern** | **Use case** |
 | --- | --- | --- | --- |
-| `0` | 0px | No gap | Items that must touch (rare) |
+| `0` | 0px | No gap | Mimicking rows in tabular data |
 | `1` | 4px | Tight grouping | Label paired with its input |
 | `2` | 8px | Tight grouping | Icon paired with a text line |
 | `3` | 12px | Standard spacing | Form fields in a group |
 | `4` | 20px | Standard spacing | Cards in a list, paragraphs |
-| `5` | 28px | Generous spacing | Sections within a view |
-| `6` | 36px | Generous spacing | Major content blocks |
-| `7` | 44px | Generous spacing | Page-level sections |
-| `8` | 52px | Generous spacing | Reserved for large layouts |
-| `9` | 60px | Generous spacing | Reserved for large layouts |
+| `5` | 32px | Generous spacing | Sections within a view |
+| `6` | 52px | Generous spacing | Major content blocks (use with caution) |
+| `7` | 84px | Generous spacing | Page-level sections (use with caution) |
+| `8` | 136px | Generous spacing | Reserved for large layouts (use with caution) |
+| `9` | 220px | Generous spacing | Reserved for large layouts (use with caution) |
 
 **Content density tiers:**
 
@@ -2763,18 +3165,6 @@ Stack takes the following props:
 #### As (semantic element)
 
 `as` sets the rendered HTML element. The default is `'div'`.
-
-| **Value** | **When to use** | **Requirements** |
-| --- | --- | --- |
-| `'div'` | Generic vertical layout (default) | None |
-| `'ul'` | An unordered list of items | Add `role="list"`. Children must be `<li>` elements. |
-| `'ol'` | An ordered list of items | Add `role="list"`. Children must be `<li>` elements. |
-| `'nav'` | A group of navigation links | Add `aria-label` when the page has more than one `<nav>`. |
-| `'section'` | A themed group with a heading | Add a heading child. Without one, `<section>` has no landmark role. |
-| `'fieldset'` | A group of related form controls | Add a `<legend>` as the first child. |
-| `'form'` | A form container | Add an `aria-label` or visible heading. |
-| `'header'` | Page or section header | Should contain heading and nav elements. |
-| `'footer'` | Page or section footer | Should contain metadata or nav elements. |
 
 Avoid `as="button"`, `as="dialog"`, or `as="select"`. These elements carry behavior contracts that Stack does not fulfil. Use the matching component instead.
 
@@ -2810,7 +3200,7 @@ Each child of a list Stack must be an `<li>` element. Wrap each child in `<li>` 
 
 Example:
 
-`<Stack as="ul" role="list" gap={2}>`
+`<Stack as="ul" role="list" gap={2}>`
 
 `  <li>First item</li>`
 
@@ -2819,8 +3209,6 @@ Example:
 `  <li>Third item</li>`
 
 `</Stack>`
-
-
 
 **Reading order.** Stack places items in DOM order. Visual order and DOM order match by default. Do not use CSS `order` on children. It breaks the link between what users see and what screen readers announce. Keyboard navigation also follows DOM order, not visual order (WCAG 1.3.2).
 
@@ -2845,23 +3233,6 @@ Example:
 **Width behavior.** Stack fills its parent's width. Each child stretches to the full width of the Stack. This is not adjustable — if you need children with varied widths, use **Flex** or **Grid**.
 
 **No text styling.** Stack is a layout primitive. It does not set font size, line height, or color. Use **Text**, **Heading**, or **Label** inside the Stack to style text content.
-
-### v3 to v4 migration
-
-| **Area** | **v3** | **v4** |
-| --- | --- | --- |
-| Spacing prop | `space={3}` | `gap={3}` (renamed) |
-| Responsive format | Array only: `space={[2, 3]}` | Array, object, or scalar: `gap={3}`, `gap={[2, , 4]}`, `gap={{sm: 2, lg: 4}}` |
-| List handling | `as="ul"` applied `list-style: none` on its own | Removed. Apply `list-style: none` and `role="list"` yourself. |
-| Styling engine | styled-components | CSS class composition |
-| `forwardRef` | Required for ref forwarding | Not needed (React 19 ref-as-prop) |
-| Breakpoints | Theme-driven (varied) | Fixed: `[0, 360, 600, 900, 1200, 1800, 2400]` px |
-
-**Rename **`space`** to **`gap`**.** Find all uses of `<Stack space={…}>` and change them to `<Stack gap={…}>`. The values (0–9) stay the same.
-
-**Update list Stacks.** In v3, `as="ul"` stripped list markers on its own. In v4, you must add `role="list"` and style `list-style: none` yourself. Without `role="list"`, VoiceOver does not treat the element as a list.
-
-**Check responsive values.** v3 only accepted arrays. v4 accepts arrays, objects, and scalars. No changes are needed — arrays still work. Objects and scalars are new options.
 
 # Text
 
@@ -2956,14 +3327,12 @@ Before truncating, attempt to shorten the text if possible. The ideal kind of tr
 
 ### Accessibility
 
-- **Semantic elements via `as`.** Text defaults to a `<div>`. Use `as` to render the correct element:
-  - `as="p"` — for paragraph text.
-  - `as="span"` — for inline text within another element.
-  - `as="label"` — for form labels. Pair with `htmlFor` to link to an input.
-  - Do not use `as` for behavioral elements like `<button>` or `<a>`. Text does not add keyboard handling or ARIA roles (WCAG 4.1.2 A).
-- **Color contrast.** Text must maintain **4.5:1** contrast against its background for standard sizes, and **3:1** for large text (24px+ regular or 19px+ bold) (WCAG 1.4.3 AA). Take care with `muted` or `accent` on non-standard backgrounds.
-- **Color independence.** Do not use the `accent` prop as the only way to mark status. Pair color with text labels or icons (WCAG 1.4.1 A).
-- **Zoom and reflow.** Text must remain legible at 400% zoom / 320px viewport width (WCAG 1.4.10 AA). Text spacing must hold up when users override line height to 1.5×, paragraph spacing to 2×, letter spacing to 0.12×, and word spacing to 0.16× (WCAG 1.4.12 AA). Spacing tokens use `rem` units and scale with user font-size settings. Do not use fixed `px` units when overriding styles.
+To ensure content is accessible to all users, including those using assistive technologies:
+
+- **Contrast Compliance:** Ensure that the text color maintains a contrast ratio of at least **4.5:1** against the background for standard text, and **3:1** for large text. Be particularly careful when using `muted` or `accent` props on non-standard backgrounds.
+- **Don't rely on color:** Do not use the `accent` prop as the _only_ way to indicate status (e.g., errors or success). Always pair color with text labels or icons.
+- **Semantic Structure:** While the `Text` component defaults to a `div`, use the `as` prop to render semantically appropriate tags (e.g., `as="p"`) to help screen readers understand the content structure.
+- **Scaling:** Ensure text remains legible when the browser is zoomed up to 200%. Avoid using fixed pixel units if overriding styles manually.
 
 ### **Content**
 
@@ -3035,7 +3404,7 @@ Used to visually deemphasize a heading element. **Use with caution. **Heading’
 
 #### Accent
 
-Accent should only be used in rare circumstances where adding color is considered essential to communication. Use `size` ahead of accent.
+Accent is deprecated and should be avoided. Use `size` instead of accent to increase emphasis.
 
 #### TextOverflow
 
@@ -3048,10 +3417,10 @@ Before truncating, attempt to shorten the text if possible. The ideal kind of tr
 
 ### Accessibility
 
-- **Navigation and orientation.** Screen reader users rely on headings to navigate complex interfaces. Headings address common orientation issues in Sanity Studio.
+- **Navigation and orientation. **Use Heading to create explicit waypoints within an interface. Screen reader users rely on headings to navigate complex interfaces. Headings address common orientation issues in Sanity Studio.
 - **Semantic structure.** Always use the `as` prop to render `<h1>`–`<h6>` tags. The default `<div>` rendering provides no heading role. Screen readers will skip it.
 - **Logical order.** Heading levels must descend in sequence (H1 → H2 → H3). Do not skip levels (e.g. H1 to H4). Screen reader users navigate by heading level — a gap breaks their mental model.
-- **Color contrast.** `muted` or `accent` headings must maintain **3:1** contrast against the background for large text (24px+ regular or 19px+ bold) and **4.5:1** for smaller text (WCAG 1.4.3 AA).
+- **Color contrast.** `muted` headings must maintain **3:1** contrast against the background for large text (24px+ regular or 19px+ bold) and **4.5:1** for smaller text (WCAG 1.4.3 AA).
 - **Zoom and reflow.** Heading sizes must remain legible at 400% zoom / 320px viewport width (WCAG 1.4.10 AA). Long headings should wrap, not clip. When using `textOverflow="ellipsis"`, verify clipped headings still make sense in context. Spacing tokens use `rem` and scale with user font-size settings (WCAG 1.4.12 AA).
 
 ### **Content**
@@ -3062,6 +3431,8 @@ Before truncating, attempt to shorten the text if possible. The ideal kind of tr
 - **Descriptive:** Headings should clearly describe the content of the section they introduce.
 
 # Tooltip
+
+
 
 **Description** The Tooltip is a floating text label that displays information when a user hovers, focuses, or taps on an element. Its purpose is to provide helpful, non-essential context to a UI element. It succinctly describes the function of an element (like an icon-only button) or enhances baseline understanding without cluttering the interface.
 
@@ -3105,17 +3476,15 @@ The Tooltip component accepts the following specific properties. It extends `Lay
 
 **1. Basic Tooltip** A simple text label for an icon button.
 
-`<Tooltip content={<Text>Edit Profile</Text>}>`
+`<Tooltip content={<Text>Edit Profile</Text>}>`
 
 `  <Button icon={EditIcon} mode="ghost" />`
 
 `</Tooltip>`
 
-
-
 **2. With Arrow and Animation** Provides a smoother visual transition and clearer connection to the trigger.
 
-`<Tooltip`
+`<Tooltip`
 
 `  arrow`
 
@@ -3129,11 +3498,9 @@ The Tooltip component accepts the following specific properties. It extends `Lay
 
 `</Tooltip>`
 
-
-
 **3. Delayed Interaction** Adds a 500ms delay before opening to prevent accidental triggers.
 
-`<Tooltip`
+`<Tooltip`
 
 `  delay={{ open: 500, close: 0 }}`
 
@@ -3145,8 +3512,6 @@ The Tooltip component accepts the following specific properties. It extends `Lay
 
 `</Tooltip>`
 
-
-
 ### Accessibility
 
 - **Keyboard trigger.** Tooltips must appear on keyboard focus, not only on mouse hover. The child element must be interactive (a `<button>`, `<a href>`, or other focusable element).
@@ -3155,6 +3520,7 @@ The Tooltip component accepts the following specific properties. It extends `Lay
 - **Disabled elements.** Never attach a tooltip to a disabled button (`<button disabled>`). Disabled elements leave the tab order. Keyboard users will never reach the tooltip. Place the tooltip on a wrapper element instead, or provide context through nearby text.
 - **Reduced motion.** The `animate` prop respects the user's `prefers-reduced-motion` setting. When reduced motion is on, the tooltip appears and hides with no transition.
 - **Screen readers.** Tooltip content must not repeat the trigger's `aria-label`. If the button is labeled "Settings," the tooltip should add context or be omitted.
+- **Child must forward refs.** Tooltip attaches to its child via a ref. If the child is a custom component, it must use `React.forwardRef`. Without ref forwarding, the tooltip fails to position and does not appear. This is silent — no error is thrown.
 
 ### **Content Guidelines**
 
@@ -3178,12 +3544,14 @@ _Refer to TypeDocs in Button.tsx_
 **When to use:**
 
 - To trigger an action within the application (e.g., "Publish", "Delete", "Save").
-- `.` To submit data in a form context. In such cases, set Button to `type="submit"`.
+- To submit data in a form context. In such cases, set Button to `type="submit"`.
 
 **When not to use:**
 
 - To navigate the user to a new view or URL within  a line of text or paragraph. Use **Link** instead. Users of assistive technology expect buttons to perform actions and links to navigate.
 - To switch between different views on a screen. Use **Tab** instead. The Tab component family has several `aria` tags that make navigation accessible for people relying on assistive technology.
+- To toggle a boolean form value (on/off). Use **Switch** or **Checkbox** instead. Button `selected` is for action toggles (bold, show panel), not form state.
+- 
 
 ### Best practices
 
@@ -3195,6 +3563,8 @@ _Refer to TypeDocs in Button.tsx_
 - Limit the number of primary buttons on the screen. Display one primary action per logical section (example: actions in a toolbar, or a card).
 - Add tooltips to icon-icon buttons. Wrap the button in a tooltip, and use `aria-label` – `<Tooltip text="Text"><Button aria-label="Text" icon={...} />`
 - Set `iconRight` to `chevron-down` when using `Button` in `MenuButton`
+- When using `selected` for toggle buttons, always pass `aria-pressed={selected}`. Sanity UI does not set this for you.
+- Use `mode="bleed"` for toggle buttons. The light resting state makes the selected state more visible.
 
 **Don’t**
 
@@ -3213,7 +3583,7 @@ _Refer to TypeDocs in Button.tsx_
 | `“pressed”` | Provides a visual cue that the button is actively being pressed via keyboard input, finger tap, or mouse press. |  |  |
 | `“focused”` | Provides a visual cue that the button is in a focused state and is interactable with keyboard inputs |  |  |
 | `"disabled"` | Removes the ability to interact with the button in any way | To remove the ability to interact with an action. | When allowing the user to perform an action can cause destructive or harmful outcomes When button is set to a `loading` state |
-| `“selected”` | Provides a visual cue that the button has been set as “activated” or “on” | To allow Button to act as a toggle between two states. | Text formatting options within a rich-text editor toolbar |
+| `“selected”` | Provides a visual cue that the button has been set as “activated” or “on”. Applies the pressed color state. Sets `data-selected` on the element. | Toggle buttons — switching between on and off. | Bold/italic toolbar, show/hide panel, filter toggles. See the Selected section below |
 | `“loading”` | Provides a visual cue that the button’s action is initiated and in the process of completing | To show that a button’s action is in progress when an action is asynchronous or where there is a perceivable delay (+300ms). | Sync actions with large volumes of data Intensive processes like publishing content |
 
 **Note: **It's possible to pass `data-{state}` props to achieve the same styling as CSS pseudo classes. These are equal:
@@ -3228,7 +3598,105 @@ _Refer to TypeDocs in Button.tsx_
 
 #### Selected
 
-When a button opens a panel or activates an action
+Marks a button as "on" or active. Use `selected` when the button acts as a toggle — switching between two states on each press. Examples: bold/italic in a rich-text toolbar, showing/hiding a panel, activating a filter.
+
+**What **`selected`** does:**
+
+- Sets `data-selected` on the DOM element.
+- Applies the pressed color state (darker background, inverted foreground).
+- Does NOT set `aria-pressed`. You must add it yourself.
+
+**Single toggle button:**
+
+`const [bold, setBold] = useState(false)`
+
+`<Button`
+
+`  icon={BoldIcon}`
+
+`  mode="bleed"`
+
+`  selected={bold}`
+
+`  aria-pressed={bold}`
+
+`  aria-label="Bold"`
+
+`  onClick={() => setBold(!bold)}`
+
+`/>`
+
+
+
+**Toggle group (toolbar):**
+
+`const [format, setFormat] = useState({ bold: false, italic: false })`
+
+`<Flex gap={1}>`
+
+`  <Button`
+
+`    icon={BoldIcon}`
+
+`    mode="bleed"`
+
+`    selected={format.bold}`
+
+`    aria-pressed={format.bold}`
+
+`    aria-label="Bold"`
+
+`    onClick={() => setFormat(f => ({ ...f, bold: !f.bold }))}`
+
+`  />`
+
+`  <Button`
+
+`    icon={ItalicIcon}`
+
+`    mode="bleed"`
+
+`    selected={format.italic}`
+
+`    aria-pressed={format.italic}`
+
+`    aria-label="Italic"`
+
+`    onClick={() => setFormat(f => ({ ...f, italic: !f.italic }))}`
+
+`  />`
+
+`</Flex>`
+
+
+
+**Label change for show/hide toggles.** When the button controls visibility of a panel, update both the label and `aria-pressed`:
+
+`<Button`
+
+`  icon={showInspector ? EyeOpenIcon : EyeClosedIcon}`
+
+`  mode="bleed"`
+
+`  selected={showInspector}`
+
+`  aria-pressed={showInspector}`
+
+`  aria-label={showInspector ? 'Hide inspector' : 'Show inspector'}`
+
+`  onClick={() => setShowInspector(!showInspector)}`
+
+`/>`
+
+
+
+When NOT to use `selected`:
+
+- To switch between views on a page. Use **Tab** instead.
+- To toggle a form boolean (yes/no). Use **Switch** or **Checkbox** instead.
+- To mark a chosen item in a list. Use Card with `selected` instead.
+
+When a button is set to selected:
 
 - Pair with label change
 - **Combine with **`mode="bleed"` for clean toggle appearance
@@ -3268,7 +3736,7 @@ Used to indicate the semantic meaning of an action.
 | **Value** | **Description** | **Purpose** | **Use case** |
 | --- | --- | --- | --- |
 | `"default"` | Neutral gray | Used to represent general actions within the product. | General actions, Publish |
-| `"primary"` | Brand blue | THIS IS TONE IS DEPRECATED. DO NOT USE. | Brand moments, Account creation |
+| `"primary"` | Brand blue | THIS IS TONE IS DEPRECATED. DO NOT USE. | THIS IS TONE IS DEPRECATED. DO NOT USE. |
 | `"positive"` | Green | Used for celebratory moments or actions that reinforce success | Success, Publish, Confirm positive |
 | `"caution"` | Yellow/Orange | Used for actions that may have high consequences. | Warning states, Changing a role |
 | `"critical"` | Red | Used for destructive or dangerous actions. | Destructive actions, Delete |
@@ -3301,22 +3769,23 @@ Used to reinforce specific actions within an interface–specifically as visual 
 1. **Use ChevronRightIcon** for to drill into nested, column-based navigation
 1. **Use chevrons for expand/collapse** with dynamic direction
 
-### **Content**
-
-- **Be concise:** Button labels should be short and predictable. Use simple and direct language.
-- **Start with verbs:** Labels should describe the action taken (example: "Publish", "Edit", "Upload"). For extra clarity, add the subject of the action, (example: Upload image).
-- **Sentence case:** Use sentence case for button labels (example: "Add item").
-
 ### Accessibility
 
 - **Accessible names.** Buttons with a `text` prop get their accessible name from the label. Icon-only buttons must have an `aria-label`. The `tooltip` prop does not set an accessible name. Example: `aria-label="Add content"`.
 - **Keyboard interaction.** Buttons are focusable via `Tab`. They activate with both `Enter` and `Space`. `Space` activates on key-up and must not scroll the page on key-down. Disabled buttons are removed from the tab order via HTML `disabled`.
-- **`as` prop and keyboard behavior.** When `as="a"`, the element activates with `Enter` only — `Space` does not trigger links. Other `as` values may change the implicit ARIA role. Do not use `as` for elements whose behavioral contract Button does not fulfil.
+- `as`** prop and keyboard behavior.** When `as="a"`, the element activates with `Enter` only — `Space` does not trigger links. Other `as` values may change the implicit ARIA role. Do not use `as` for elements whose behavioral contract Button does not fulfil.
 - **Disabled strategy.** Button uses HTML `disabled`, which removes it from tab order. For cases where the user must discover the disabled element, consider `aria-disabled="true"` instead — it keeps the element focusable but blocks activation (WCAG 2.1.1 A). Do not place tooltips on disabled buttons. Keyboard users cannot reach them.
 - **Focus indicators.** A visible focus ring appears on keyboard focus. Do not suppress it without a high-contrast replacement.
 - **Color contrast.** Button text vs. background must meet **4.5:1** for standard-size text (WCAG 1.4.3 AA). The button's visual edge against nearby colors must meet **3:1** (WCAG 1.4.11 AA). These are separate criteria — do not conflate them.
 - **Minimum target size.** Button's default padding produces targets that meet the **24×24 CSS px** minimum (WCAG 2.5.8 AA). Custom padding values must not shrink the target below this size.
 - **Tone and icons.** Do not rely on tone color alone to convey meaning. Pair `'positive'`, `'caution'`, and `'critical'` tones with icons.
+- 
+
+### **Content**
+
+- **Be concise:** Button labels should be short and predictable. Use simple and direct language.
+- **Start with verbs:** Labels should describe the action taken (example: "Publish", "Edit", "Upload"). For extra clarity, add the subject of the action, (example: Upload image).
+- **Sentence case:** Use sentence case for button labels (example: "Add item").
 
 # TextInput
 
@@ -3353,45 +3822,245 @@ _Refer to TypeDocs in TextInput.tsx_
 - **Label association.** Every TextInput must have a `<label>` via `for`/`id` or wrapping, or an `aria-label`. A `placeholder` is not a label (WCAG 4.1.2 A).
 - **Error state.** When invalid, the input must have an associated error message. Use `aria-describedby` to link the input to the error text.
 - **Keyboard interaction.** TextInput is focusable via `Tab`. Standard text editing keys apply.
+- **`onChange` uses `currentTarget`.** Use `event.currentTarget.value` to read the input value. This follows the React `SyntheticEvent` pattern. `event.target` may require a type cast to `HTMLInputElement`.
 
 # Toast
 
 Used to show brief status messages about completed actions, warnings, or errors. Toasts appear at the edge of the screen and disappear after a short time.
 
-### API documentation
+---
 
-_Refer to TypeDocs in Toast.tsx_
+## Setup — ToastProvider is required
 
-### Usage guidelines
+`ToastProvider` must wrap your app for `useToast()` to work. It is NOT included in `ThemeProvider`. Omitting it causes a runtime error with no helpful message.
+
+`ToastProvider` must be **inside** `ThemeProvider`. The nesting order matters.
+
+```jsx
+// main.tsx
+import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+import { ThemeProvider, studioTheme, ToastProvider } from '@sanity/ui'
+import App from './App'
+import './reduced-motion.css'
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <ThemeProvider theme={studioTheme}>
+      <ToastProvider>
+        <App />
+      </ToastProvider>
+    </ThemeProvider>
+  </StrictMode>,
+)
+```
+
+**If `useToast()` throws at runtime**, the most likely cause is a missing `ToastProvider`. Check that it wraps the component tree above the component calling `useToast()`.
+
+---
+
+## Basic usage — useToast() and toast.push()
+
+Call `useToast()` inside any component to get the `toast` object. Call `toast.push()` to show a toast.
+
+```jsx
+import { useToast, Button } from '@sanity/ui'
+
+function PublishButton() {
+  const toast = useToast()
+
+  const handlePublish = () => {
+    // ... perform the action ...
+    toast.push({
+      status: 'success',
+      title: 'Document published',
+    })
+  }
+
+  return <Button text="Publish" onClick={handlePublish} tone="default" />
+}
+```
+
+---
+
+## toast.push() API
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `title` | `string` | Yes | The main message. Keep to one sentence. |
+| `status` | `'success'` \| `'error'` \| `'warning'` \| `'info'` | No | Sets the tone and icon. Defaults to `'info'`. |
+| `description` | `string` | No | A secondary line below the title. Keep short. |
+| `closable` | `boolean` | No | Shows a close button. Defaults to `true`. |
+| `duration` | `number` | No | Auto-dismiss time in milliseconds. Defaults to `5000`. Set to `0` to keep the toast visible until closed. |
+
+### Status values
+
+| Status | Tone | Icon | Use case |
+| --- | --- | --- | --- |
+| `'success'` | `positive` | `CheckmarkCircleIcon` | Action completed — "Document published" |
+| `'error'` | `critical` | `ErrorOutlineIcon` | Action failed — "Upload failed. Try a smaller file." |
+| `'warning'` | `caution` | `WarningOutlineIcon` | Non-blocking issue — "Connection unstable" |
+| `'info'` | `default` | `InfoOutlineIcon` | Neutral update — "3 items moved to drafts" |
+
+---
+
+## Code examples
+
+### Success toast
+
+```jsx
+toast.push({
+  status: 'success',
+  title: 'Document published',
+})
+```
+
+### Error toast with description
+
+```jsx
+toast.push({
+  status: 'error',
+  title: 'Upload failed',
+  description: 'The file exceeds the 10 MB limit. Try a smaller file.',
+})
+```
+
+### Warning toast
+
+```jsx
+toast.push({
+  status: 'warning',
+  title: 'Unsaved changes',
+  description: 'Save your work before leaving this page.',
+})
+```
+
+### Persistent toast (no auto-dismiss)
+
+```jsx
+toast.push({
+  status: 'error',
+  title: 'Connection lost',
+  description: 'Changes will not be saved until the connection is restored.',
+  closable: true,
+  duration: 0,
+})
+```
+
+### Toast after a long-running action
+
+Fire a toast when an action takes over 3 seconds. The user may have moved on.
+
+```jsx
+const handleExport = async () => {
+  setLoading(true)
+  try {
+    await exportData()
+    toast.push({
+      status: 'success',
+      title: '3 items exported',
+    })
+  } catch (err) {
+    toast.push({
+      status: 'error',
+      title: 'Export failed',
+      description: err.message,
+    })
+  } finally {
+    setLoading(false)
+  }
+}
+```
+
+---
+
+## Usage guidelines
 
 **When to use:**
 
 - To confirm an action that completed in the background (e.g. "Document published").
 - To report an error from an async task (e.g. "Upload failed. Try a smaller file.").
 - To warn about a non-blocking issue.
+- After a loading state that lasted over 3 seconds.
 
 **When not to use:**
 
 - For actions that need a response. Use **Dialog** instead.
 - For inline form errors. Show the error next to the input instead.
 - For persistent information. Use a **Card** with a tone instead.
+- For content that requires user interaction beyond dismissing. Use **Dialog** instead.
 
-### Content
+---
 
-- **Name the action and its result (P7).** Write "Document published" — not "Success." Write "3 items deleted" — not "Done." Users must know what happened without thinking back to what they clicked.
+## Content
+
+- **Name the action and its result (P7).** Write "Document published" — not "Success." Write "3 items deleted" — not "Done." Users must know what happened without looking back.
 - **Use past tense for done actions (P7).** Write "Published," "Saved," "Deleted." Use "-ing" for actions not yet done: "Publishing…," "Saving…"
-- **Keep status messages under one sentence (P7).** Toast messages must be easy to read at a glance. If more is needed, add a link to the item or a "Details" link.
-- **Use `tone` to match the status (P7).** Good outcomes use `tone="positive"`. Warnings use `tone="caution"`. Failures use `tone="critical"`. Pair each tone with its matching icon.
+- **Keep the title under one sentence (P7).** Toast messages must be easy to read at a glance.
+- **Use `description` for extra detail.** If the problem needs more context, put it in `description`. Do not cram two sentences into `title`.
+- **Use `status` to match the outcome (P7).** `'success'` for good outcomes. `'error'` for failures. `'warning'` for non-blocking issues. `'info'` for neutral updates.
 - **Loading messages must name the task (P7).** Write "Publishing document…" or "Uploading image…" when the task is known. Use "Loading…" only when the task is unknown.
-- **Use Text `size={1}` for toast messages (P7).** Status messages are low-rank, short-lived text.
-- **Casing (P8).** Use sentence case for all toast text.
+- **Casing (P8).** Use sentence case for title and description.
 - **Translation (P9).** Toast text can grow 30–50% in other languages. Keep base text short to leave room for growth.
 
-### Accessibility
+---
 
-- **Live region.** Toast containers must use `aria-live="polite"` for status messages and `aria-live="assertive"` for errors. Screen readers announce the text when it appears (WCAG 4.1.3 AA).
-- **Do not rely on color alone.** Pair `tone="critical"` with `ErrorOutlineIcon` and `tone="positive"` with `CheckmarkCircleIcon` (WCAG 1.4.1 A).
-- **Auto-dismiss timing.** Toasts that auto-dismiss must stay visible long enough to be read. Allow at least 5 seconds.
+## Accessibility
+
+- **Live region.** `ToastProvider` renders a container with `aria-live`. Success and info toasts use `aria-live="polite"`. Error toasts use `aria-live="assertive"`. Screen readers announce the text when it appears (WCAG 4.1.3 AA).
+- **Do not rely on color alone.** Each `status` value pairs a tone with an icon. The icon is added by the component. If you build a custom toast layout, pair `tone="critical"` with `ErrorOutlineIcon` and `tone="positive"` with `CheckmarkCircleIcon` (WCAG 1.4.1 A).
+- **Auto-dismiss timing.** Toasts auto-dismiss after 5 seconds by default. For error toasts that require user attention, set `duration: 0` to keep the toast visible until the user closes it. All auto-dismissing toasts must stay visible long enough to be read — do not set `duration` below 3000ms.
+- **Known Sanity UI issue.** `ToastProvider` renders a `<ul>` element with `list-style: none`. WebKit strips list semantics from unstyled lists. VoiceOver may not announce the container as a list. This is a library-level issue. See `accessibility-standards.md` §9.
+
+---
+
+## Common mistakes
+
+### Missing ToastProvider
+
+```jsx
+/* ✗ useToast() throws — no ToastProvider in the tree */
+<ThemeProvider theme={studioTheme}>
+  <App /> {/* App calls useToast() */}
+</ThemeProvider>
+
+/* ✓ ToastProvider wraps the app inside ThemeProvider */
+<ThemeProvider theme={studioTheme}>
+  <ToastProvider>
+    <App />
+  </ToastProvider>
+</ThemeProvider>
+```
+
+### ToastProvider outside ThemeProvider
+
+```jsx
+/* ✗ Wrong order — ToastProvider has no theme context */
+<ToastProvider>
+  <ThemeProvider theme={studioTheme}>
+    <App />
+  </ThemeProvider>
+</ToastProvider>
+
+/* ✓ Correct order */
+<ThemeProvider theme={studioTheme}>
+  <ToastProvider>
+    <App />
+  </ToastProvider>
+</ThemeProvider>
+```
+
+### Vague toast messages
+
+```jsx
+/* ✗ Vague — user does not know what happened */
+toast.push({ status: 'success', title: 'Success!' })
+toast.push({ status: 'error', title: 'Something went wrong' })
+
+/* ✓ Specific — names the action and the result */
+toast.push({ status: 'success', title: 'Document published' })
+toast.push({ status: 'error', title: 'Image upload failed. File exceeds 10 MB.' })
+```
 
 # Card
 
@@ -3412,7 +4081,7 @@ _Refer to TypeDocs in Card.tsx_
 
 **When not to use:**
 
-- You simply need to group elements for layout without visible boundaries or background colors. Use **Box** or **Flex** instead to avoid unnecessary DOM nesting and style calculations.
+- To group elements for layout without visible boundaries or background colors. Use **Box** or **Flex** instead to avoid unnecessary DOM nesting and style calculations.
 - You are building a button. While `pressed` and `selected` props exist, use the **Button** component for interactive actions to ensure full keyboard accessibility and semantic validity.
 - As a layout element. Use Box, Flex, Grid, Inline, or Stack instead.
 
@@ -3427,9 +4096,20 @@ _Refer to TypeDocs in Card.tsx_
 **Don’t**
 
 - Don’t manually set text colors inside a Card unless absolutely necessary. Rely on the Card to automatically provide high-contrast text colors based on the selected `tone`.
-- Don’t rely on color alone to convey meaning (e.g., a red card background) for users with color blindness; ensure text labels or icons accompany the color change.
+- Don't rely on color alone to convey meaning (e.g., a red card background) for users with color blindness; ensure text labels or icons accompany the color change.
 - Use caution when nesting cards. Cards are intended to be an atomic composition. Use Box, Flex, Grid, Inline, or Stack instead.
-- Don’t add interactive elements to Card when paired with an onClick event.
+- Don't add interactive elements to Card when paired with an onClick event.
+
+**Horizontal dividers.** Sanity UI does not export a general-purpose `Divider` component (`MenuDivider` is for menus only). To create a horizontal rule between sections, use `<Card borderBottom />` with no padding. This renders a thin border line that inherits the Card color context.
+
+```jsx
+/* Horizontal divider between sections */
+<Stack space={4}>
+  <Text>Section one content</Text>
+  <Card borderBottom />
+  <Text>Section two content</Text>
+</Stack>
+```
 
 ### **Variants & Examples**
 
@@ -3532,6 +4212,68 @@ Individual padding can be set with `paddingLeft`, `paddingRight`, `paddingTop`, 
 - **Contrast.** Card handles text color contrast for its tones. If you nest custom components, verify text maintains a **4.5:1** ratio against the Card's `tone` (WCAG 1.4.3 AA).
 - **Focus indication.** If Card is interactive, it must have a visible focus style. Do not suppress the outline without a high-contrast replacement.
 - **Heading hierarchy.** Heading levels inside a Card must follow the page hierarchy. Do not start with `<h1>` inside a Card if the page already has a main title (WCAG 1.3.1 A, 2.4.6 AA).
+- **`selected` does not set `aria-selected`.** The `selected` prop sets `data-selected` for styling only. It does NOT set `aria-selected`. Do not add `aria-selected` to a `<div>` Card — it is invalid on elements without a supporting role like `option`, `row`, or `tab` (WCAG 4.1.2 A). For a selectable list, use `role="listbox"` on the container and `role="option"` on each Card. Or avoid `aria-selected` and use `aria-current="true"` to mark the active item instead.
+- **Selectable list pattern.** When building a list of selectable Cards, structure it as a listbox:
+
+  ```jsx
+  /* ✗ Invalid — aria-selected on a plain <div> Card */
+  <Stack space={2}>
+    <Card selected={activeId === 1} aria-selected={activeId === 1}>Doc 1</Card>
+  </Stack>
+
+  /* ✓ Valid — role="listbox" + role="option" supports aria-selected */
+  <Stack space={2} role="listbox" aria-label="Documents">
+    <Card role="option" aria-selected={activeId === 1} selected={activeId === 1}
+      tabIndex={0} padding={3} border>
+      Doc 1
+    </Card>
+  </Stack>
+
+  /* ✓ Also valid — aria-current avoids the role requirement */
+  <Stack space={2}>
+    <Card selected={activeId === 1}
+      aria-current={activeId === 1 ? 'true' : undefined}
+      padding={3} border>
+      Doc 1
+    </Card>
+  </Stack>
+  ```
+
+  **Do not nest interactive elements inside a `role="option"` Card.** A Card with `role="option"` is itself interactive. Placing a Button, MenuButton, or link inside it creates nested interactive elements — screen readers cannot announce them and keyboard focus breaks. Move action buttons outside the selectable Card, or place them in a separate column that is not inside the `role="option"` element.
+
+  ```jsx
+  /* ✗ Nested interactive — Button inside role="option" */
+  <Card role="option" aria-selected={active} tabIndex={0} padding={3}>
+    <Flex align="center" justify="space-between">
+      <Text>{doc.title}</Text>
+      <Button icon={EllipsisVerticalIcon} mode="bleed" aria-label="Options" />
+    </Flex>
+  </Card>
+
+  /* ✓ Actions outside the selectable element */
+  <Flex align="center" gap={2}>
+    <Card role="option" aria-selected={active} tabIndex={0} padding={3} flex={1}>
+      <Text>{doc.title}</Text>
+    </Card>
+    <Button icon={EllipsisVerticalIcon} mode="bleed" aria-label="Options" />
+  </Flex>
+  ```
+- **Clickable card pattern.** Do not add `onClick` to Card. Use a stretched link inside the Card instead:
+
+  ```jsx
+  <Card padding={3} border radius={2} style={{ position: 'relative' }}>
+    <Stack space={2}>
+      <Heading as="h2" size={1}>
+        <a href={`/doc/${doc.id}`}
+          style={{ textDecoration: 'none', color: 'inherit',
+            position: 'absolute', inset: 0 }}>
+          {doc.title}
+        </a>
+      </Heading>
+      <Text size={1} muted>{doc.type}</Text>
+    </Stack>
+  </Card>
+  ```
 
 ### **Content Guidelines**
 
@@ -3600,7 +4342,7 @@ _Refer to TypeDocs in MenuDivider.tsx_
 
 **Don’t**
 
-- Use caution when nesting `MenuGroup`s more than 2 levels deep. Deeply nested menus are difficult to navigate and prone to closing accidentally.
+- Use caution when nesting `MenuGroup`s more than 2 levels deep. Menus nested beyond 2 levels are hard to navigate and prone to closing by accident.
 - Don’t put complex forms or interactive inputs inside a `MenuItem`. The Menu is designed for simple "one-click" actions or boolean toggles.
 - Don’t use the `hotkeys` for keyboard shortcuts when the MenuItem’s purpose is navigational.
 
@@ -3629,7 +4371,6 @@ Used exclusively for communicating what navigation action the user should expect
 ##### Tone
 
 - MenuItems used for Navigation should not utilize tone
-- 
 
 ##### Selected
 
@@ -3638,7 +4379,6 @@ Used exclusively for communicating what navigation action the user should expect
 ##### Hotkeys
 
 - Menu hotkeys should be used explicitly when representing an action. MenuItems used for Navigation should not utilize hotkeys
-- 
 
 ### Accessibility
 
@@ -3653,6 +4393,10 @@ Used exclusively for communicating what navigation action the user should expect
 - **Accessible names.** Each MenuItem gets its accessible name from its visible text content. If a MenuItem uses only an icon, add `aria-label`.
 - **Focus management.** The menu acts as a focus trap while open. Tab closes the menu to preserve document flow. Escape closes the menu and returns focus to the trigger.
 - **Color independence.** MenuItems with `tone="critical"` must pair with an icon (e.g. `ErrorOutlineIcon`). Do not rely on the red color alone to convey the destructive meaning (WCAG 1.4.1 A).
+- **Selected state contrast.** When a MenuItem is `selected`, the default theme applies a primary blue background (`#556bfc`) with white text. This produces a 4.29:1 contrast ratio — below the 4.5:1 AA threshold for standard-size text (WCAG 1.4.3 AA). For navigation menus where one item stays selected, avoid using the `selected` prop on text-bearing MenuItems. Mark the active item with a bold label or a left border accent instead.
+- **MenuButton trigger names.** When the MenuButton trigger is icon-only, the trigger Button must have `aria-label`. The Menu component handles its own ARIA roles, but the trigger button does not inherit a name from the menu content.
+- **`MenuButton` requires an `id` prop.** The `id` connects the trigger button to the menu for ARIA. Omitting it causes no console error, but screen readers cannot link the trigger to its popup.
+- **`popover={{ portal: true }}` for clipped containers.** When a MenuButton sits inside a container with `overflow: hidden`, the menu gets clipped. Pass `popover={{ portal: true }}` to render the menu in a portal outside the overflow container.
 
 ### **Content Guidelines**
 
@@ -3662,6 +4406,8 @@ Used exclusively for communicating what navigation action the user should expect
 - **Consistent Icons:** If you use icons for some items in a group, try to use icons for all items in that group to maintain visual alignment.
 
 # Popover
+
+
 
 **Description** The Popover is a floating container used to display content on top of other UI elements. It is positioned relative to a reference element (usually a button or an input) and serves as a foundational primitive for building complex interactive components like menus, date pickers, and dropdowns,.
 
@@ -3687,7 +4433,7 @@ Used exclusively for communicating what navigation action the user should expect
 
 **1. Basic Popover** A standard popover triggered by a button.
 
-`<Popover`
+`<Popover`
 
 `  content={<Box padding={3}><Text>Popover Content</Text></Box>}`
 
@@ -3701,11 +4447,9 @@ Used exclusively for communicating what navigation action the user should expect
 
 `</Popover>`
 
-
-
 **2. With Arrow and Animation** Useful for contextual help or onboarding tips.
 
-`<Popover`
+`<Popover`
 
 `  arrow`
 
@@ -3723,11 +4467,9 @@ Used exclusively for communicating what navigation action the user should expect
 
 `</Popover>`
 
-
-
 **3. Dropdown Behavior (Match Width)** Ensures the popover is exactly as wide as the trigger element.
 
-`<Popover`
+`<Popover`
 
 `  matchReferenceWidth`
 
@@ -3742,8 +4484,6 @@ Used exclusively for communicating what navigation action the user should expect
 `  <SelectButton />`
 
 `</Popover>`
-
-
 
 ### Accessibility
 
@@ -3760,104 +4500,232 @@ Used exclusively for communicating what navigation action the user should expect
 - **Action-Oriented:** If the popover contains a menu, use verbs for labels (e.g., "Edit," "Delete").
 - **Sentence Case:** Use sentence case for any text headers or descriptions inside the popover (e.g., "Sort by date" not "Sort By Date").
 
-# Tooltip
 
-**Description** The Tooltip is a floating text label that displays information when a user hovers, focuses, or taps on an element. Its purpose is to provide helpful, non-essential context to a UI element. It succinctly describes the function of an element (like an icon-only button) or enhances baseline understanding without cluttering the interface.
+# List of all Sanity Icons in TSV format
 
-### **API Documentation**
+Icon name	Alternative names	Purpose	When to use	When not to use	Additional best practices
+FilledIcon		Represents content in use	- To show that something is used (opposite of EmptyIcon)	- To indicate success or completion. Use CheckmarkIcon or CheckmarkCircleIcon instead.
+CheckmarkCircleFilledIcon		Represents a completed task or successful step	- To represent general tasks in a completed state. - To represent success at small sizes where greater visual weight/distinction is important.	- To represent success when the icon is displayed at a normal or large size. Use CheckmarkIcon instead.
+CloseCircleIcon	Cancel Circle | Remove Circle | Exit Circle
+CheckmarkCircleIcon	Success Circle | Confirmed Circle | Done Circle	Represents an incompleted task	- To represent general tasks independent of completion state. - To view/manage tasks. 	- For tasks with an explicitly defined deadline. Use TaskIcon instead. - To explicitly a completed task. Use CheckmarkCircleFilledIcon instead. - To explicitly indicate an incompleted task. Use CircleIcon instead. - To indicate success. Use CheckmarkIcon or CheckmarkCircleFilledIcon instead.
+CircleIcon	Dot Large | Point | Marker	Incompleted general tasks	- To represent general tasks in an incompleted state. 	- Explicitly as a radio button or checkbox. Use actual components instead.
+AccessDeniedIcon	Forbidden | No Entry | Restricted	Indicates access restrictions or permissions denial	- Use when a user lacks permission to access content or features	- For errors that aren't related to user permissions. Use ErrorOutlineIcon or ErrorFilledIcon instead.  - For warnings that aren't related to user permissions. Use WarningOutlineIcon or WarningFilledIcon instead. - To represent an action to gain access. Use LockIcon instead.
+AddIcon	Plus | Create | New	Adding a new or existing item to an element	"- Adding/creating a new item that doesn't benefit from the specificity of an icon with an ""add"" modifier  (example: add-document) - As a button for the primary add/create action - As a button when only one type of content can be added - As a menu button to display the options of what type of item to add"	- When there are multiple add actions on a page. Use a more specific icon is available like AddCommentIcon for comments - To indicate showing UI columns/rows in the UI. Use split-horizontal or split-vertical instead. - To indicate inviting people/members to an organization or group. Use AddUserIcon instead. - For adding content in a list where position does matters. Use InsertAboveIcon or InsertBelowIcon instead.	"- Add a label with the icon when space permits.   - When creating a new item, use ""New [ITEM TYPE]"". Example: ""New document""    - When adding an existing item, use ""Add [ITEM TYPE ]"". Example: ""Add tag"". - In cases where a label is not used, add a tooltip.    - When creating a new item, use ""Create a new [ITEM TYPE]"". Example: ""Create a new document""    - When adding an existing item, use ""Add a [ITEM TYPE ]"". Example: ""Add a tag""."
+AddCommentIcon	Comment Add | New Comment | Reply	To provide an affordance for adding a comment or reply. 	- To represent the ability to add a comment or reply to a thread. Especially when commenting is a secondary action.	- To view comments. Use CommentIcon instead. - When commenting is the primary action within a feature. Consider AddIcon instead.
+AddUserIcon		To add a role or add/invite users to a group 	- For adding people to a user group or a team - To add people to a permissions group - To add a role	- As a general action for sharing. Use ShareIcon instead.
+ClipboardIcon	Copy | Paste | Buffer	To represent pasting text from clipboard	- For pasting from clipboard actions only. 	- To represent copying or copying to clipboard. Use CopyIcon instead. - To represent pasting an image from clipboard. Use  ClipboardImageIcon instead.
+ClipboardImageIcon	Copy Image | Image Buffer | Screenshot	To represent pasting an image from clipboard	- Specifically for pasting image data from the clipboard.	- For general pasting actions. Use ClipboardIcon instead.
+CloseIcon	X | Exit | Dismiss	Close or dismiss UI elements	- Closing a menu or popover. - Dismissing a modal, panel, or sheet. - Removing a Card from view.	- For deleting or removing items. Use RemoveIcon instead.  - For errors. Use ErrorIconOutline instead.  - For permission issues. Use AccessDeniedIcon instead. - For clearing content from an input. Use CloseCircleIcon instead. - Concealing a panel. Use PanelLeftIcon/PanelRightIcon instead.
+CogIcon	Settings | Configuration | Preferences	View or manage settings	- Use to indicate settings for an item or application	- For general tools or maintence. Use WrenchIcon instead. - To represent local computer settings. Use DesktopIcon instead. - To indicate configurations. Use ControlsIcon instead.
+CollapseIcon	Minimize | Contract | Fold	To exit the interface out of a maximized state or mode.	- For exiting a full screen mode in the interface - For exiting a focus mode in the interface	- For closing UI elements. Use CloseIcon instead. - For collapsing UI elements. Use ChevronUp instead. - For hiding UI elements. Use EyeClosedIcon instead.
+CommentIcon	Message | Feedback | Discussion	To represent comments, discussions, or threads	- To demarcate comment sections  - To show comments within the UI - To use as a visual indicator for the number of comments	- For creating new comments. Use AddCommentIcon instead. - For referencing or soliciting feedback. Use FeedbackIcon instead.
+CopyIcon	Duplicate | Clone | Copy	Copying or duplicating actions	- For copying general text to clipboard - For duplicating items or cloning operations	- For copying a link/URL to the clipboard. Use LinkIcon instead.
+DocumentsIcon	Multiple Files | Collection | Archive	To represent multiple documents or a group of documents	- To represent multiple documents or general files	- For single documents. Use DocumentIcon instead.
+DownloadIcon	Save | Get | Pull	To represent downloading or exporting of content	- To indicate downloads or downloading actions.  - To indicate exports or exporting actions.  	- For uploads or uploading actions. Use UploadIcon instead. - For imports or importing actions. Use UploadIcon instead. - For actions associated with publishing. Use UnpublishIcon instead.
+EllipsisHorizontalIcon	More Options | Menu | Additional	Reveal additional actions in a menu	- Revealing additional options or actions in an overflow menu 	- For revealing a navigation menu. Use MenuIcon instead. - To indicate truncated text. Use typographic ellipses instead.
+EmptyIcon		To indicate that no results exist or that something is in a blank state	- To indicate that parent has no children - To show that there are no results or instances of something   - To show that something isn't used	- To indicate null values
+ErrorOutlineIcon	Error | Alert | Failed	To represent a general error within the application.	- To represent a critical or blocking error - When an operation or process fails - To visually demarcate an error message	- To represent issues that are neither critical nor blocking. Use WarningOutlineIcon instead. - To represent issues related to user permissions. Use AccessDeniedIcon instead.
+ExpandIcon	Maximize | Grow | Enlarge	To enter the interface into a maximized state or mode.	- For entering full screen mode in the interface - For entering focus mode in the interface 	- For expanding UI elements. Use ChevronDown instead. - For making UI elements visible. Use EyeOpenIcon instead.
+EyeClosedIcon	Hidden | Invisible | Off	To indicate that an item is hidden from view or to make an item hidden from view	- For hiding content from view, such as passwords or content elements.	- For hiding, closing or dismissing UI elements. Use CloseIcon instead.  - For collapsing UI elements. Use ChevronUpIcon instead. - To represent private content or making something private. Use LockIcon instead.
+EyeOpenIcon	Visible | Show | View	To indicate that an item is visible or to make an item visible	- For showing content in a view, such as passwords or content elements.	- For opening new content, such as tabs, windows, previews or applications. Use LaunchIcon instead. - For exposing UI elements. Use ChevronDownIcon instead. - To represent pubilc content or making something public. Use EarthGlobeIcon instead.
+FeedbackIcon		To represent a feature or action to collect feedback from users	- When asking for feedback or to indicate that a feature is open for feedback	- To represent comments. Use CommentIcon instead. - To represent discussion threads. Use CommentIcon instead.
+FilterIcon	Funnel | Sort Options | Refine	Filtering or refine a group of items	- To reveal a filter menu or a group of filters - To reveal a group of filters and sort options. - To perform a filtering action  	- For sorting or reordering items. Use SortIcon instead. - To reveal a free-form text input filter. Use SearchIcon instead.
+HomeIcon	House | Main | Start	Home or main page	- To provide a direct link to the top-most page of Sanity.	- To link to the entry page of an individual application or plugin.
+ImageIcon	Picture | Photo | Media	To represent a single image	- To represent an image or image file.  - As a placeholder for an image before it's fully loaded	- To represent multiple images. Use ImagesIcon instead. - To represent a video. Use VideoIcon instead.
+ImageRemoveIcon	Delete Image | Remove Photo | Clear	Removing or deleting an image	- For image removal or deletion 	- For general removal. Use RemoveIcon instead. - For any actions associated with image editing.
+ImagesIcon	Gallery | Multiple Photos | Collection	To represent a collection of images or a collection of mixed media formats	- To represent multiple images or media files	- To represent a single image. Use ImageIcon instead. - To represent a general collection. Use PackageIcon instead.
+JsonIcon	Data | JSON Format | Code	To represent JSON data.	- For JSON editors - For JSON data display	- To represent inline code. Use CodeIcon instead. - To represent a code blocks. Use CodeBlockIcon instead.
+LinkIcon	Hyperlink | Connection | URL	Links or connections	- To represent a link or copying a link to the clipboard - To represent linking one item to another	- For unlinked items. Use LinkRemovedIcon instead. - For broken links. Use UnlinkIcon instead.
+LockIcon	Locked | Secure | Private	To represent locked or secured content	- To represent locked content or an action to lock content. - To represent an action to gain access to private content. - To represent private content/items - To represent that content cannot be altered.	- As a general toggle for locking/unlocking. Use UnlockIcon and LockIcon in conjunction. - To represent locking/docking of interface elements. For sidebar locking/docking use PanelLeftIcon or PanelRightIcon instead.
+MasterDetailIcon	Split View | Layout | Detail Pane	To represent the Sanity Studio	- Representing the Structure tool within Sanity Studio	- For any purpose other than representing the Structure tool within Sanity Studio
+MenuIcon	Hamburger | Navigation | Drawer	Reveal main navigation in a menu or panel	- To represent the main navigational menu.	- For any menu that is not the primary navigation.  - For filter menus, use FilterIcon instead. - For options menus, use EllipsisHorizontalIcon instead. - For secondary menus, use ChevronDown instead. 	- MenuIcon should be used once in a screen. Avoid multiple menu affordances to represent different navigational elements.
+OlistIcon	Ordered List | Numbered | Sequence	Ordered/numbered lists	- To represent numbered lists - List formatting for ordered lists	- To represent a general list. Use ListIcon instead. - For unordered lists. Use UlistIcon instead.
+PanelLeftIcon	Sidebar Left | Left Panel | West	Toggle the visibility of a left panel or sidebar	- Toggling the visibility, docking or locking a left sidebar/panel	- Don't use for navigation. Use MenuIcon instead. - Don't use to indicate closing the PanelRightIcon. Use PanelLeftIcon instead.	"- Consider RTL languages when using panel left/right. - Make sure to reinforce which toggle action will occur in the label (ex: ""Open the navigation panel"")"
+PanelRightIcon	Sidebar Right | Right Panel | East	Toggle the visibility of a left panel or sidebar	- Toggling the visibility, docking or locking a right sidebar/panel	- Don't use for navigation. Use MenuIcon instead. - Don't use to indicate closing the PanelLeftIcon. Use PanelRightIcon instead. 	"- Consider RTL languages when using panel left/right. - Consider RTL languages when using panel left/right. - Make sure to reinforce which toggle action will occur in the label (ex: ""Close the inspector panel"")"
+PauseIcon	Stop | Hold | Wait	Pausing media playback or holding actions	- For pausing media playback  - For holding processes or actions	 - Don't use for stopping playback completely or terminating actions. Use StopIcon instead.
+PlayIcon	Start | Run | Begin	Starting media playback or initiating actions	- To represent media playback or starting media playback  - For initiating processes or actions	- For toggling visibility of items within a tree view. Use ToggleArrowRightIcon instead.
+SearchIcon	Find | Magnify | Look	Search/find content/information	- Used to represent any form of search or text-input filtering	- For code inspection. Use JsonIcon instead. - For non-text-input filtering of list items or table rows. Use FilterIcon instead.
+SortIcon	Order | Arrange | Organize	Sorting or ordering a group of items	- For sorting items in a group - For toggling the sort order of items in a group	- For filtering. Use FilterIcon instead. - When filter and sort actions are combined. Use FilterIcon instead. - To indicate a transfer of information. Use TransferIcon instead.
+SparkleIcon	AI	Used exclusively to represent Sanity's branded Content Agent feature	- To represent Sanity's Content Agent feature	- For any purpose other than representing Sanity's Content Agent feature
+SparklesIcon	Magic | AI | Enhanced	To represent AI or agentic features	- As a general purpose represention for AI-powered features	- When there are more specific AI icons. For AI-writing features, use ComposeSparklesIcon instead. - For in-product celebrations or announcements. Use ConfettingIcon instead.
+StackCompactIcon	List Compact | Dense | Tight	To represent general vertically stacked content at higher density 	- To set a higher viewing density for a stack of items	- To represent a stack with normal density. Use StackIcon instead.
+StackIcon	List | Layers | Pile	To represent general vertically stacked content at normal density	- To toggle a group of items to be vertically oriented - To set a normal viewing density for a stack of items	- For compact/dense stacked views. Use StackCompactIcon instead. - For collections of content. Use PackageIcon instead. - To represent lists. Use ListIcon instead. - To represent files or documents or any form of content. Use DocumentsIcon instead.
+StarFilledIcon	Starred | Favorited | Rating	To represent content that is currently set as a favorite	- Displaying an item as being favorited - As a toggle for removing an item to their favorites	- Showing that an item can be set as a favorite. Use StarIcon instead. - Adding a favorite or toggling a favorite off. Use StarIcon instead.  - For new features. Use [TBD] instead. - For bookmarks. Use BookmarkIcon instead. - For liking. Use HeartIcon instead. - For rating. Use [TBD] instead.
+StarIcon	Unstarred | Favorite | Featured | Rating	To represent content that can be favorited	- View/managing favorites - Displaying that an item can be favorited - As a toggle for adding an item to their favorites 	- Showing that an item is set as a favorite. Use StarIconFilled instead. - Removing a favorite or toggling a favorite off. Use StarIconFilled instead.  - For new features. Use [TBD] instead. - For bookmarks. Use BookmarkIcon instead. - For liking. Use HeartIcon instead. - For rating. Use [TBD] instead.
+StopIcon	End | Terminate | Cancel	Stopping media playback or terminating actions	- For stopping media playback - For terminating processes or actions	- Don't use for pausing playback temporarily or holding actions. Use PauseIcon instead.
+TagIcon	Label | Category | Keyword	Single tag, label or keyword	- To represent the action of adding a tag.  - To indicate text as a tag or keyword	- To represent multiple tags. Use TagsIcon instead.
+TagsIcon	Labels | Categories | Keywords	Multiple tags, labels or keywords	- To indicate multiple tags or keywords exist for an item - To indicate editing a groupd of keywords/tags.	- For a single tag or keyword. Use TagIcon instead. - To represent adding a tag. Use TagIcon instread.
+ThLargeIcon	Grid Large | Tiles | Gallery	To present a grid or tile view	- To represent grid views or tile layouts	- For tables or tabular data lists. Use ThListIcon instead. - For general lists. Use ListIcon instead.
+ThListIcon	List View | Rows | Table	To represent a table view	- To represent a table view or tabular data	- To represent a general list. Use ListIcon instead.
+UlistIcon	Unordered List | Bullets | Items	Unordered/bulleted lists	- To represent bulleted lists - List formatting for unordered lists 	- To represent a general list. Use ListIcon instead. - For numbered lists. Use OlistIcon instead.
+UnlockIcon	Unlocked | Open | Public	Unlocked or open state	- To represent unlock content or an action to unlock content. - To represent content/items that the user can access but is not publicly available. - To explicitly represent that content can be altered. 	- As a general toggle for locking/unlocking. Use UnlockIcon and LockIcon in conjunction. - To represent unlocking/undocking of interface elements. For sidebar locking/docking use PanelLeftIcon or PanelRightIcon instead. - To represent public content. Use EarthGlobeIcon instead.
+UploadIcon	Send | Push | Import	To represent uploading or importing of content	- To indicate uploads or uploading actions.  - To indicate imports or importing actions.  	- For downloads or downloading actions. Use DownloadIcon instead. - For exports or exporting actions. Use DownloadIcon instead. - For actions associated with publishing. Use PublishIcon instead.
+UserIcon	Person | Profile | Account	To represent an inidividual person	- To represent a person, role or profile	- To represent multiple users, a group, or a team. Use UsersIcon instead. - To add a user. Use AddUserIcon instead.
+UsersIcon	People | Team | Group	To represent multiple people, or group, or a team	- To represent people, a group, or a team.	- To represent a single user. Use UserIcon instead. - To add a user. Use AddUserIcon instead.
+VideoIcon		To represent a single video	- To represent a video - As a placeholder for an video before it's loaded	- To represent a video file. Use DocumentVideoIcon instead. - To represent playback. Use PlayIcon instead.
+WarningOutlineIcon	Caution | Alert | Warning	To represent a general warning within the application.	- To represent issues that are neither critical nor blocking. - When an operation or process needs attention, but has not failed - To visually demarcate a warning message	- To represent issues that are either critical or blocking. Use ErrorOutlineIcon instead. - To represent issues related to user permissions. Use AccessDeniedIcon instead.
+CheckmarkIcon	Check | Done | Confirmed	Success or selection	- To represent general positive outcomes - To indicate selection of an item - To indicate success of a flow or operation	- To represent tasks. Use TaskIcon instead. - As a interactive element for toggling an item. Use the Checkbox component instead.
+DotIcon	Point | Bullet | Marker Small	Minimal status indicator	- To visually highlight an item as updated  - To mark an item with a minimal status indicator	- As a bullet for unordered lists. Use unicode characters instead. - To mark items with a warning or error status. Use WarningOutlineIcon or ErrorOutlineIcon respectively.
+ActivityIcon	Feed | Timeline | EKG	Represents activity feeds, monitoring, or diagnostics.	- For activity logs or feeds.  - For performance or health checks.	- For general analytics or data visualization tools. Use BarChartIcon instead. - To represent usage or a general line chart. Use ChartUpwardIcon instead. - To represent a trend in data. Use TrendIcon instead.
+AddDocumentIcon	New document	Adding or creating a document	- For adding a document to a group/collection/list  - For creating a new document as a secondary action	- When adding/creating a document is the primary action. Use AddIcon instead. - For general adding or creation. Use AddIcon instead.
+ArchiveIcon	Box | Storage | Deprecated	Archiving or storing items for later reference	- For archival actions - For stashing changes	- For removal actions. Use RemoveIcon instead. - For delete actions. Use TrashIcon instead. - To represent adding to a collection. Use PackageIcon instead. - To represent download or export actions. Use DownloadIcon instead.
+BarChartIcon	Chart | Statistics | Analytics	Analytics or general data visualization	- For general analytics or data visualization tools - Displaying data as a bar chart	- To represent activity or health metrics. Use ActivityIcon instead. - To represent trends in data. Use TrendUpwardIcon instead. - To represent usage or a general line chart. Use ChartUpwardIcon instead.
+BillIcon	Invoice | Receipt | Payment	Financial information or invoices	- For billing information or invoice management. - To view payment history	- For general documents. Use DocumentIcon instead. - For documentation. Use BookIcon instead. - For payment actions. Use CreditCardIcon instead.
+BoldIcon	Strong | Emphasis | Heavy	Bold text formatting	- For toggling text as bold within a text editing feature.	- Outside text editing. This icon is intended for formatting toolsets.
+CalendarIcon	Date | Schedule | Event	Calendar or date selection	- To indicate date selection or scheduling. - To represent calendar views or features.	- For time or duration. Use ClockIcon instead. - To represent a collection of events. Use TimelineIcon instead.
+ChartUpwardIcon	Growth | Trend | Increase	Product/feature usage or specific line chart data visualization	- To represent usage reports for a product or feature - Displaying data as a line chart	- For, general analytics, data visualization or charts. Use BarChartIcon instead. - To represent activity or health metrics. Use ActivityIcon instead. - To represent trends in data. Use TrendUpwardIcon instead.
+CodeBlockIcon	Code Snippet | Pre | Programming Block	Multiline code blocks	- Code block formatting in rich text 	- To represent inline code. Use CodeIcon instead. - For general API references. Use PlugIcon instead. - To represent JSON. Use JsonIcon instead.
+CodeIcon	Programming | Markup | Syntax	General indicator of code or Inline code snippets	- To indicate something as code - Inline code formatting in rich text 	- To represent multiline code blocks. Use CodeBlockIcon instead. - For general API references. Use PlugIcon instead. - To represent JSON. Use JsonIcon instead.
+DashboardIcon	Overview | Home | Main	Dashboard pages/screens	- To represent pages/screens that act as a dashboard of information.	- To represent Sanity's home page. Use HomeIcon instead. - To represent a gallery of media. Use ImagesIcon instead.
+DocumentIcon	File | Doc | Paper	To represent files or general documents	- As an indicator for a file or general document 	- To represent specific document types when an icon exists - For binary files, use BinaryDocumentIcon instead. - For PDF files, use DocumentPdfIcon instead. - For spreadsheets or tabular files like CSV of TSV, use DocumentSheetIcon instead. - For purely text-based files like .txt or Markdown use DocumentTextIcon instead. - For video files, use DocumentVideoIcon  instead. - For compressed files like Zip or .tar, use DocumentZipIcon instead.
+DragHandleIcon	Grip | Reorder | Move	Reorder items in a group through drag and drop interactions	- Used exclusively for sortable lists or draggable items	- For non-draggable items.
+EditIcon	Modify | Change | Update	Edit or modify actions	- For editing, modifying or updating content.	- For creating new general content. Use AddIcon instead. - For creating new written content. Use ComposeIcon instead.
+EnvelopeIcon	Email | Mail | Message	Email or email communication	- Specifically for email-based communication/features	- For in-app chat. Use CommentIcon instead. - For general feedback. Use FeedbackIcon instead.
+FolderIcon	Directory | Collection | Group	To represent folders or directories.	- For folder navigation or representing directory structures.  - For grouping items in the context of a file system.	- For individual files. Use DocumentIcon instead. - For representing packages or collections. Use PackageIcon instead.
+HelpCircleIcon	Question | Help | Support	Help or support	- For help sections - For links to Support  - For any link/affordance in which the primary purpose is help	- For contextual information in UI. Use InfoOutlineIcon instead. - For documentation. Use BookIcon instead.
+InfoOutlineIcon	Information | Details | About	To represent additional information or details	- For informational tooltips  - Indicators for details or additional information - To demarcate notifications that are for general information/context	- To represent help/support. Use HelpCircleIcon instead. - To represent documentation. Use BookIcon instead.
+ItalicIcon	Emphasis | Slant | Italic Text	Italic text formatting	- For toggling text as italic within a text editing feature.	- Outside text editing. This icon is intended for formatting toolsets.
+LeaveIcon	Exit | Logout | Sign Out	Leaving or exiting	- For logout or exiting actions	- For closing or dismissing views. Use CloseIcon instead. - For toggling sidebars or panels. Use PanelLeftIcon or PanelRightIcon instead.
+MoonIcon	Dark Mode | Night | Theme	Dark mode setting	- For setting a color scheme to dark mode	- For light mode. Use SunIcon instead.
+PinFilledIcon	Pinned 	To represent a pinned item	- To represent an item that has been pinned to a view	- To represent favorited or saved content. Use StarFIlledIcon instead.
+PinIcon	Unpinned	To represent an item that can be pinned	- As an affordance for pinning an item to a view	- For representing an actively pinned item. Use PinFilledIcon instead. - For favoriting or saving content. Use StarIcon instead.
+SelectIcon	Choose | Pick | Cursor	A visual affordance for select components	Exclusively within Select components to visually indicate the input has a menu.	- For dropdowns, menus or popovers. Use ChevronDownIcon instead. - To indicate sorting order. Use SortIcon instead. - To act as an afforance for reordering items in a list. Use DragHandeIcon instead.
+ShareIcon	Export | Send | Distribute	Sharing or general social media	- For share action or general social media sharing	- For exporting actions. Use DownloadIcon instead. - For sharing on a specific social media platform. Use GithubIcon, LinkedInIcon, or TwitterIcon instead.
+SpinnerIcon	Loading | Processing | Wait	To represent an active and indeterminate loading or processing states	- For active and indeterminate loading indicators or processing states.	- When progress is known. Use a progress bar for determinate loading instead. - To represent an action related to beginning a loading or processing activity.  - To repesent syncing. Use SyncIcon instead. - To represent a reload/refresh process. Use RefreshIcon instead.
+TranslateIcon	Language | Localization | Interpret	Translation or language features	- For representing translation or localization features. - For language settings/switching.	- For representing global or international concepts. Use EarthGlobeIcon instead.
+UnarchiveIcon	Box	Moving items out of an archived/stashed state	- For restoring items from an archive	- To represent removing from a collection. Use RemoveIcon instead. - To represent upload or import actions. Use UploadIcon instead.
+UnderlineIcon	Underlined | Emphasis | U	Underline text formatting	For toggling text as underlined within a text editing feature.	- Outside text editing. This icon is intended for formatting toolsets.
+UnknownIcon	Question | Mystery | Undefined	An unknown/undefined thing or state	- For unknown types or undefined states  - As a fallback icon for contents that are unspecified	- To represent help or support. Use HelpCircleIcon instead - To represent something that is empty or unused. Use EmptyIcon instead.
+BinaryDocumentIcon	Code File | Binary | Data File	To represent binary or executable files	- As an indicator for a binary file or executable	- For general documents or files. Use DocumentIcon instead.
+ComposeIcon	Edit | Write | Create Content	Creating new written content	- For creating new written content or documents. 	- For AI-powered creation of new written content. Use ComposeSparklesIcon instead. - For editing existing written content. Use EditIcon instead. - For creating new general content. Use AddIcon instead.
+ComposeSparklesIcon	AI compose	AI-powered creation of new written content	- For creating new written content or documents with AI assistance. 	- To represent an AI-powered feature. Use SparklesIcon instead. - To represent Sanity's Content Agent feature. Use SparkleIcon instead. - For manual creation of new written content. Use ComposeIcon instead.
+DocumentRemoveIcon	Delete Document | Remove File | Discard	Removing or deleting a document	- For document removal or deletion 	- For general removal. Use RemoveIcon instead.
+DocumentSheetIcon	Spreadsheet | Table | Grid	Spreadsheet or tabular documents	- As an indicator for spreadsheet or tabular-data files, such as Excel, CSV, or TSV	- For general documents or files. Use DocumentIcon instead. - For representing tabular data. Use ThListIcon instead.
+DocumentTextIcon	Text File | Article | Written	Text-based documents	- As an indicator for text-based files, such as .txt, .rtf, or Markdown 	- Don't use for rich text. Use BlockContentIcon instead.
+DocumentWordIcon	Word Document | DOC | Text Processing	Word processor documents	- As an indicator for .doc, .docx, or other Word processor file formats	- For general documents or files. Use DocumentIcon instead. - To represent a general text-based document. Use DocumentTextIcon instead.
+DocumentZipIcon	Archive | Compressed | Package	Compressed or archived files	- As an indicator for .zip, .tar, /.gzip or other compression file formats 	- For general archives or archiving data. Use ArchiveIcon instead.
+OverageIcon	Excess | Limit | Quota	Overage or exceeding limits	- For quota warnings, exceeded limit indicators, or overage alerts	- For general warnings Use WarningOutlineIcon instead. - To represent usage or a general line chart. Use ChartUpwardIcon instead. - To represent activity or health metrics. Use ActivityIcon instead. - To represent trends in data. Use TrendUpwardIcon instead.
+PackageIcon	Bundle | Module | Dependency	Packages, or bundles, or collections	- To represent package management, bundles, or collections of data.	- For shipping general groups of documents. Use DocumentsIcon instead. - For directories/folders of files. Use FolderIcon instead.
+ReadOnlyIcon	View Only | Locked | No Edit	Read-only or view-only state	- For read-only fields or to reinforce when content is not editable. - To represent a view-only mode. 	- For locked content. Use LockIcon instead. - For content a user is not allowed to access. Use AccessDeniedIcon instead.
+RedoIcon	Repeat | Forward | Reapply	Redo or reapply actions	- For redo operations 	- For retrying an operation. Use RetryIcon instead. - For going foward in history. Use ArrowRight instead. - For refreshing content. Use RefreshIcon instead.
+RefreshIcon	Reload | Sync | Update	Refresh or reload actions	- For reloading or refreshing content - To mimic the browser's reload action	- To represent syncing data or as an action to sync data. Use SyncIcon instead. - To retry a process or operation. Use RetryIcon instead. - To redo or reapply an action. Use RedoIcon instead.
+StrikethroughIcon	Crossed | Deleted Text | Strike	Strikethrough text formatting	- For toggling text as striked within a text editing feature.	- Outside text editing. This icon is intended for formatting toolsets.
+SunIcon	Light Mode | Day | Bright	Light mode setting	- For setting a color scheme to light mode	- For dark mode. Use MoonIcon instead.
+SyncIcon	Synchronize | Refresh | Update	Synchronization or bi-directional sync	- For bi-directional syncing of content/information. 	- For general refreshing of information. Use RefreshIcon instead. - For transferring information from one location to another. Use TransferIcon instead. - To represent loading content. Use SpinnerIcon instead.
+UndoIcon	Revert | Back | Cancel	To undo the last user action 	- For undo operations 	- For reverting changes. Use RevertIcon instead. - For going backward in history. Use ArrowLeft instead.
+DocumentPdfIcon	PDF | Portable Document | PDF File	To specifically represent PDF documents	- As an indicator for a PDF document	- For general documents or files. Use DocumentIcon instead. - To represent text-based documents. Use DocumentTextIcon instead.
+DocumentVideoIcon	Video File | Movie | Recording	Video files	- As an indicator for a video file	- For representing video playback or video in the interface. Use VideoIcon instead.
+ToggleArrowRightIcon	Switch Right | Navigate Toggle | Expand	A visual affordance for expanding/collapsing items within a hierarchical tree view.	- For expanding/collapsing items within a hierarchical tree view.	- To expand or collapse content within an accordion view. Use ChevronUpIcon and ChevronDownIcon instead. - For playing media or starting a process. Use PlayIcon instead. - For navigating forward to a new page or drilling in through nested content in a column view. Use ChevronRightIcon instead.
+BugIcon	Issue	Code debugging	- To indicate a debugging action, mode, or process.	- To represent user-facing errors. Use ErrorOutlineIcon instead.
+ControlsIcon	Adjustments | Sliders | Tuning	Configuration or advanced controls	- To represent a configuration action or mode - To represent advanced controls/actions (ex: Advanced search)	- To represent general settings. Use CogIcon instead. - To represent configuring content filters. Use FilterIcon instead.
+NumberIcon	Hash | Numeric | Count	Numeric data or Number type	- To indicate that a numeric data or a Number type value	- To represent underlined text style. Use UnderlineIcon instead.
+StringIcon	Text | Characters | ABC	Text data or String type	- To reference or indicate text data or a String type value	- To represent a link. Use LinkIcon instead. - To represent underlined text style. Use UnderlineIcon instead. - To indicate general text. Use TextIcon instead.
+ColorWheelIcon	Color Picker | Palette | Hue	Color collections, palettes, or themes	- To reference or represent a color theme or collection of colors.	- For targeting an individual color or coloring an individual element. Use DropIcon instead.
+DropIcon	Liquid | Water | Fluid	Individual coloring of an element	- To reference or represent the color of an individual element	- For targeting a color theme or creating a color palette. Use ColorWheelIcon instead.
+CubeIcon	3D | Box | Object	Generic data/metadata	- To represent an individual and general piece of data or metadata. - As a fallback icon for data types that are too abstract to be represented with a more specific icon.	- To represent a collection of data or items. Use PackageIcon instead. - To represent unknown or unidentified data. Use UnknownIcon instead.
+DatabaseIcon	Storage | Data | Server	Database or data storage	- To represent general databases or database features - Data management or storage settings	- For GROQ-specific features or queries. Use GroqIcon instead. - To represent a collection of data or items. Use PackageIcon instead. - To represent an individual and general piece of data or metadata. Use CubeIcon instead.
+MobileDeviceIcon	Phone | Smartphone | Mobile	Mobile device or phone	- To represent a mobile device when choosing between different device types - To represent general touch-based devices	- To represent tablets. Use TabletDeviceIcon instead.
+PlugIcon	Plugin | Extension | Connection	Represents API endpoints or integrations	- Referencing API integrations, features, or endpoints	- For general code references. Use CodeIcon or CodeBlockIcon instead. - For code inspection. Use JsonIcon instead.
+PublishIcon	Release | Deploy | Go Live	Publishing or releasing	- For publishing, deploying or releasing content.	- For unpublishing content. Use UnpublishIcon instead. - For uploading content. Use UploadIcon instead. - For collapsing content vertically. Use ChevronUpIcon instead.
+UnpublishIcon	Retract | Take Down | Draft	Unpublishing or reverting content to a draft	- For unpblishing or taking content offline	- For publishing content. Use PublishIcon instead. - For downloading content. Use DownloadIcon instead. - For expanding content vertically. Use ChevronDownIcon instead.
+TaskIcon	Todo | Checklist | Assignment	For inidicating one or more tasks with a deadline	- To represent tasks with a explicitly defined deadline.	- As a general representation for tasks. Use CheckmarkCircleIcon instead.
+TabletDeviceIcon	Tablet | iPad | Device	Tablet device	- To represent a tablet device when choosing between different device types	- To represent general touch-based devices. Use MobileDeviceIcon instead.
+TerminalIcon	Console | Command Line | Shell	Command line tools and output	- For CLI features/tools or console access	- For general code or code editing. Use CodeIcon instead.
+TimelineIcon	Gantt chart	A sequence or timeline of events	- To represent a sequence or timeline of events 	- To represent tasks. Use TaskIcon instead. - To represent general dates. Use CalendarIcon instead.
+TrendUpwardIcon	Growth | Increase | Rising	Trends in data 	- For representing trending indicators in data. 	- To represent a general data visualization or a line chart. Use BarChartIcon instead. - To represent usage or a general line chart. Use ChartUpwardIcon instead. - To represent usage overages. Use OverageIcon instead. - To represent activity or health metrics. Use ActivityIcon instead.
+ChevronLeftIcon	Collapse Left | Previous	Moving, resizing, transitioning, or revealing/concealing an element in a leftward direction.	- Drilling out through a column based heirarchical view - Moving backward in a carousel view	- Expanding/collapsing sidebars. Use PanelLeftIcon or PanelRightIcon instead - Moving/resizing/revealing a group of elements. Use DoubleChevronLeftIcon instead. - Navigating backward to a previous surface. Use ArrowLeftIcon instead.	- Consider RTL languages when using chevrons.
+ChevronRightIcon	Expand Right | Next	Moving, resizing, transitioning, or revealing/concealing an element in a rightward direction.	- Drilling out through a column based heirarchical view - Moving forward in a carousel view	- Expanding/collapsing sidebars. Use PanelLeftIcon or PanelRightIcon instead - Moving/resizing/revealing a group of elements. Use DoubleChevronRightIcon instead. - Navigating to a new surface. Use ArrowRightIcon instead.	- Consider RTL languages when using chevrons.
+ChevronDownIcon	Expand | Dropdown | More	Moving, resizing, transitioning, or revealing/concealing an element in a downward direction.	- As a general affordance for expanding content for an element when direction is not explicitly known (example: a menu button) - For expanding an elements's content in a top-to-bottom direction (example: accordions) - For collapsing an element in a bottom-to-top direction (example: a fixed footer) 	- As the trailing affordance for Select inputs. Use SelectIcon instead. - Moving/resizing/revealing a group of elements. Use DoubleChevronDownIcon instead. - To represent downloads or the download action. Use DownloadIcon instead. - As an affordance to scroll down to an element. Use ArrowDownIcon instead.
+ChevronUpIcon	Collapse | Hide | Less	Moving, resizing, transitioning, or revealing/concealing an element in an upward direction.	- As a general affordance for concealing additional content when direction is not explicitly known (example: a menu button) - For collapsing an element's content in a top-to-bottom direction (example: accordions) - For expanding an element in a bottom-to-top direction (example: a fixed footer) 	- Moving/resizing/revealing a group of elements. Use DoubleChevronUpcon instead. - For concealing a popover menu. Use Close instead. - To represent uploads or the upload action. Use UploadIcon instead. instead. - As an affordance to scroll up to an element or back to top. Use ArrowUpIcon instead.
+ArrowLeftIcon	Left | Back | Previous	Backward navigation across surfaces.	- Navigating back to a previous page - Paginating backward/previous	- To move, resize or reveal elements within a page. Use ChevronLeftIcon instead.
+ArrowRightIcon	Right | Forward | Next	Forward navigation across surfaces.	- Navigating forward to a new page - Paginating forward/next 	- To move, resize or reveal elements within a page. Use ChevronRightIcon instead.
+ArrowDownIcon	Down | Descend | Download Direction	Downward screen-level movement/scrolling.	- Moving/scrolling down within a page	- As an indicator for downloads. Use DownloadIcon for viewing instead. - To represent unpublish actions. Use UnpublishIcon instead. - To move, transition or resize elements within a page. Use ChevonDownIcon instead.
+ArrowUpIcon	Up | Ascend | Upload Direction	Upward screen-level movement/scrolling.	- Moving/scrolling up within a page - Scrolling back to the top of a page	- To represent uploads. Use UploadIcon instead. - To represent publish actions. Use PublishIcon instead. - To move, transition or resize elements within a page. Use ChevonUpIcon instead. - To represent opening a new window or tab. Use LaunchIcon instead.
+DoubleChevronLeftIcon	Fast Left | Jump Previous | Rewind	Moving, resizing, transitioning, or revealing/concealing a group of elements in a leftward direction.	- For expanding a group of elements' content in a right-to-left direction (example: a leading floating panel)	- For moving, resizing, or expanding/collapsing a single element. Use ChevronLeftcon instead. - To navigate back to a previous page. Use ArrowLeftIcon instead.
+DoubleChevronRightIcon	Fast Right | Jump Next | Fast Forward	Moving, resizing, transitioning, or revealing/concealing a group of elements in a rightward direction.	- For expanding a group of elements' content in a left-to-right direction (example: a trailing floating panel)	- For moving, resizing, or expanding/collapsing a single element. Use ChevronRightcon instead. - To navigate foward to a new page. Use ArrowRightIcon instead.
+DoubleChevronDownIcon	Fast Down | Jump Down | Scroll Bottom	Moving, resizing, transitioning, or revealing/concealing a group of elements in a downward direction.	- As a general affordance for expanding content for a group of elements when direction is not explicitly known - For expanding a group of elements' content in a top-to-bottom direction (example: all accordion sections) - For collapsing a group of elements' content in a bottom-to-top direction 	- For moving, resizing, or expanding/collapsing a single element. Use ChevronDownIcon instead. - To scroll down within a page. Use ArrowDownIcon instead.
+DoubleChevronUpIcon	Fast Up | Jump Up | Scroll Top	Moving, resizing, transitioning, or revealing/concealing a group of elements in an upward direction.	- For collapsing a group of elements' content in a top-to-bottom direction (example: all accordion sections) - For expanding a group of elements' content in a bottom-to-top direction	- For moving, resizing, or expanding/collapsing a single element. Use ChevronUpIcon instead. - To scroll up within a page. Use ArrowUpIcon instead.
+ArrowTopRightIcon	External | Open New | Diagonal Up Right	To outside a link outside of the current application context	- To open a link to another Studio or application - To open content from the existing Studio/application in a new tab/window or preview	- To represent opening an external link in a new window or tab. Use LaunchIcon instead.
+LaunchIcon	Open | External | Start	To indicate a link external from Sanity 	- To indicate an external link 	- For internal navigation with the current Studio or application. Use ArrowRightIcon instead. - For navigation to a different Studio or application. Use ArrowTopRightIcon instead.
+BulbOutlineIcon	Idea | Light | Suggestion	Product tips and suggestions	- To represent product tips/suggestions for user onboarding or revealing new features	- For deeper learning or to represent documentation. Use BookIcon instead.
+TextIcon	Typography | Font | Letters	Representation of general text content	- As an indicator for setting font size or family.  - To represent general text content.	- To represent text data or a String type value. Use StringIcon instead.
+BlockContentIcon	Content Block | Rich Text | Structured Content	Block-based content or structured text	- To represent a block of text, like a paragraph. - To indicate rich text formatting.	- As a prompt for editing or composing content. Use EditIcon or ComposeIcon respectively.
+BlockquoteIcon	Quote | Citation | Excerpt	Blockquote text formatting	- For toggling text as a blockquote within a text editing feature.	- Outside text editing. This icon is intended for formatting toolsets. - To represent a general text block. Use BlockContentIcon instead.
+BookIcon	Documentation | Manual | Guide	Represent documentation or reading material	- To represent reading material–most notably documentation or learning guides.	- For product tips or suggestions. Use BulbOutlineIcon instead. - To represent help or support. Use HelpCircleIcon instead.
+EarthAmericasIcon	Globe Americas | World | International	Representation of geo-region or time zones	- Representing geo-region (example: Asia, Europe, etc.) or time zones. 	- Represending specific geo-location. Use MarkerIcon instead. - Representing public content. Use EarthGlobeIcon instead.
+EarthGlobeIcon	World | Global | International	To represent global concepts or public features	- To represent public content 	- To select a geo-region or timezone. Use EarthAmericasIcon instread.  - To represent language. Use TranslateIcon instead.
+GroqIcon	Query | GROQ | Sanity Query	Sanity's GROQ query language	- For GROQ queries or query builders - To represent Sanity-specific query features	- Don't use outside Sanity context. For general representation of data queries, use DatabaseIcon instead.
+InsertAboveIcon	Add Above | Insert Before | Up	Inserting content above an element in a vertical list	- For adding content above current position - For adding a preceding row in a table	- For adding of content where position does not matter. Use AddIcon instead.
+InsertBelowIcon	Add Below | Insert After | Down	Inserting content below an element in a vertical list	- For adding content below current position - For adding a proceding row in a table	- For adding of content where position does not matter. Use AddIcon instead.
+LinkRemovedIcon	Broken Link | Disconnected | Unlinked	To represent removing a link or a connection	- As an action to remove a link or disconnect two items	- To represent a broken/missing link or disconnected state. Use UnlinkIcon instead.
+RocketIcon	Launch | Fast | Performance	Launch or high performance	- As an indicator for premium features–typically within the context of an upsell	- To represent performance health metrics. Use ActivityIcon instead. - To represent business metrics or performance. Use TrendIcon insead.
+SplitHorizontalIcon	Divide Horizontal | Split Panes Horizontal | Layout	Horizontal split layout	- As an action to horizontally split a layout.	- For vertical UI splits. Use SplitVerticalIcon instead. - For displaying a sidebar/panel. Use PanelLeftIcon or PanelRightIcon
+SplitVerticalIcon	Divide Vertical | Split Panes Vertical | Layout	Vertical split layout	- As an action to vertically split a layout.	- For horizontal UI splits. Use SplitVerticalIcon instead. - For displaying a sidebar/panel. Use PanelLeftIcon or PanelRightIcon
+TransferIcon	Move | Exchange | Swap	Transfer or swapping of items or data	- For transferring items or data to different locations. 	- For bi-directional syncing of content/information. Use SyncIcon instead. - To represent general direction or movement. Use arrow icons instead.
+UnlinkIcon	Broken Link | Disconnected | Unlinked	Broken/missing links or disconnected items	- To represent a broken or missing web link. - To represent a disconnected state between two previously connected items	- To represent the action of removing a link or disconnecting two items. Use LinkRemovedIcon instead.
+ThumbsUpIcon	Like	Providing a positive vote on yes/no questions.	- To represent a positive vote on a yes/no question.	- For any purpose other than a positive vote on a yes/no question. - To favorite/save content. Use StarIcon instead.
+ThumbsDownIcon	Unlike | Dislike	Providing a negative vote on yes/no questions.	- To represent a negative vote on a yes/no question.	- For any purpose other than a negative vote on a yes/no question.
+BlockElementIcon	Block | Container | Box	Block layout elements	- To represent content that is displayed as a block element (taking the full width of its parent and starting a new line). 	- To represent the size or aspect ratio of an element. - For spliting a layout vertically. Use SplitVeticalIcon instead.
+InlineElementIcon	Inline | Span | Text Element	Inline layout elements	- To represent content that is displayed as an inline element (taking up as much width as necessary for its content and flows within the current line without forcing a line break). 	- To represent the size or aspect ratio of an element. - For spliting a layout horizontally. Use SplitHoritonztalIcon instead.
+BellIcon	Notification | Alert | Ring	Viewing, recieving, or managing notifications/alerts	- For notifications, alerts, or reminders.	- For reminders related to a task. Use TaskIcon instead.
+ClockIcon	Time | History	To represent time or duration.	- To indicate a time or duration based value - To represent a timestamp 	- To represent specific dates. Use CalendarIcon instead. - To view the history or activity log of an item. Use RestoreIcon instead. - To represent time-zones. Use EarthAmericasIcon instead.
+ResetIcon	Restart | Clear | Default	To reset an item to its original state or defaults	- For resetting or clearing all saved values for an item. - For restoring an item to its original state.	- For undo a single action. Use UndoIcon instead. - To represent the history or activity log for an item. Use RestoreIcon instead. - To represent an error in history. Use ErrorOutlineIcon instead.
+RestoreIcon	Recover | Unarchive | Bring Back | Roll Back	To restore an item to a previous version	- To view the history or activity log of an item  - To see previous/recent actions 	- To represent time or duration. Use ClockIcon instead. - For undo a single action. Use UndoIcon instead. - To indicate explicit versions. Use VersionsIcon instead. - To reset to the original state. Use ResetIcon instead.
+CropIcon	Trim | Cut Image | Adjust	Image cropping or trimming	- To represent image cropping or cropping tools	- For image resizing - For broader image or video editing features. Use ControlsIcon instead.
+DesktopIcon	Monitor | Screen	To represent desktop devices or a person's local computer settings	- To represent a desktop when choosing between different device types - To represent a a computer's system settings (example: system-level light/dark mode preference)	- As an indicator for responsiveness. Use MobileDeviceIcon instead.
+RemoveIcon	Minus | Delete | Subtract	Non-permanenet removal or subtraction of content/data	- For removing items from a list, collection or view.	- For permanent delection of content/data. Use TrashIcon instead.
+SchemaIcon	Structure | Model | Definition	Schema, data structure or heirarchical content	- For schema editors or data models - To represent general heirarchical structure of content	- For general representation of data queries. Use DatabaseIcon instead. - For GROQ-specific features or queries. Use GroqIcon instead.
+TrashIcon	Delete | Remove | Discard	Permanenet deletion of content/data	- For permanent deletion/removal actions.	- For archiving of content. Use ArchiveIcon instead. - For any form of non-destructive deletion. Use RemoveIcon instread.
+TokenIcon	Key | Authentication | API Key	To represent AI tokens	- Exclusively to represent AI token counts	- To represent API or access tokens. Use PlugIcon instead.
+BasketIcon		DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+BoltIcon	Lightning | Fast | Energy	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+ComponentIcon	Module | Part | Building Block	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+AsteriskIcon	Star Symbol | Required | Wildcard	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+ApiIcon	Code Interface | Integration	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+BookmarkFilledIcon		DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+BookmarkIcon		DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+BottleIcon	Container | Liquid | Product	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+BoxIcon		DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+CaseIcon	Briefcase | Portfolio | Business	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+CreditCardIcon	Payment | Card | Transaction	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+EnterIcon	Return | Submit | Go	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+EnterRightIcon	Enter Direction | Go Right | Navigate In	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+ErrorScreenIcon		DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+FaceHappyIcon		DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+FaceIndifferentIcon		DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+FaceSadIcon		DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+GithubIcon		DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+HeartFilledIcon	Favorite | Like | Love	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+HeartIcon	Favorite | Like | Love	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+IceCreamIcon	Treat | Dessert | Sweet	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+JoystickIcon	Game | Controller | Gaming	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+LemonIcon	Citrus | Fresh | Fruit	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+LinkedinIcon		DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+ListIcon		DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+LogoJsIcon	JavaScript | JS | ECMAScript	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+LogoTsIcon	TypeScript | TS | Type Script	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+MarkerIcon		DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+MarkerRemovedIcon		DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+MicrophoneIcon		DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+MicrophoneSlashIcon		DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+OkHandIcon	Okay | Approved | Good	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+PresentationIcon	Slideshow | Present | Display	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+Progress50Icon		DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+Progress75Icon		DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+RobotIcon	Bot | Automation	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+SquareIcon	Box | Rectangle | Shape	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+TargetIcon		DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+TiersIcon	Levels | Hierarchy | Pricing	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+TriangleOutlineIcon	Triangle | Shape | Pointer	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+TrolleyIcon	Cart | Shopping | E-Commerce	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+TruncateIcon	Cut | Shorten | Ellipsis	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+TwitterIcon	Social | X | Tweet	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+WrenchIcon	Tool | Maintenance | Fix	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+VersionsIcon		DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+GenerateIcon	AI | Create | Automatic	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+InlineIcon	Inline Text | Continuous | Flow	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+ConfettiIcon	Celebration | Party | Success	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+DiamondIcon	Gem | Premium | Value	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+HashIcon	Hashtag | Tag | Number	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
+HighlightIcon	Mark | Emphasis | Note	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.	DECORATIVE. USE WITH DISCRETION. ONLY USE IF ANOTHER ICON DOES NOT FIT THE NEED.
 
-The Tooltip component accepts the following specific properties. It extends `LayerProps` (excluding `as`) .
-
-| **Attribute** | **Type** | **Accepted Values** | **Default** | **Optional** | **Description** |
-| --- | --- | --- | --- | --- | --- |
-| **content** | ReactNode | `ReactNode` | `undefined` | Yes | The content to be displayed inside the floating tooltip card . |
-| **children** | ReactElement | `ReactElement` | `undefined` | Yes | The anchor element (trigger) that the tooltip is attached to . |
-| **placement** | String | `'top'`, `'bottom'`, `'left'`, `'right'`, etc. | `'bottom'` | Yes | The preferred position relative to the reference element . |
-| **fallbackPlacements** | Array | `Placement[]` | `undefined` | Yes | A list of alternative positions to try if the primary `placement` does not fit in the viewport . |
-| **delay** | Number / Object | `number` \|`{ open: number; close: number }` | `0` | Yes |  |
-| **arrow** | Boolean | `true` \|`false` | `false` | Yes |  |
-| **animate** | Boolean | `true` \|`false` | `false` | Yes |  |
-| **disabled** | Boolean | `true` \|`false` | `false` | Yes |  |
-| **portal** | Boolean / String | `boolean` \|`string` | `undefined` | Yes |  |
-| **padding** | Number / Array | `number` \|`number[]` | `2` | Yes |  |
-| **radius** | Number / Array | `number` \|`number[]` | `2` | Yes |  |
-| **shadow** | Number / Array | `number` \|`number[]` | `2` | Yes |  |
-| **scheme** | String | `'light'`, `'dark'` | `undefined` | Yes | Forces a specific color scheme for the tooltip . |
-| **boundaryElement** | HTMLElement | `HTMLElement` | `null` | Yes | Defines the element boundary that the tooltip should not overflow . |
-
-### **When to Use / When Not to Use**
-
-- **Use when:** You need to explain the function of an icon-only button (e.g., a "Trash" icon meaning "Delete").
-- **Use when:** You need to provide supplementary information that enhances the understanding of a feature but is not critical for the task.
-- **Do not use when:** The information is critical for the user to complete a task or understand an error. Use inline text or banners instead.
-- **Do not use when:** You are restating text that is already visible on the screen. This creates redundancy and cognitive noise.
-- **Do not use when:** The element is disabled. Disabled elements cannot receive focus, making the tooltip inaccessible to keyboard users.
-
-### **Usage Dos and Don’ts**
-
-- **Do** use the `arrow` prop to visually link the tooltip to small triggers like icons, helping users identify which element is being described.
-- **Do** use `delay` to prevent tooltips from flickering open/closed as the user moves their mouse rapidly across the screen (hover intent).
-- **Don’t** put interactive content like links or buttons inside a Tooltip. If you need interactive content, use a **Popover** instead.
-- **Don’t** use lengthy text. Tooltips are for quick scanning; if the text is long, consider if it belongs in a modal or helper text.
-
-### **Variants & Examples**
-
-**1. Basic Tooltip** A simple text label for an icon button.
-
-`<Tooltip content={<Text>Edit Profile</Text>}>`
-
-`  <Button icon={EditIcon} mode="ghost" />`
-
-`</Tooltip>`
-
-
-
-**2. With Arrow and Animation** Provides a smoother visual transition and clearer connection to the trigger.
-
-`<Tooltip`
-
-`  arrow`
-
-`  animate`
-
-`  content={<Box padding={2}><Text>Helpful information</Text></Box>}`
-
-`>`
-
-`  <Button text="Hover me" />`
-
-`</Tooltip>`
-
-
-
-**3. Delayed Interaction** Adds a 500ms delay before opening to prevent accidental triggers.
-
-`<Tooltip`
-
-`  delay={{ open: 500, close: 0 }}`
-
-`  content={<Text>Delayed tip</Text>}`
-
-`>`
-
-`  <Button icon={InfoIcon} />`
-
-`</Tooltip>`
-
-
-
-### Accessibility
-
-- **Keyboard trigger.** Tooltips must appear on keyboard focus, not only on mouse hover. The child element must be interactive (a `<button>`, `<a href>`, or other focusable element).
-- **Escape to dismiss.** Pressing `Escape` must hide the tooltip without moving focus.
-- **Tab behavior.** The tooltip is not a Tab stop. When the user presses Tab, focus moves to the next focusable element and the tooltip closes. The tooltip should close on Tab away from the trigger (per the APG Tooltip pattern).
-- **Disabled elements.** Never attach a tooltip to a disabled button (`<button disabled>`). Disabled elements leave the tab order. Keyboard users will never reach the tooltip. Place the tooltip on a wrapper element instead, or provide context through nearby text.
-- **Reduced motion.** The `animate` prop respects the user's `prefers-reduced-motion` setting. When reduced motion is on, the tooltip appears and hides with no transition.
-- **Screen readers.** Tooltip content must not repeat the trigger's `aria-label`. If the button is labeled "Settings," the tooltip should add context or be omitted.
-
-### **Content Guidelines**
-
-- **Concise:** Limit text to a maximum of 60–75 characters where possible. Tooltips should be succinct .
-- **Action-Oriented:** Start with a verb if describing an action (e.g., "Edit profile" rather than "Profile editor") .
-- **Sentence Case:** Use sentence case for tooltip labels (e.g., "Save to board" not "Save To Board") .
-- **No Punctuation:** Avoid periods at the end of fragments. Only use punctuation if the tooltip contains full sentences .

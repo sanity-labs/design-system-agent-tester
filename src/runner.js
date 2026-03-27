@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { runAccessibilityTests } from "./a11y.js";
-import { writeFile, mkdir, rm, readFile } from "node:fs/promises";
+import { createSanityUiMcpClient } from "./mcp-client.js";
+import { writeFile, mkdir, rm, readFile, appendFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { existsSync } from "node:fs";
 import {
@@ -69,6 +70,214 @@ Rules:
 - If an import does not exist in a library, remove it or replace it with one that does exist
 - Make sure the project works with "npm install && npm run dev"`;
 
+// Max tool-use round-trips before we force the model to finish
+const MAX_TOOL_TURNS = 25;
+
+/**
+ * Simple single-shot generation (no MCP tools).
+ */
+async function generateSimple({ client, model, promptContent }) {
+  const response = await client.messages.create({
+    model,
+    max_tokens: 16000,
+    system: SYSTEM_PROMPT,
+    messages: [{ role: "user", content: promptContent }],
+  });
+
+  const fullText = response.content
+    .filter((block) => block.type === "text")
+    .map((block) => block.text)
+    .join("\n");
+
+  return {
+    fullText,
+    inputTokens: response.usage?.input_tokens ?? 0,
+    outputTokens: response.usage?.output_tokens ?? 0,
+  };
+}
+
+/**
+ * Multi-turn generation with MCP tool use.
+ *
+ * 1. Start the local Sanity UI MCP server
+ * 2. Register its tools with the Anthropic SDK
+ * 3. Let the model call tools (list_components, get_component_guideline, etc.)
+ * 4. Route each tool call to the MCP server and send results back
+ * 5. Continue until the model stops calling tools and emits its final text
+ */
+async function generateWithMcp({
+  client,
+  model,
+  promptContent,
+  iterDir,
+  iterLabel,
+}) {
+  let mcpClient;
+  try {
+    console.log(`[${iterLabel}] Starting Sanity UI MCP server...`);
+    mcpClient = await createSanityUiMcpClient();
+
+    const mcpTools = mcpClient.getToolsForAnthropic();
+    const mcpInstructions = mcpClient.getInstructions() || "";
+
+    console.log(
+      `[${iterLabel}] MCP ready — ${mcpTools.length} tools available`,
+    );
+
+    // Build system prompt with MCP instructions appended.
+    // Amend the instructions to fix known issues:
+    // - The MCP server instructions say to fetch the "props" section, but that
+    //   section returns empty for most components. "all" works and includes props.
+    // - search_design_system and list_icons don't support multi-word queries well;
+    //   the model needs to search one term at a time.
+    const mcpAmendments = `
+IMPORTANT corrections to the workflow above:
+- When calling get_component_guideline, ALWAYS use section: "all" (NOT "props"). The "props" section does not exist for most components. "all" includes props, usage, best practices, accessibility, variants, states, and content.
+- When calling list_icons, search for ONE term at a time (e.g. "menu", then "document", then "search"). Multi-word searches like "menu home document" return no results.
+- When calling search_design_system, use short single-concept queries (e.g. "layout", "navigation", "theme"). Long multi-word queries return no results.
+- When calling validate_icons, use the icon names WITHOUT the "Icon" suffix (e.g. "home" not "HomeIcon", "document" not "DocumentIcon").
+- ALWAYS call get_component_guideline with section "all" for EVERY component you plan to use before writing any code.
+`;
+    const systemPrompt =
+      SYSTEM_PROMPT + "\n\n" + mcpInstructions + "\n" + mcpAmendments;
+
+    // Conversation messages — we'll append tool results as the loop progresses
+    const messages = [{ role: "user", content: promptContent }];
+
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let allTextParts = [];
+    let turns = 0;
+
+    // Save a log of all tool interactions for debugging
+    const toolLog = [];
+    // Track seen tool calls to detect retry loops
+    const seenToolCalls = new Set();
+    let duplicateStreak = 0;
+
+    while (turns < MAX_TOOL_TURNS) {
+      turns++;
+
+      // When approaching the limit or stuck in a loop, nudge the model to stop researching
+      const nudge =
+        turns >= MAX_TOOL_TURNS - 2 || duplicateStreak >= 3
+          ? "\n\nYou have done enough research. Stop calling tools and produce ALL project files now using ---FILE: path--- blocks."
+          : "";
+
+      const response = await client.messages.create({
+        model,
+        max_tokens: 16000,
+        system: systemPrompt + nudge,
+        tools: mcpTools,
+        messages,
+      });
+
+      inputTokens += response.usage?.input_tokens ?? 0;
+      outputTokens += response.usage?.output_tokens ?? 0;
+
+      // Extract text blocks from this turn
+      const textBlocks = response.content
+        .filter((block) => block.type === "text")
+        .map((block) => block.text);
+      allTextParts.push(...textBlocks);
+
+      // Extract tool_use blocks
+      const toolUseBlocks = response.content.filter(
+        (block) => block.type === "tool_use",
+      );
+
+      // If the model stopped without calling tools, we're done
+      if (response.stop_reason === "end_turn" || toolUseBlocks.length === 0) {
+        console.log(
+          `[${iterLabel}] Generation complete after ${turns} turn(s), ${toolLog.length} tool call(s)`,
+        );
+        break;
+      }
+
+      // The model wants to call tools — process each one
+      // First, add the assistant's full response to the conversation
+      messages.push({ role: "assistant", content: response.content });
+
+      // Build the tool results
+      const toolResults = [];
+      for (const toolUse of toolUseBlocks) {
+        const toolName = toolUse.name;
+        const toolInput = toolUse.input || {};
+
+        const callKey = `${toolName}:${JSON.stringify(toolInput)}`;
+        const isDuplicate = seenToolCalls.has(callKey);
+        seenToolCalls.add(callKey);
+
+        if (isDuplicate) {
+          duplicateStreak++;
+        } else {
+          duplicateStreak = 0;
+        }
+
+        console.log(
+          `[${iterLabel}] Tool call: ${toolName}(${JSON.stringify(toolInput).slice(0, 100)})${isDuplicate ? " [DUPLICATE]" : ""}`,
+        );
+
+        let resultText;
+        if (isDuplicate) {
+          // Don't re-call the MCP server for duplicate requests — return a hint instead
+          resultText = `You already called ${toolName} with these exact arguments. The result has not changed. Stop repeating tool calls and proceed to generate the project files.`;
+        } else {
+          try {
+            resultText = await mcpClient.callToolText(toolName, toolInput);
+          } catch (err) {
+            resultText = `Error calling ${toolName}: ${err.message}`;
+            console.warn(`[${iterLabel}] Tool error: ${err.message}`);
+          }
+        }
+
+        toolLog.push({
+          turn: turns,
+          tool: toolName,
+          input: toolInput,
+          resultLength: resultText.length,
+          isDuplicate,
+        });
+
+        toolResults.push({
+          type: "tool_result",
+          tool_use_id: toolUse.id,
+          content: resultText,
+        });
+      }
+
+      // Add tool results as the next user message
+      messages.push({ role: "user", content: toolResults });
+    }
+
+    if (turns >= MAX_TOOL_TURNS) {
+      console.warn(
+        `[${iterLabel}] Hit max tool turns (${MAX_TOOL_TURNS}) — forcing completion`,
+      );
+    }
+
+    // Save tool log for debugging
+    if (toolLog.length > 0) {
+      await writeFile(
+        resolve(iterDir, "_mcp_tool_log.json"),
+        JSON.stringify(toolLog, null, 2),
+        "utf-8",
+      );
+    }
+
+    return {
+      fullText: allTextParts.join("\n"),
+      inputTokens,
+      outputTokens,
+    };
+  } finally {
+    // Always shut down the MCP server
+    if (mcpClient) {
+      await mcpClient.stop().catch(() => {});
+    }
+  }
+}
+
 /**
  * Run a single isolated agent iteration using the Anthropic SDK.
  * Iterates: generate → validate → fix → validate → ... until the page renders
@@ -90,8 +299,19 @@ export async function runAgent({
   takeScreenshots,
   maxFixes = 5,
   maxGenerationRetries = 3,
+  useMcp,
 }) {
-  const client = new Anthropic();
+  // Sonnet 4.6 generation can take 2-3 minutes per call. The default SDK
+  // timeout is 10 min with 2 retries (30 min worst-case per call). Increase
+  // the per-request timeout to 15 min and reduce retries to 1 so a slow
+  // call doesn't block the entire run.
+  const client = new Anthropic({
+    timeout: 15 * 60 * 1000, // 15 minutes
+    maxRetries: 1,
+  });
+
+  // useMcp flag from CLI: true = auto-detect, false = force off
+  const needsMcp = useMcp === false ? false : /mcp/i.test(promptContent);
 
   // --- Step 1: Initial generation (with retries if no files are produced) ---
   let fullText = "";
@@ -111,25 +331,26 @@ export async function runAgent({
       );
     }
 
-    const response = await client.messages.create({
-      model,
-      max_tokens: 16000,
-      system: SYSTEM_PROMPT,
-      messages: [
-        {
-          role: "user",
-          content: promptContent,
-        },
-      ],
-    });
+    let result;
+    if (needsMcp) {
+      result = await generateWithMcp({
+        client,
+        model,
+        promptContent,
+        iterDir,
+        iterLabel,
+      });
+    } else {
+      result = await generateSimple({
+        client,
+        model,
+        promptContent,
+      });
+    }
 
-    totalInputTokens += response.usage?.input_tokens ?? 0;
-    totalOutputTokens += response.usage?.output_tokens ?? 0;
-
-    fullText = response.content
-      .filter((block) => block.type === "text")
-      .map((block) => block.text)
-      .join("\n");
+    totalInputTokens += result.inputTokens;
+    totalOutputTokens += result.outputTokens;
+    fullText = result.fullText;
 
     // Save raw response
     await writeFile(resolve(iterDir, "_raw_response.txt"), fullText, "utf-8");
@@ -534,6 +755,7 @@ async function buildResult({
   );
 
   return {
+    model,
     linesOfCode,
     fileCount: files.length,
     files: sourceContents,

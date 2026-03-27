@@ -89,11 +89,14 @@ async function invokeClaudeCli({
   model,
   iterLabel,
   timeoutMs = 300_000, // 5 minutes default
+  mcpTools = null, // e.g. ["mcp__Sanity"] to allow Sanity MCP tools
 }) {
   // Merge system prompt into user prompt to avoid --system-prompt CLI hang
   // (claude CLI v2.1.79+ hangs when --system-prompt is combined with
   // non-trivial user prompts in --print mode)
   const combinedPrompt = `${systemPrompt}\n\n---\n\n${userPrompt}`;
+
+  const useMcp = Array.isArray(mcpTools) && mcpTools.length > 0;
 
   const args = [
     "--print",
@@ -101,20 +104,28 @@ async function invokeClaudeCli({
     "text",
     "--model",
     model,
-    // Disable all tools so the CLI just returns text (no file edits, no bash, etc.)
-    // Note: --tools "" broke in CLI v2.1.79+; --allowed-tools "none" is the replacement
-    "--allowed-tools",
-    "none",
     // Don't persist this as a resumable session
     "--no-session-persistence",
-    // The combined prompt (system + user)
-    combinedPrompt,
   ];
 
-  // Use a fresh temp directory as cwd to prevent the CLI from reading
-  // project context (claude.md, package.json, etc.) which causes it to
-  // hang or produce empty output in --print mode.
-  const tempCwd = await mkdtemp(join(tmpdir(), "agent-cli-"));
+  if (useMcp) {
+    // Allow only the specified MCP tool prefixes (e.g. "mcp__Sanity")
+    // plus block all filesystem tools so the agent can't edit files directly.
+    // --allowed-tools takes variadic args, so it must come before the prompt
+    // and we pipe the prompt via stdin to avoid it being consumed as a tool name.
+    args.push("--allowed-tools", ...mcpTools);
+  } else {
+    // No MCP needed — disable all tools
+    // Note: --tools "" broke in CLI v2.1.79+; --allowed-tools "none" is the replacement
+    args.push("--allowed-tools", "none");
+    // Safe to pass prompt as positional arg when no variadic --allowed-tools issue
+    args.push(combinedPrompt);
+  }
+
+  // When MCP is disabled, use a temp dir to avoid project context interference.
+  // When MCP is enabled, we must run from the project dir so MCP servers are discovered.
+  const tempCwd = useMcp ? null : await mkdtemp(join(tmpdir(), "agent-cli-"));
+  const cwd = useMcp ? resolve(import.meta.dirname, "..") : tempCwd;
 
   console.log(
     `[${iterLabel}] Invoking claude CLI (timeout: ${Math.round(timeoutMs / 1000)}s)...`,
@@ -122,12 +133,14 @@ async function invokeClaudeCli({
 
   return new Promise((resolvePromise, reject) => {
     const child = spawn("claude", args, {
-      stdio: ["ignore", "pipe", "pipe"],
-      cwd: tempCwd,
+      // When using MCP, we pipe the prompt via stdin (to avoid --allowed-tools
+      // variadic arg consuming the prompt). Otherwise stdin is ignored.
+      stdio: [useMcp ? "pipe" : "ignore", "pipe", "pipe"],
+      cwd,
       env: {
         ...process.env,
         // Prevent the CLI from picking up any project-level config
-        CLAUDE_CODE_DISABLE_PROJECT_CONFIG: "1",
+        ...(useMcp ? {} : { CLAUDE_CODE_DISABLE_PROJECT_CONFIG: "1" }),
       },
     });
 
@@ -151,6 +164,12 @@ async function invokeClaudeCli({
     child.stderr.on("data", (data) => {
       stderr += data.toString();
     });
+
+    // When using MCP, pipe the combined prompt via stdin then close the stream
+    if (useMcp) {
+      child.stdin.write(combinedPrompt);
+      child.stdin.end();
+    }
 
     child.on("error", (err) => {
       clearTimeout(timer);
@@ -205,7 +224,18 @@ export async function runAgent({
   takeScreenshots,
   maxFixes = 5,
   maxGenerationRetries = 3,
+  useMcp,
 }) {
+  // useMcp flag from CLI: true = auto-detect, false = force off
+  const needsMcp = useMcp === false ? false : /mcp/i.test(promptContent);
+  const mcpTools = needsMcp ? ["mcp__sanity-ui"] : null;
+  // MCP calls need more time since the model makes tool calls before generating code
+  const generationTimeout = needsMcp ? 600_000 : 300_000;
+
+  if (needsMcp) {
+    console.log(`[${iterLabel}] MCP tools enabled (prompt references MCP)`);
+  }
+
   // --- Step 1: Initial generation (with retries if no files are produced) ---
   let fullText = "";
   let files = [];
@@ -225,6 +255,8 @@ export async function runAgent({
       userPrompt: promptContent,
       model,
       iterLabel,
+      mcpTools,
+      timeoutMs: generationTimeout,
     });
 
     // Save raw response
@@ -604,6 +636,7 @@ async function buildResult({
   );
 
   return {
+    model,
     linesOfCode,
     fileCount: files.length,
     files: sourceContents,

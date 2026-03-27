@@ -17,6 +17,9 @@ export async function generateReport(allResults, outputDir) {
     const validIterations = iterations.filter((r) => !r.error);
     const failedCount = iterations.length - validIterations.length;
 
+    // Extract model name from the first valid iteration (all iterations use the same model)
+    const model = validIterations.find((r) => r.model)?.model || null;
+
     // 1. Average time to complete
     const times = validIterations.map((r) => r.elapsedSeconds);
     const avgTime = mean(times);
@@ -54,11 +57,17 @@ export async function generateReport(allResults, outputDir) {
 
     // 8. Accessibility analysis
     const a11yAnalysis = analyzeAccessibility(validIterations);
+
+    // 9. Visual diff (attached by index.js as _visualDiff on iterations)
+    const visualDiff =
+      iterations.find((r) => r._visualDiff)?._visualDiff || null;
+
     const avgFixes = mean(fixCounts);
     const stdDevFixes = stdDev(fixCounts);
     const iterationsNeedingFixes = fixCounts.filter((n) => n > 0).length;
 
     report.prompts[promptKey] = {
+      model,
       totalIterations: iterations.length,
       successfulIterations: validIterations.length,
       failedIterations: failedCount,
@@ -100,6 +109,14 @@ export async function generateReport(allResults, outputDir) {
       },
       feedback: feedbackAnalysis,
       accessibility: a11yAnalysis,
+      visualDiff: visualDiff || {
+        pairwiseDiffs: [],
+        averageDiffPercent: null,
+        minDiffPercent: null,
+        maxDiffPercent: null,
+        iterationsCompared: 0,
+        description: "No visual diff data available",
+      },
       tokenUsage: {
         avgInputTokens: inputTokens.length ? round(mean(inputTokens)) : null,
         avgOutputTokens: outputTokens.length ? round(mean(outputTokens)) : null,
@@ -130,8 +147,10 @@ export async function generateReport(allResults, outputDir) {
 function computeCodeVariance(iterations) {
   if (iterations.length < 2) {
     return {
-      pairwiseSimilarities: [],
-      averageSimilarity: null,
+      pairwiseContentSimilarity: [],
+      averageContentSimilarity: null,
+      pairwiseStructuralSimilarity: [],
+      averageStructuralSimilarity: null,
       description: "Need at least 2 successful iterations to compute variance",
     };
   }
@@ -418,6 +437,9 @@ function renderMarkdown(report) {
     md += `---\n\n`;
     md += `## Prompt: \`${promptKey}\`\n\n`;
     md += `| Metric | Value |\n|--------|-------|\n`;
+    if (data.model) {
+      md += `| Model | \`${data.model}\` |\n`;
+    }
     md += `| Total iterations | ${data.totalIterations} |\n`;
     md += `| Successful | ${data.successfulIterations} |\n`;
     md += `| Failed | ${data.failedIterations} |\n\n`;
@@ -613,6 +635,40 @@ function renderMarkdown(report) {
       md += `\n`;
     } else {
       md += `No accessibility results collected for this prompt.\n\n`;
+    }
+
+    // Visual Diff
+    md += `### 🖼️ Visual Diff\n\n`;
+    const vd = data.visualDiff;
+    if (vd && vd.averageDiffPercent !== null) {
+      md += `| Metric | Value |\n|--------|-------|\n`;
+      md += `| Average difference | ${vd.averageDiffPercent}% |\n`;
+      md += `| Min difference | ${vd.minDiffPercent}% |\n`;
+      md += `| Max difference | ${vd.maxDiffPercent}% |\n`;
+      md += `| Iterations compared | ${vd.iterationsCompared} |\n\n`;
+
+      md += `_${vd.description}_\n\n`;
+
+      if (vd.pairwiseDiffs.length > 0) {
+        md += `| Pair | Diff % | Changed Pixels | Total Pixels |\n|------|--------|----------------|---------------|\n`;
+        for (const d of vd.pairwiseDiffs) {
+          md += `| Iter ${d.iterA} vs ${d.iterB} | ${d.diffPercent}% | ${d.diffPixels.toLocaleString()} | ${d.totalPixels.toLocaleString()} |\n`;
+        }
+        md += `\n`;
+
+        // Link diff images if they exist
+        const withImages = vd.pairwiseDiffs.filter((d) => d.diffImagePath);
+        if (withImages.length > 0) {
+          md += `**Diff images:**\n\n`;
+          for (const d of withImages) {
+            const relPath = d.diffImagePath.split("/output/").pop();
+            md += `- Iter ${d.iterA} vs ${d.iterB}: ![diff](${relPath})\n`;
+          }
+          md += `\n`;
+        }
+      }
+    } else {
+      md += `${vd?.description || "No visual diff data available."}\n\n`;
     }
 
     // Screenshots
