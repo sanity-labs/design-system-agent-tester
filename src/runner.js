@@ -1,18 +1,54 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { runAccessibilityTests } from "./a11y.js";
 import { createSanityUiMcpClient } from "./mcp-client.js";
-import { writeFile, mkdir, rm, readFile, appendFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import {
+  writeFile,
+  mkdir,
+  rm,
+  readFile,
+  appendFile,
+  cp,
+} from "node:fs/promises";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const PROJECT_ROOT = resolve(__dirname, "..");
+
+/**
+ * Asset directories to copy into each generated project before validation.
+ * Each entry is a directory name relative to the agent-tester project root.
+ * The directory will be copied into the generated project at the same relative path.
+ */
+const COPY_ASSETS = ["ui-poc"];
+
+/**
+ * Copy asset directories into the generated project directory.
+ * Skips assets that don't exist in the project root.
+ */
+async function copyAssetsToProject(projectDir, iterLabel) {
+  for (const asset of COPY_ASSETS) {
+    const src = resolve(PROJECT_ROOT, asset);
+    if (!existsSync(src)) continue;
+
+    const dest = resolve(projectDir, asset);
+    console.log(`[${iterLabel}] Copying ${asset}/ into project...`);
+    await cp(src, dest, { recursive: true });
+  }
+}
 import {
   validateProject,
   killDevServer,
   captureScreenshot,
 } from "./screenshot.js";
+import { measurePerformance } from "./perf.js";
 import {
   parseFiles,
   parseFeedback,
   extractSanityUIComponents,
+  extractInlineStyles,
+  extractComponentUsageCounts,
   isSourceFile,
 } from "./analyze.js";
 
@@ -48,7 +84,8 @@ Rules:
 - Do not include explanations outside of file blocks (except the FEEDBACK block at the end)
 - Do not include unit tests
 - Make sure the project works with "npm install && npm run dev"
-- The FEEDBACK block must appear after all FILE blocks`;
+- The FEEDBACK block must appear after all FILE blocks
+- NEVER output any files under the ui-poc/ directory. The ui-poc/ directory is pre-installed in the project root and must not be created, modified, or overwritten. Import from it using relative paths (e.g. ../ui-poc/packages/ui/src/components/Box) but do not emit FILE blocks for any path starting with ui-poc/.`;
 
 const FIX_SYSTEM_PROMPT = `You are an expert frontend developer debugging a web application that fails to render.
 
@@ -73,11 +110,51 @@ Rules:
 // Max tool-use round-trips before we force the model to finish
 const MAX_TOOL_TURNS = 25;
 
+const API_CALL_MAX_RETRIES = 3;
+const API_CALL_RETRY_DELAY_MS = 15_000; // 15 seconds
+
+/**
+ * Call `client.messages.create()` with retry logic for transient connection errors.
+ * Retries up to API_CALL_MAX_RETRIES times with a delay between attempts.
+ */
+async function callAnthropicWithRetry(client, params, label = "") {
+  for (let attempt = 1; attempt <= API_CALL_MAX_RETRIES; attempt++) {
+    try {
+      // Use streaming to keep the connection alive during long generations.
+      // Non-streaming holds a silent TCP connection for 100+ seconds on large
+      // outputs, which triggers infrastructure-level connection drops.
+      const stream = await client.messages.stream(params);
+      return await stream.finalMessage();
+    } catch (err) {
+      const msg = (err.message || "").toLowerCase();
+      const isTransient =
+        msg.includes("connection error") ||
+        msg.includes("connection reset") ||
+        msg.includes("econnreset") ||
+        msg.includes("socket hang up") ||
+        msg.includes("timeout") ||
+        msg.includes("overloaded") ||
+        msg.includes("529") ||
+        msg.includes("503");
+
+      if (isTransient && attempt < API_CALL_MAX_RETRIES) {
+        const delaySec = Math.round(API_CALL_RETRY_DELAY_MS / 1000);
+        console.warn(
+          `${label ? `[${label}] ` : ""}API call failed (attempt ${attempt}/${API_CALL_MAX_RETRIES}): ${err.message}. Retrying in ${delaySec}s...`,
+        );
+        await new Promise((r) => setTimeout(r, API_CALL_RETRY_DELAY_MS));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 /**
  * Simple single-shot generation (no MCP tools).
  */
 async function generateSimple({ client, model, promptContent }) {
-  const response = await client.messages.create({
+  const response = await callAnthropicWithRetry(client, {
     model,
     max_tokens: 16000,
     system: SYSTEM_PROMPT,
@@ -164,13 +241,42 @@ IMPORTANT corrections to the workflow above:
           ? "\n\nYou have done enough research. Stop calling tools and produce ALL project files now using ---FILE: path--- blocks."
           : "";
 
-      const response = await client.messages.create({
-        model,
-        max_tokens: 16000,
-        system: systemPrompt + nudge,
-        tools: mcpTools,
-        messages,
-      });
+      // Use streaming to keep the connection alive during long generation turns.
+      // Non-streaming holds a silent TCP connection open for 100+ seconds on the
+      // final code-generation turn, which causes infrastructure-level timeouts.
+      let response;
+      for (let attempt = 1; attempt <= API_CALL_MAX_RETRIES; attempt++) {
+        try {
+          const stream = await client.messages.stream({
+            model,
+            max_tokens: 16000,
+            system: systemPrompt + nudge,
+            tools: mcpTools,
+            messages,
+          });
+          response = await stream.finalMessage();
+          break;
+        } catch (err) {
+          const msg = (err.message || "").toLowerCase();
+          const isTransient =
+            msg.includes("connection error") ||
+            msg.includes("connection reset") ||
+            msg.includes("econnreset") ||
+            msg.includes("socket hang up") ||
+            msg.includes("timeout") ||
+            msg.includes("overloaded") ||
+            msg.includes("529") ||
+            msg.includes("503");
+          if (isTransient && attempt < API_CALL_MAX_RETRIES) {
+            console.warn(
+              `[${iterLabel}] API stream failed (attempt ${attempt}/${API_CALL_MAX_RETRIES}): ${err.message}. Retrying in ${Math.round(API_CALL_RETRY_DELAY_MS / 1000)}s...`,
+            );
+            await new Promise((r) => setTimeout(r, API_CALL_RETRY_DELAY_MS));
+          } else {
+            throw err;
+          }
+        }
+      }
 
       inputTokens += response.usage?.input_tokens ?? 0;
       outputTokens += response.usage?.output_tokens ?? 0;
@@ -300,6 +406,7 @@ export async function runAgent({
   maxFixes = 5,
   maxGenerationRetries = 3,
   useMcp,
+  copyAssets = true,
 }) {
   // Sonnet 4.6 generation can take 2-3 minutes per call. The default SDK
   // timeout is 10 min with 2 retries (30 min worst-case per call). Increase
@@ -386,6 +493,11 @@ export async function runAgent({
   const projectDir = resolve(iterDir, "project");
   await writeProjectFiles(projectDir, files);
 
+  // Copy asset directories (e.g. ui-poc) into the project if enabled
+  if (copyAssets) {
+    await copyAssetsToProject(projectDir, iterLabel);
+  }
+
   // Track fix attempts
   let fixAttempts = 0;
   const fixLog = [];
@@ -424,6 +536,20 @@ export async function runAgent({
             console.warn(`[${iterLabel}] ⚠ A11y tests failed: ${err.message}`);
           }
 
+          // Run performance measurements against the live dev server
+          let perfResults = null;
+          try {
+            perfResults = await measurePerformance({
+              serverUrl: validation.serverUrl,
+              iterDir,
+              iterLabel,
+            });
+          } catch (err) {
+            console.warn(
+              `[${iterLabel}] ⚠ Perf measurement failed: ${err.message}`,
+            );
+          }
+
           // Save any non-fatal console errors for reference
           if (validation.consoleErrors.length > 0) {
             await writeFile(
@@ -447,6 +573,7 @@ export async function runAgent({
             fixLog,
             feedback,
             a11yResults,
+            perfResults,
             runner: "api",
           });
           return result;
@@ -482,17 +609,21 @@ export async function runAgent({
 
         // Ask Claude to fix the errors
         console.log(`[${iterLabel}] Asking Claude to fix errors...`);
-        const fixResponse = await client.messages.create({
-          model,
-          max_tokens: 16000,
-          system: FIX_SYSTEM_PROMPT,
-          messages: [
-            {
-              role: "user",
-              content: fixPrompt,
-            },
-          ],
-        });
+        const fixResponse = await callAnthropicWithRetry(
+          client,
+          {
+            model,
+            max_tokens: 16000,
+            system: FIX_SYSTEM_PROMPT,
+            messages: [
+              {
+                role: "user",
+                content: fixPrompt,
+              },
+            ],
+          },
+          iterLabel,
+        );
 
         totalInputTokens += fixResponse.usage?.input_tokens ?? 0;
         totalOutputTokens += fixResponse.usage?.output_tokens ?? 0;
@@ -579,6 +710,7 @@ export async function runAgent({
       fixLog,
       feedback,
       a11yResults: null,
+      perfResults: null,
       runner: "api",
     });
   }
@@ -596,6 +728,7 @@ export async function runAgent({
     fixLog,
     feedback,
     a11yResults: null,
+    perfResults: null,
     runner: "api",
   });
 }
@@ -612,7 +745,11 @@ async function writeProjectFiles(projectDir, files) {
     if (existsSync(projectDir)) {
       const entries = await readdir(projectDir);
       for (const entry of entries) {
-        if (entry !== "node_modules" && entry !== "package-lock.json") {
+        if (
+          entry !== "node_modules" &&
+          entry !== "package-lock.json" &&
+          !COPY_ASSETS.includes(entry)
+        ) {
           await rm(resolve(projectDir, entry), {
             recursive: true,
             force: true,
@@ -719,6 +856,7 @@ async function buildResult({
   fixLog,
   feedback,
   a11yResults,
+  perfResults,
   runner,
 }) {
   const linesOfCode = files.reduce(
@@ -727,6 +865,8 @@ async function buildResult({
   );
 
   const sanityUIComponents = extractSanityUIComponents(files);
+  const inlineStyles = extractInlineStyles(files);
+  const componentUsage = extractComponentUsageCounts(files);
 
   const sourceContents = files
     .filter((f) => isSourceFile(f.path))
@@ -740,6 +880,8 @@ async function buildResult({
     fileCount: files.length,
     filePaths: files.map((f) => f.path),
     sanityUIComponents: [...sanityUIComponents],
+    inlineStyles,
+    componentUsage,
     screenshotPath,
     inputTokens: totalInputTokens || null,
     outputTokens: totalOutputTokens || null,
@@ -747,6 +889,7 @@ async function buildResult({
     fixLog,
     feedback,
     a11yResults,
+    perfResults,
   };
   await writeFile(
     resolve(iterDir, "_meta.json"),
@@ -760,6 +903,8 @@ async function buildResult({
     fileCount: files.length,
     files: sourceContents,
     sanityUIComponents: [...sanityUIComponents],
+    inlineStyles,
+    componentUsage,
     screenshotPath,
     inputTokens: totalInputTokens || null,
     outputTokens: totalOutputTokens || null,
@@ -767,5 +912,6 @@ async function buildResult({
     fixLog,
     feedback,
     a11yResults,
+    perfResults,
   };
 }

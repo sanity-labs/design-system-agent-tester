@@ -2,6 +2,7 @@ Create a simple interface that mimics Sanity Studio using Sanity UI.
 
 # Instructions
 * DO NOT USE OLDER VERSIONS OF SANITY ICONS OR SANITY UI.
+* DO NOT USE COMPONENTS FROM `ui-poc` DIRECTORY.
 * Use the latest version of Sanity Icons and Sanity UI for the interface. YOU ARE NOT ALLOWED INSTALL A SPECIFIC VERSION. YOU HAVE TO EXPLICITLY INSTALL THE LATEST VERSION OF EACH PACKAGE WITH THE FOLLOWING COMMANDS:
   * Sanity icons: `npm i @sanity/icons@latest`
   * Sanity UI: `npm i @sanity/ui@latest` 

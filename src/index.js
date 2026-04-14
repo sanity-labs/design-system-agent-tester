@@ -1,7 +1,8 @@
 import { parseArgs } from "node:util";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readFile, mkdir } from "node:fs/promises";
+import { readFile, mkdir, cp } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { generateReport } from "./report.js";
 import { computeVisualDiff } from "./visual-diff.js";
 
@@ -81,6 +82,10 @@ const { values } = parseArgs({
       type: "boolean",
       default: false,
     },
+    "no-copy-assets": {
+      type: "boolean",
+      default: false,
+    },
   },
 });
 
@@ -110,6 +115,7 @@ async function main() {
   const takeScreenshots = values.screenshot;
   const maxFixes = parseInt(values["max-fixes"], 10);
   const useMcp = !values["no-mcp"];
+  const copyAssets = !values["no-copy-assets"];
 
   if (isNaN(maxFixes) || maxFixes < 0) {
     console.error("Error: --max-fixes must be a non-negative integer");
@@ -162,6 +168,7 @@ async function main() {
   console.log(`Concurrency:  ${maxConcurrency}`);
   console.log(`Screenshots:  ${takeScreenshots}`);
   console.log(`MCP:          ${useMcp}`);
+  console.log(`Copy assets:  ${copyAssets}`);
   console.log(`Prompts:      ${promptKeys.join(", ")}`);
   console.log(`Output:       ${runDir}`);
   console.log("");
@@ -207,6 +214,7 @@ async function main() {
             takeScreenshots,
             maxFixes,
             useMcp,
+            copyAssets,
           });
 
           const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);

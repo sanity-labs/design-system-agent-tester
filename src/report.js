@@ -62,6 +62,15 @@ export async function generateReport(allResults, outputDir) {
     const visualDiff =
       iterations.find((r) => r._visualDiff)?._visualDiff || null;
 
+    // 10. Performance analysis
+    const perfAnalysis = analyzePerformance(validIterations);
+
+    // 11. Inline style analysis
+    const inlineStyleAnalysis = analyzeInlineStyles(validIterations);
+
+    // 12. Component usage count analysis
+    const componentUsageAnalysis = analyzeComponentUsage(validIterations);
+
     const avgFixes = mean(fixCounts);
     const stdDevFixes = stdDev(fixCounts);
     const iterationsNeedingFixes = fixCounts.filter((n) => n > 0).length;
@@ -117,6 +126,9 @@ export async function generateReport(allResults, outputDir) {
         iterationsCompared: 0,
         description: "No visual diff data available",
       },
+      performance: perfAnalysis,
+      inlineStyles: inlineStyleAnalysis,
+      componentUsageCounts: componentUsageAnalysis,
       tokenUsage: {
         avgInputTokens: inputTokens.length ? round(mean(inputTokens)) : null,
         avgOutputTokens: outputTokens.length ? round(mean(outputTokens)) : null,
@@ -637,6 +649,112 @@ function renderMarkdown(report) {
       md += `No accessibility results collected for this prompt.\n\n`;
     }
 
+    // Performance
+    md += `### ⚡ Performance\n\n`;
+    const perf = data.performance;
+    if (perf && perf.iterationsWithResults > 0) {
+      md += `| Metric | Value |\n|--------|-------|\n`;
+      md += `| Iterations measured | ${perf.iterationsWithResults}/${data.successfulIterations} |\n`;
+      if (perf.avgFcpMs !== null) {
+        md += `| Avg FCP | ${perf.avgFcpMs}ms |\n`;
+      }
+      if (perf.avgLcpMs !== null) {
+        md += `| Avg LCP | ${perf.avgLcpMs}ms |\n`;
+      }
+      if (perf.avgRenderMs !== null) {
+        md += `| Avg render time | ${perf.avgRenderMs}ms |\n`;
+        md += `| Min render time | ${perf.minRenderMs}ms |\n`;
+        md += `| Max render time | ${perf.maxRenderMs}ms |\n`;
+        md += `| Samples per iteration | ${perf.samplesPerIteration} |\n`;
+      }
+      md += `\n`;
+
+      if (perf.perIteration.length > 0) {
+        md += `| Iteration | FCP (ms) | LCP (ms) | Avg Render (ms) |\n|-----------|----------|----------|------------------|\n`;
+        for (const p of perf.perIteration) {
+          const fcp = p.fcpMs !== null ? p.fcpMs : "N/A";
+          const lcp = p.lcpMs !== null ? p.lcpMs : "N/A";
+          const render = p.avgRenderMs !== null ? p.avgRenderMs : "N/A";
+          md += `| ${p.iteration} | ${fcp} | ${lcp} | ${render} |\n`;
+        }
+        md += `\n`;
+      }
+    } else {
+      md += `No performance data collected for this prompt.\n\n`;
+    }
+
+    // Component Usage Counts
+    md += `### 🧩 Component Usage Counts\n\n`;
+    const cu = data.componentUsageCounts;
+    if (cu && cu.totalAcrossIterations > 0) {
+      md += `| Metric | Value |\n|--------|-------|\n`;
+      md += `| Total component instances | ${cu.totalAcrossIterations} |\n`;
+      md += `| Unique component types | ${Object.keys(cu.byComponent).length} |\n`;
+      md += `| Average per iteration | ${cu.averagePerIteration} |\n`;
+      md += `| Iterations measured | ${cu.iterationsWithData}/${data.successfulIterations} |\n\n`;
+
+      if (Object.keys(cu.byComponent).length > 0) {
+        md += `**By component (total instances across all iterations):**\n\n`;
+        md += `| Component | Total Uses |\n|-----------|------------|\n`;
+        const sorted = Object.entries(cu.byComponent).sort((a, b) => b[1] - a[1]);
+        for (const [comp, count] of sorted) {
+          md += `| \`${comp}\` | ${count} |\n`;
+        }
+        md += `\n`;
+      }
+
+      if (cu.perIteration.length > 0) {
+        md += `**Per iteration:**\n\n`;
+        md += `| Iteration | Total | Top component |\n|-----------|-------|---------------|\n`;
+        for (const p of cu.perIteration) {
+          const top = Object.entries(p.byComponent).sort((a, b) => b[1] - a[1])[0];
+          const topStr = top ? `\`${top[0]}\` (${top[1]})` : "—";
+          md += `| ${p.iteration} | ${p.total} | ${topStr} |\n`;
+        }
+        md += `\n`;
+      }
+    } else {
+      md += `No component usage data available.\n\n`;
+    }
+
+    // Inline Styles
+    md += `### 🎨 Inline Styles\n\n`;
+    const is = data.inlineStyles;
+    if (is && is.totalAcrossIterations > 0) {
+      md += `| Metric | Value |\n|--------|-------|\n`;
+      md += `| Total inline \`style={{}}\` usages | ${is.totalAcrossIterations} |\n`;
+      md += `| Average per iteration | ${is.averagePerIteration} |\n`;
+      md += `| Iterations measured | ${is.iterationsWithData}/${data.successfulIterations} |\n\n`;
+
+      if (Object.keys(is.byComponent).length > 0) {
+        md += `**By component (across all iterations):**\n\n`;
+        md += `| Component | Inline Style Count | % of Instances |\n|-----------|--------------------|-----------------|\n`;
+        const sorted = Object.entries(is.byComponent).sort((a, b) => b[1] - a[1]);
+        const totalUsage = data.componentUsageCounts?.byComponent || {};
+        for (const [comp, count] of sorted) {
+          const totalInstances = totalUsage[comp] || 0;
+          const pct = totalInstances > 0
+            ? `${Math.round((count / totalInstances) * 100)}%`
+            : "—";
+          md += `| \`${comp}\` | ${count} | ${pct} |\n`;
+        }
+        md += `\n`;
+      }
+
+      if (is.perIteration.length > 0) {
+        md += `**Per iteration:**\n\n`;
+        md += `| Iteration | Total | Top component |\n|-----------|-------|---------------|\n`;
+        for (const p of is.perIteration) {
+          const top = Object.entries(p.byComponent).sort((a, b) => b[1] - a[1])[0];
+          const topStr = top ? `\`${top[0]}\` (${top[1]})` : "—";
+          md += `| ${p.iteration} | ${p.total} | ${topStr} |\n`;
+        }
+        md += `\n`;
+      }
+    } else {
+      md += `No inline style data available.\n\n`;
+    }
+
     // Visual Diff
     md += `### 🖼️ Visual Diff\n\n`;
     const vd = data.visualDiff;
@@ -695,6 +813,152 @@ function renderMarkdown(report) {
 }
 
 // --- Utility functions ---
+
+/**
+ * Analyze performance results across iterations.
+ */
+function analyzePerformance(iterations) {
+  const withResults = iterations.filter(
+    (r) => r.perfResults && !r.perfResults.error,
+  );
+
+  if (withResults.length === 0) {
+    return {
+      iterationsWithResults: 0,
+      totalIterations: iterations.length,
+      avgFcpMs: null,
+      avgLcpMs: null,
+      avgRenderMs: null,
+      minRenderMs: null,
+      maxRenderMs: null,
+      samplesPerIteration: 0,
+      perIteration: [],
+    };
+  }
+
+  const fcpValues = withResults
+    .map((r) => r.perfResults.fcpMs)
+    .filter((v) => v !== null);
+  const lcpValues = withResults
+    .map((r) => r.perfResults.lcpMs)
+    .filter((v) => v !== null);
+  const renderAvgs = withResults
+    .map((r) => r.perfResults.renderTimes?.averageMs)
+    .filter((v) => v !== null);
+  const allRenderSamples = withResults.flatMap(
+    (r) => r.perfResults.renderTimes?.samples || [],
+  );
+
+  const perIteration = withResults.map((r) => ({
+    iteration: r.iteration,
+    fcpMs: r.perfResults.fcpMs,
+    lcpMs: r.perfResults.lcpMs,
+    avgRenderMs: r.perfResults.renderTimes?.averageMs ?? null,
+    minRenderMs: r.perfResults.renderTimes?.minMs ?? null,
+    maxRenderMs: r.perfResults.renderTimes?.maxMs ?? null,
+    sampleCount: r.perfResults.renderTimes?.count ?? 0,
+  }));
+
+  return {
+    iterationsWithResults: withResults.length,
+    totalIterations: iterations.length,
+    avgFcpMs: fcpValues.length > 0 ? round(mean(fcpValues)) : null,
+    avgLcpMs: lcpValues.length > 0 ? round(mean(lcpValues)) : null,
+    avgRenderMs: renderAvgs.length > 0 ? round(mean(renderAvgs)) : null,
+    minRenderMs:
+      allRenderSamples.length > 0 ? round(Math.min(...allRenderSamples)) : null,
+    maxRenderMs:
+      allRenderSamples.length > 0 ? round(Math.max(...allRenderSamples)) : null,
+    samplesPerIteration: withResults[0]?.perfResults?.samples ?? 0,
+    perIteration,
+  };
+}
+
+/**
+ * Aggregate inline style usage across iterations.
+ */
+/**
+ * Aggregate component JSX usage counts across iterations.
+ */
+function analyzeComponentUsage(iterations) {
+  const withData = iterations.filter(
+    (r) => r.componentUsage && r.componentUsage.total !== undefined,
+  );
+
+  if (withData.length === 0) {
+    return {
+      iterationsWithData: 0,
+      totalAcrossIterations: 0,
+      averagePerIteration: 0,
+      byComponent: {},
+      perIteration: [],
+    };
+  }
+
+  const globalByComponent = {};
+  let totalAcrossIterations = 0;
+
+  const perIteration = withData.map((r) => {
+    const { total, byComponent } = r.componentUsage;
+    totalAcrossIterations += total;
+    for (const [comp, count] of Object.entries(byComponent || {})) {
+      globalByComponent[comp] = (globalByComponent[comp] || 0) + count;
+    }
+    return {
+      iteration: r.iteration,
+      total,
+      byComponent: byComponent || {},
+    };
+  });
+
+  return {
+    iterationsWithData: withData.length,
+    totalAcrossIterations,
+    averagePerIteration: round(totalAcrossIterations / withData.length),
+    byComponent: globalByComponent,
+    perIteration,
+  };
+}
+
+function analyzeInlineStyles(iterations) {
+  const withData = iterations.filter(
+    (r) => r.inlineStyles && r.inlineStyles.total !== undefined,
+  );
+
+  if (withData.length === 0) {
+    return {
+      iterationsWithData: 0,
+      totalAcrossIterations: 0,
+      averagePerIteration: 0,
+      byComponent: {},
+      perIteration: [],
+    };
+  }
+
+  const globalByComponent = {};
+  let totalAcrossIterations = 0;
+
+  const perIteration = withData.map((r) => {
+    const { total, byComponent } = r.inlineStyles;
+    totalAcrossIterations += total;
+    for (const [comp, count] of Object.entries(byComponent || {})) {
+      globalByComponent[comp] = (globalByComponent[comp] || 0) + count;
+    }
+    return {
+      iteration: r.iteration,
+      total,
+      byComponent: byComponent || {},
+    };
+  });
+
+  return {
+    iterationsWithData: withData.length,
+    totalAcrossIterations,
+    averagePerIteration: round(totalAcrossIterations / withData.length),
+    byComponent: globalByComponent,
+    perIteration,
+  };
+}
 
 function mean(arr) {
   if (arr.length === 0) return 0;

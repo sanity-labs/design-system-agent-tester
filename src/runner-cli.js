@@ -1,17 +1,37 @@
-import { writeFile, mkdir, rm, readFile, mkdtemp } from "node:fs/promises";
-import { resolve, join } from "node:path";
+import { writeFile, mkdir, rm, readFile, mkdtemp, cp } from "node:fs/promises";
+import { resolve, join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const PROJECT_ROOT = resolve(__dirname, "..");
+
+const COPY_ASSETS = ["ui-poc"];
+
+async function copyAssetsToProject(projectDir, iterLabel) {
+  for (const asset of COPY_ASSETS) {
+    const src = resolve(PROJECT_ROOT, asset);
+    if (!existsSync(src)) continue;
+
+    const dest = resolve(projectDir, asset);
+    console.log(`[${iterLabel}] Copying ${asset}/ into project...`);
+    await cp(src, dest, { recursive: true });
+  }
+}
 import {
   validateProject,
   killDevServer,
   captureScreenshot,
 } from "./screenshot.js";
+import { measurePerformance } from "./perf.js";
 import {
   parseFiles,
   parseFeedback,
   extractSanityUIComponents,
+  extractInlineStyles,
+  extractComponentUsageCounts,
   isSourceFile,
 } from "./analyze.js";
 import { runAccessibilityTests } from "./a11y.js";
@@ -48,7 +68,8 @@ Rules:
 - Do not include explanations outside of file blocks (except the FEEDBACK block at the end)
 - Do not include unit tests
 - Make sure the project works with "npm install && npm run dev"
-- The FEEDBACK block must appear after all FILE blocks`;
+- The FEEDBACK block must appear after all FILE blocks
+- NEVER output any files under the ui-poc/ directory. The ui-poc/ directory is pre-installed in the project root and must not be created, modified, or overwritten. Import from it using relative paths (e.g. ../ui-poc/packages/ui/src/components/Box) but do not emit FILE blocks for any path starting with ui-poc/.`;
 
 const FIX_SYSTEM_PROMPT = `You are an expert frontend developer debugging a web application that fails to render.
 
@@ -225,6 +246,7 @@ export async function runAgent({
   maxFixes = 5,
   maxGenerationRetries = 3,
   useMcp,
+  copyAssets = true,
 }) {
   // useMcp flag from CLI: true = auto-detect, false = force off
   const needsMcp = useMcp === false ? false : /mcp/i.test(promptContent);
@@ -294,6 +316,11 @@ export async function runAgent({
   const projectDir = resolve(iterDir, "project");
   await writeProjectFiles(projectDir, files);
 
+  // Copy asset directories (e.g. ui-poc) into the project if enabled
+  if (copyAssets) {
+    await copyAssetsToProject(projectDir, iterLabel);
+  }
+
   // Track fix attempts
   let fixAttempts = 0;
   const fixLog = [];
@@ -329,6 +356,20 @@ export async function runAgent({
             );
           }
 
+          // Run performance measurements against the live dev server
+          let perfResults = null;
+          try {
+            perfResults = await measurePerformance({
+              serverUrl: validation.serverUrl,
+              iterDir,
+              iterLabel,
+            });
+          } catch (err) {
+            console.warn(
+              `[${iterLabel}] ⚠ Perf measurement failed: ${err.message}`,
+            );
+          }
+
           // Run accessibility tests against the live dev server
           let a11yResults = null;
           try {
@@ -353,6 +394,7 @@ export async function runAgent({
             fixLog,
             feedback,
             a11yResults,
+            perfResults,
           });
           return result;
         }
@@ -469,6 +511,7 @@ export async function runAgent({
       fixLog,
       feedback,
       a11yResults: null,
+      perfResults: null,
     });
   }
 
@@ -483,6 +526,7 @@ export async function runAgent({
     fixLog,
     feedback,
     a11yResults: null,
+    perfResults: null,
   });
 }
 
@@ -497,7 +541,11 @@ async function writeProjectFiles(projectDir, files) {
     const { readdir } = await import("node:fs/promises");
     const entries = await readdir(projectDir);
     for (const entry of entries) {
-      if (entry !== "node_modules" && entry !== "package-lock.json") {
+      if (
+        entry !== "node_modules" &&
+        entry !== "package-lock.json" &&
+        !COPY_ASSETS.includes(entry)
+      ) {
         await rm(resolve(projectDir, entry), {
           recursive: true,
           force: true,
@@ -601,6 +649,7 @@ async function buildResult({
   fixLog,
   feedback,
   a11yResults,
+  perfResults,
 }) {
   const linesOfCode = files.reduce(
     (sum, f) => sum + f.content.split("\n").length,
@@ -608,6 +657,8 @@ async function buildResult({
   );
 
   const sanityUIComponents = extractSanityUIComponents(files);
+  const inlineStyles = extractInlineStyles(files);
+  const componentUsage = extractComponentUsageCounts(files);
 
   const sourceContents = files
     .filter((f) => isSourceFile(f.path))
@@ -621,6 +672,8 @@ async function buildResult({
     fileCount: files.length,
     filePaths: files.map((f) => f.path),
     sanityUIComponents: [...sanityUIComponents],
+    inlineStyles,
+    componentUsage,
     screenshotPath,
     inputTokens: null,
     outputTokens: null,
@@ -628,6 +681,7 @@ async function buildResult({
     fixLog,
     feedback,
     a11yResults,
+    perfResults,
   };
   await writeFile(
     resolve(iterDir, "_meta.json"),
@@ -641,6 +695,8 @@ async function buildResult({
     fileCount: files.length,
     files: sourceContents,
     sanityUIComponents: [...sanityUIComponents],
+    inlineStyles,
+    componentUsage,
     screenshotPath,
     inputTokens: null,
     outputTokens: null,
@@ -648,5 +704,6 @@ async function buildResult({
     fixLog,
     feedback,
     a11yResults,
+    perfResults,
   };
 }

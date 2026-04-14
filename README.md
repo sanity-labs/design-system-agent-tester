@@ -135,6 +135,7 @@ node src/index.js --runner cli --prompt control
 | `--concurrency` | `-c` | `2` | Max parallel agent calls. Capped at 2 by default to avoid rate limiting on slower models. Set higher with `--concurrency 5` if your API tier supports it. |
 | `--screenshot` | `-s` | `true` | Capture screenshots and run the validate/fix loop |
 | `--no-mcp` | | `false` | Disable MCP tool use. By default, MCP is auto-detected from prompt content (enabled when the prompt mentions "MCP"). Pass `--no-mcp` to force it off. |
+| `--no-copy-assets` | | `false` | Disable copying asset directories (e.g. `ui-poc/`) into each generated project before validation. By default, any directories listed in `COPY_ASSETS` are copied into the project so agents can reference local libraries. |
 
 ### Models
 
