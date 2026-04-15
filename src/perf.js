@@ -1,339 +1,289 @@
-import { resolve } from "node:path";
 import { writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
 
 /**
- * Performance measurement module.
+ * Performance measurement combining two complementary tools:
  *
- * Collects:
- * - FCP (First Contentful Paint) via PerformanceObserver
- * - LCP (Largest Contentful Paint) via PerformanceObserver
- * - Average render time over N full page loads
+ * 1. Lighthouse — Google's official web-perf audit engine (same as Chrome
+ *    DevTools / PageSpeed Insights). Measures Core Web Vitals: FCP, LCP,
+ *    TBT, TTI, Speed Index, Performance Score.
+ *    Runs LIGHTHOUSE_RUNS times and averages for stability.
  *
- * Requires a running dev server URL and uses Puppeteer for measurement.
+ * 2. React Profiler — injected via __REACT_DEVTOOLS_GLOBAL_HOOK__ (the same
+ *    mechanism used by the React DevTools browser extension). This hook is
+ *    installed before any page scripts run, so React calls into it on every
+ *    commit without any modification to the generated app code.
+ *    Captures actualDuration per commit from the fiber tree, which React
+ *    populates in development builds (Vite dev server = dev build).
  */
 
-const NUM_RENDER_SAMPLES = 10;
-const NAVIGATION_TIMEOUT = 30_000;
-const RENDER_SETTLE_MS = 1500;
+const LIGHTHOUSE_RUNS = 3;
+
+// ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
  * Measure performance metrics for a generated project.
  *
  * @param {object} opts
- * @param {string} opts.serverUrl - URL of the running dev server
- * @param {string} opts.iterDir - Directory for this iteration's output
+ * @param {string} opts.serverUrl  - URL of the running dev server
+ * @param {string} opts.iterDir   - Directory for this iteration's output
  * @param {string} opts.iterLabel - Label for logging
  * @returns {Promise<object>} Performance results
  */
 export async function measurePerformance({ serverUrl, iterDir, iterLabel }) {
+  const { default: lighthouse, desktopConfig } = await import("lighthouse");
   const puppeteer = await import("puppeteer");
+
   const browser = await puppeteer.default.launch({
     headless: true,
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
 
   try {
+    // ── Phase 1: Lighthouse ─────────────────────────────────────────────────
     console.log(
-      `[${iterLabel}] Measuring performance (${NUM_RENDER_SAMPLES} samples)...`,
+      `[${iterLabel}] Lighthouse (${LIGHTHOUSE_RUNS} runs)...`,
     );
 
-    // --- Collect FCP and LCP on the first load ---
-    const webVitals = await collectWebVitals(browser, serverUrl, iterLabel);
+    const port = parseInt(new URL(browser.wsEndpoint()).port);
 
-    // --- Collect render times over multiple page loads ---
-    const renderTimes = await collectRenderTimes(
-      browser,
-      serverUrl,
-      NUM_RENDER_SAMPLES,
-      iterLabel,
-    );
+    const lhRuns = [];
+    for (let i = 0; i < LIGHTHOUSE_RUNS; i++) {
+      const { lhr } = await lighthouse(
+        serverUrl,
+        { port, output: "json", logLevel: "error", throttlingMethod: "provided" },
+        desktopConfig,
+      );
+      lhRuns.push(lhr);
+    }
 
-    const avgRenderMs =
-      renderTimes.length > 0
-        ? round(renderTimes.reduce((a, b) => a + b, 0) / renderTimes.length)
+    const pick = (key) =>
+      lhRuns
+        .map((lhr) => lhr.audits[key]?.numericValue ?? null)
+        .filter((v) => v !== null);
+
+    const avg = (vals) =>
+      vals.length
+        ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length)
         : null;
 
-    const minRenderMs =
-      renderTimes.length > 0 ? round(Math.min(...renderTimes)) : null;
-    const maxRenderMs =
-      renderTimes.length > 0 ? round(Math.max(...renderTimes)) : null;
+    const fcpVals = pick("first-contentful-paint");
+    const lcpVals = pick("largest-contentful-paint");
+    const tbtVals = pick("total-blocking-time");
+    const ttiVals = pick("interactive");
+    const siVals  = pick("speed-index");
+    const scores  = lhRuns.map((lhr) =>
+      Math.round((lhr.categories.performance?.score ?? 0) * 100),
+    );
 
+    // ── Phase 2: React Profiler ─────────────────────────────────────────────
+    console.log(`[${iterLabel}] React Profiler...`);
+    const reactProfile = await collectReactProfile(browser, serverUrl, iterLabel);
+
+    // ── Assemble results ────────────────────────────────────────────────────
     const results = {
-      label: iterLabel,
-      timestamp: new Date().toISOString(),
-      samples: NUM_RENDER_SAMPLES,
-      fcpMs: webVitals.fcp,
-      lcpMs: webVitals.lcp,
-      lcpSize: webVitals.lcpSize ?? null,
-      lcpElement: webVitals.lcpElement ?? null,
-      lcpCandidateCount: webVitals.lcpCandidateCount ?? 0,
-      renderTimes: {
-        samples: renderTimes.map((t) => round(t)),
-        averageMs: avgRenderMs,
-        minMs: minRenderMs,
-        maxMs: maxRenderMs,
-        count: renderTimes.length,
-      },
+      label:            iterLabel,
+      timestamp:        new Date().toISOString(),
+      runs:             LIGHTHOUSE_RUNS,
+      // Lighthouse metrics
+      fcpMs:            avg(fcpVals),
+      lcpMs:            avg(lcpVals),
+      tbtMs:            avg(tbtVals),
+      ttiMs:            avg(ttiVals),
+      speedIndex:       avg(siVals),
+      performanceScore: avg(scores),
+      perRun: lhRuns.map((lhr, i) => ({
+        run:              i + 1,
+        fcpMs:            Math.round(lhr.audits["first-contentful-paint"]?.numericValue  ?? 0),
+        lcpMs:            Math.round(lhr.audits["largest-contentful-paint"]?.numericValue ?? 0),
+        tbtMs:            Math.round(lhr.audits["total-blocking-time"]?.numericValue      ?? 0),
+        ttiMs:            Math.round(lhr.audits["interactive"]?.numericValue              ?? 0),
+        performanceScore: Math.round((lhr.categories.performance?.score ?? 0) * 100),
+      })),
+      // React Profiler metrics
+      reactProfile,
     };
 
-    // Save results to disk
-    const perfPath = resolve(iterDir, "_perf_results.json");
-    await writeFile(perfPath, JSON.stringify(results, null, 2), "utf-8");
+    await writeFile(
+      resolve(iterDir, "_perf_results.json"),
+      JSON.stringify(results, null, 2),
+      "utf-8",
+    );
+
     console.log(
-      `[${iterLabel}] Performance: FCP=${fmt(results.fcpMs)} LCP=${fmt(results.lcpMs)} avgRender=${fmt(avgRenderMs)} (${renderTimes.length} samples)`,
+      `[${iterLabel}] FCP=${results.fcpMs}ms TBT=${results.tbtMs}ms score=${results.performanceScore}` +
+      (reactProfile
+        ? ` | React mount=${reactProfile.mountMs}ms commits=${reactProfile.commitCount}`
+        : ""),
     );
 
     return results;
   } catch (err) {
-    console.warn(
-      `[${iterLabel}] Performance measurement failed: ${err.message}`,
-    );
+    console.warn(`[${iterLabel}] Performance measurement failed: ${err.message}`);
     return {
-      label: iterLabel,
-      timestamp: new Date().toISOString(),
-      samples: NUM_RENDER_SAMPLES,
-      fcpMs: null,
-      lcpMs: null,
-      renderTimes: {
-        samples: [],
-        averageMs: null,
-        minMs: null,
-        maxMs: null,
-        count: 0,
-      },
-      error: err.message,
+      label:            iterLabel,
+      timestamp:        new Date().toISOString(),
+      runs:             LIGHTHOUSE_RUNS,
+      fcpMs:            null,
+      lcpMs:            null,
+      tbtMs:            null,
+      ttiMs:            null,
+      speedIndex:       null,
+      performanceScore: null,
+      perRun:           [],
+      reactProfile:     null,
+      error:            err.message,
     };
   } finally {
     await browser.close();
   }
 }
 
+// ─── React Profiler ───────────────────────────────────────────────────────────
+
 /**
- * Collect FCP and LCP from a single page load.
+ * Collect React commit-level timing by injecting __REACT_DEVTOOLS_GLOBAL_HOOK__
+ * into the page before any scripts run.
  *
- * Uses two complementary approaches:
- * - FCP: PerformanceObserver on "paint" entries (reliable, fires once)
- * - LCP: PerformanceObserver on "largest-contentful-paint" entries.
- *   LCP entries arrive progressively as larger elements render. The final
- *   LCP value is the LAST entry before user interaction or page fully loaded.
- *   We track every entry with its size and renderTime, wait for the page to
- *   fully settle, then take the last (largest) entry.
+ * React calls onCommitFiberRoot() synchronously at the end of every commit
+ * phase. Each fiber carries actualDuration (ms) — the time React spent
+ * rendering that fiber and its entire subtree. This field is populated in
+ * development builds; Vite's dev server always produces development builds.
+ *
+ * Returns null if the page has no React, or if actualDuration is unavailable
+ * (e.g. a production/minified build).
+ *
+ * @param {import("puppeteer").Browser} browser
+ * @param {string} serverUrl
+ * @param {string} iterLabel
+ * @returns {Promise<ReactProfile | null>}
+ *
+ * @typedef {{
+ *   mountMs:      number,   // Initial mount duration (first commit)
+ *   commitCount:  number,   // Total number of React commits observed
+ *   avgUpdateMs:  number,   // Average duration of commits after the initial mount
+ *   maxUpdateMs:  number,   // Slowest update commit
+ *   commits:      Array<{ durationMs: number, timestampMs: number }>,
+ * }} ReactProfile
  */
-async function collectWebVitals(browser, serverUrl, iterLabel) {
+async function collectReactProfile(browser, serverUrl, iterLabel) {
   const page = await browser.newPage();
 
   try {
     await page.setViewport({ width: 1440, height: 900 });
 
-    // Set up performance observers BEFORE navigation via evaluateOnNewDocument
+    // Install the hook BEFORE any page scripts execute.
+    // React reads window.__REACT_DEVTOOLS_GLOBAL_HOOK__ at module evaluation
+    // time and stores a reference — setting it afterwards has no effect.
     await page.evaluateOnNewDocument(() => {
-      window.__PERF_FCP__ = null;
-      // Store ALL LCP candidates — the last one at read-time is the true LCP
-      window.__PERF_LCP_ENTRIES__ = [];
+      window.__REACT_PROFILER_COMMITS__ = [];
 
-      // FCP observer
-      try {
-        new PerformanceObserver((list) => {
-          for (const entry of list.getEntries()) {
-            if (entry.name === "first-contentful-paint") {
-              window.__PERF_FCP__ = entry.startTime;
-            }
-          }
-        }).observe({ type: "paint", buffered: true });
-      } catch (e) {
-        // paint observer not supported
-      }
+      window.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
+        // Minimum interface React 16–18 expects on the hook object.
+        supportsFiber:       true,
+        isDisabled:          false,
+        renderers:           new Map(),
 
-      // LCP observer — accumulate ALL candidates
-      try {
-        new PerformanceObserver((list) => {
-          for (const entry of list.getEntries()) {
-            window.__PERF_LCP_ENTRIES__.push({
-              startTime: entry.startTime,
-              renderTime: entry.renderTime || 0,
-              loadTime: entry.loadTime || 0,
-              size: entry.size || 0,
-              element: entry.element ? entry.element.tagName : null,
-            });
-          }
-        }).observe({ type: "largest-contentful-paint", buffered: true });
-      } catch (e) {
-        // LCP observer not supported
-      }
-    });
+        // Called once per renderer (ReactDOM) at module initialisation.
+        inject:              () => {},
+        // Used by React to assert that dead-code elimination ran correctly.
+        checkDCE:            () => {},
 
-    // Navigate and wait for full load (not just networkidle — we want late paints)
-    await page.goto(serverUrl, {
-      waitUntil: "networkidle0",
-      timeout: NAVIGATION_TIMEOUT,
-    });
+        // Scheduling notifications — not needed for profiling but must exist.
+        onScheduleFiberRoot: () => {},
+        onScheduleRoot:      () => {},
 
-    // Wait longer for LCP to settle — images, fonts, lazy content can trigger
-    // late LCP entries. 3 seconds is the standard recommendation.
-    await new Promise((r) => setTimeout(r, 3000));
+        // Called when a root unmounts.
+        onUnmountFiberRoot:  () => {},
 
-    // Finalize LCP by dispatching a keydown event — LCP observation stops
-    // on first user input per the spec. This ensures no more entries arrive.
-    await page.keyboard.press("Tab");
-    await new Promise((r) => setTimeout(r, 200));
+        // Called when an individual fiber unmounts.
+        onCommitFiberUnmount: () => {},
 
-    // Collect the metrics
-    const metrics = await page.evaluate(() => {
-      const entries = window.__PERF_LCP_ENTRIES__ || [];
-      // True LCP is the last entry (largest element rendered last)
-      const lastLcp = entries.length > 0 ? entries[entries.length - 1] : null;
+        // Called after passive effects (useEffect) flush — not used here.
+        onPostCommitFiberRoot: () => {},
 
-      // LCP time is renderTime if available (more accurate), else startTime
-      let lcpMs = null;
-      if (lastLcp) {
-        lcpMs = lastLcp.renderTime > 0 ? lastLcp.renderTime : lastLcp.startTime;
-      }
+        /**
+         * Called synchronously at the end of every React commit phase.
+         *
+         * @param {number}  _rendererID  - opaque ID assigned by React
+         * @param {object}  root         - FiberRoot object
+         */
+        onCommitFiberRoot: (_rendererID, root) => {
+          // root.current is the HostRoot fiber. Its child is the top-most
+          // user component (e.g. <App> or <React.StrictMode>).
+          // actualDuration on the child equals the total reconciler time for
+          // the entire component tree during this commit.
+          const topFiber = root?.current?.child;
+          if (!topFiber) return;
 
-      return {
-        fcp: window.__PERF_FCP__,
-        lcp: lcpMs,
-        lcpSize: lastLcp ? lastLcp.size : null,
-        lcpElement: lastLcp ? lastLcp.element : null,
-        lcpCandidateCount: entries.length,
+          const duration = topFiber.actualDuration;
+
+          // actualDuration is undefined in production builds and is 0 only
+          // when React bailed out of the entire subtree (no re-render needed).
+          // Both are valid data points so we record them.
+          if (typeof duration !== "number") return;
+
+          window.__REACT_PROFILER_COMMITS__.push({
+            durationMs:  duration,
+            timestampMs: performance.now(),
+          });
+        },
       };
     });
 
-    // Fallback for FCP via the Performance API directly
-    if (metrics.fcp === null) {
-      metrics.fcp = await page.evaluate(() => {
-        const entries = performance.getEntriesByType("paint");
-        const fcp = entries.find((e) => e.name === "first-contentful-paint");
-        return fcp ? fcp.startTime : null;
-      });
-    }
-
-    return {
-      fcp: metrics.fcp !== null ? round(metrics.fcp) : null,
-      lcp: metrics.lcp !== null ? round(metrics.lcp) : null,
-      lcpSize: metrics.lcpSize,
-      lcpElement: metrics.lcpElement,
-      lcpCandidateCount: metrics.lcpCandidateCount,
-    };
-  } finally {
-    await page.close();
-  }
-}
-
-/**
- * Measure page load/render time over multiple navigations.
- *
- * Each sample does a fresh navigation to the server URL and measures
- * the time from navigation start to when meaningful content is rendered.
- * This captures the full render pipeline: HTML parse, JS execution,
- * React hydration/render, and DOM paint.
- */
-async function collectRenderTimes(browser, serverUrl, count, iterLabel) {
-  const page = await browser.newPage();
-  const times = [];
-
-  try {
-    await page.setViewport({ width: 1440, height: 900 });
-
-    for (let i = 0; i < count; i++) {
-      try {
-        // Navigate with cache disabled to get a fresh render each time
-        await page.setCacheEnabled(false);
-
-        const start = Date.now();
-
-        await page.goto(serverUrl, {
-          waitUntil: "networkidle2",
-          timeout: NAVIGATION_TIMEOUT,
-        });
-
-        // Wait until we detect rendered content (same check as validation)
-        const rendered = await waitForRenderedContent(page);
-
-        const elapsed = Date.now() - start;
-
-        if (rendered) {
-          times.push(elapsed);
-        }
-
-        // Also collect the browser's own performance timing for more precision
-        const perfTiming = await page.evaluate(() => {
-          const nav = performance.getEntriesByType("navigation")[0];
-          if (nav) {
-            return {
-              domContentLoaded: nav.domContentLoadedEventEnd - nav.startTime,
-              loadComplete: nav.loadEventEnd - nav.startTime,
-              domInteractive: nav.domInteractive - nav.startTime,
-            };
-          }
-          return null;
-        });
-
-        // If we got browser timing, prefer domContentLoaded as it's more precise
-        if (perfTiming && perfTiming.domContentLoaded > 0) {
-          // Replace the wall-clock time with the more precise browser timing
-          // but only if the page actually rendered
-          if (rendered && times.length > 0) {
-            times[times.length - 1] = perfTiming.domContentLoaded;
-          }
-        }
-      } catch (err) {
-        // Skip failed samples — don't break the loop
-        console.warn(
-          `[${iterLabel}] Render sample ${i + 1}/${count} failed: ${err.message}`,
-        );
-      }
-    }
-  } finally {
-    await page.close();
-  }
-
-  return times;
-}
-
-/**
- * Poll the page until meaningful content is detected.
- * Simplified version of the validation check in screenshot.js.
- */
-async function waitForRenderedContent(page) {
-  const MAX_WAIT_MS = 10_000;
-  const POLL_INTERVAL_MS = 200;
-  const start = Date.now();
-
-  while (Date.now() - start < MAX_WAIT_MS) {
-    const hasContent = await page.evaluate(() => {
-      const roots = document.querySelectorAll(
-        "#root, #app, [data-sanity], #__next, [data-ui]",
-      );
-      for (const root of roots) {
-        if (root.children.length > 0 && root.offsetHeight > 0) {
-          return true;
-        }
-      }
-      const allElements = document.body.querySelectorAll("*");
-      let visibleCount = 0;
-      for (const el of allElements) {
-        const rect = el.getBoundingClientRect();
-        if (rect.width > 0 && rect.height > 0) {
-          visibleCount++;
-        }
-        if (visibleCount >= 5) return true;
-      }
-      return false;
+    // Navigate and wait for the app to fully render and settle.
+    await page.goto(serverUrl, {
+      waitUntil: "networkidle0",
+      timeout:   30_000,
     });
 
-    if (hasContent) return true;
-    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
-  }
+    // Give React time to flush any deferred useEffect / Suspense work.
+    await new Promise((r) => setTimeout(r, 1500));
 
-  return false;
+    const commits = await page.evaluate(
+      () => window.__REACT_PROFILER_COMMITS__ ?? [],
+    );
+
+    if (commits.length === 0) {
+      // No commits recorded — either not a React app, or a production build.
+      console.warn(
+        `[${iterLabel}] React Profiler: no commits recorded (production build or non-React page)`,
+      );
+      return null;
+    }
+
+    const mountMs = round(commits[0].durationMs);
+
+    // Updates = everything after the initial mount.
+    const updates = commits.slice(1).filter((c) => c.durationMs > 0);
+    const avgUpdateMs = updates.length
+      ? round(updates.reduce((s, c) => s + c.durationMs, 0) / updates.length)
+      : 0;
+    const maxUpdateMs = updates.length
+      ? round(Math.max(...updates.map((c) => c.durationMs)))
+      : 0;
+
+    return {
+      mountMs,
+      commitCount:  commits.length,
+      avgUpdateMs,
+      maxUpdateMs,
+      commits: commits.map((c) => ({
+        durationMs:  round(c.durationMs),
+        timestampMs: round(c.timestampMs),
+      })),
+    };
+  } catch (err) {
+    console.warn(`[${iterLabel}] React Profiler failed: ${err.message}`);
+    return null;
+  } finally {
+    await page.close();
+  }
 }
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function round(n, decimals = 2) {
   if (n === null || n === undefined || isNaN(n)) return n;
   return Math.round(n * 10 ** decimals) / 10 ** decimals;
-}
-
-function fmt(ms) {
-  if (ms === null || ms === undefined) return "N/A";
-  return `${round(ms)}ms`;
 }

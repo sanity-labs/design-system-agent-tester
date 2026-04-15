@@ -19,6 +19,9 @@
     "rebuild": "node --env-file=.env src/rebuild.js",
     "rebuild:control": "node --env-file=.env src/rebuild.js --prompt control",
     "rebuild:training": "node --env-file=.env src/rebuild.js --prompt training",
+    "reperf": "node src/reperf.js",
+    "reperf:control": "node src/reperf.js --prompt control",
+    "reperf:training": "node src/reperf.js --prompt training",
     "test:a11y": "playwright test --config a11y/playwright.config.ts",
     "test:a11y:control": "A11Y_PROMPT=control playwright test --config a11y/playwright.config.ts",
     "test:a11y:training": "A11Y_PROMPT=training playwright test --config a11y/playwright.config.ts",
@@ -27,6 +30,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "axe-core": "^4.11.1",
+    "lighthouse": "^13.1.0",
     "pixelmatch": "^7.1.0",
     "pngjs": "^7.0.0",
     "puppeteer": "^24.2.0"

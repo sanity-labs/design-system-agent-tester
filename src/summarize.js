@@ -187,8 +187,11 @@ function extractMetrics(data) {
     boxInline:        data.inlineStyles?.byComponent?.Box       ?? 0,
     axeTotal:         data.accessibility?.totalAxeViolations   ?? null,
     axeAvg:           data.accessibility?.averageAxeViolations  ?? null,
-    fcpMs:            data.performance?.avgFcpMs    ?? null,
-    renderMs:         data.performance?.avgRenderMs ?? null,
+    fcpMs:            data.performance?.avgFcpMs             ?? null,
+    tbtMs:            data.performance?.avgTbtMs             ?? null,
+    ttiMs:            data.performance?.avgTtiMs             ?? null,
+    performanceScore: data.performance?.avgPerformanceScore  ?? null,
+    reactMountMs:     data.performance?.reactMountMs         ?? null,
   };
 }
 
@@ -222,7 +225,7 @@ function aggregateMetrics(metricSets) {
   const keys = [
     'loc', 'fixesAvg', 'fixesTotal', 'cleanOnFirstTry',
     'inlineTotal', 'inlineAvg', 'boxInline',
-    'axeTotal', 'axeAvg', 'fcpMs', 'renderMs',
+    'axeTotal', 'axeAvg', 'fcpMs', 'tbtMs', 'ttiMs', 'performanceScore', 'reactMountMs',
   ];
   const result = { count: metricSets.length };
   for (const k of keys) {
@@ -328,8 +331,11 @@ function renderSummary(runs, promptKeys, scannedDir) {
     ['Box inline styles',          'boxInline',     true,        1],
     ['Axe violations total',       'axeTotal',      true,        1],
     ['Axe violations / iter',      'axeAvg',        true,        2],
-    ['FCP (ms)',                   'fcpMs',         true,        0],
-    ['Avg render time (ms)',       'renderMs',      true,        1],
+    ['FCP (ms)',                   'fcpMs',            true,  0],
+    ['TBT (ms)',                   'tbtMs',            true,  1],
+    ['TTI (ms)',                   'ttiMs',            true,  0],
+    ['Lighthouse score',           'performanceScore', false, 0],
+    ['React mount (ms)',           'reactMountMs',     true,  1],
   ];
 
   const aggRows = METRIC_ROWS.map(([label, key, lowerBetter, decimals]) => {
@@ -430,14 +436,17 @@ function renderSummary(runs, promptKeys, scannedDir) {
   {
     const headers = [
       'Run',
-      ...promptKeys.flatMap(pk => [`${pk} FCP (ms)`, `${pk} render (ms)`]),
+      ...promptKeys.flatMap(pk => [`${pk} FCP (ms)`, `${pk} TBT (ms)`, `${pk} TTI (ms)`, `${pk} score`, `${pk} React mount (ms)`]),
     ];
     const rows = perRun.map(row => {
       const cells = [row.name];
       for (const pk of promptKeys) {
         const m = row[pk];
-        cells.push(m ? fmtInt(m.fcpMs)      : '—');
-        cells.push(m ? fmt(m.renderMs, 1)   : '—');
+        cells.push(m ? fmtInt(m.fcpMs)           : '—');
+        cells.push(m ? fmt(m.tbtMs, 1)           : '—');
+        cells.push(m ? fmtInt(m.ttiMs)           : '—');
+        cells.push(m ? fmtInt(m.performanceScore) : '—');
+        cells.push(m ? fmt(m.reactMountMs, 1)    : '—');
       }
       return cells;
     });
@@ -445,7 +454,10 @@ function renderSummary(runs, promptKeys, scannedDir) {
     const avgRow = ['**avg**'];
     for (const pk of promptKeys) {
       avgRow.push(`**${fmtInt(agg[pk]?.fcpMs)}**`);
-      avgRow.push(`**${fmt(agg[pk]?.renderMs, 1)}**`);
+      avgRow.push(`**${fmt(agg[pk]?.tbtMs, 1)}**`);
+      avgRow.push(`**${fmtInt(agg[pk]?.ttiMs)}**`);
+      avgRow.push(`**${fmtInt(agg[pk]?.performanceScore)}**`);
+      avgRow.push(`**${fmt(agg[pk]?.reactMountMs, 1)}**`);
     }
     rows.push(avgRow);
 
@@ -497,7 +509,10 @@ function renderSummary(runs, promptKeys, scannedDir) {
       ['Box inline styles',    'boxInline'],
       ['Axe violations total', 'axeTotal'],
       ['FCP (ms)',              'fcpMs'],
-      ['Render time (ms)',      'renderMs'],
+      ['TBT (ms)',              'tbtMs'],
+      ['TTI (ms)',              'ttiMs'],
+      ['Lighthouse score',      'performanceScore'],
+      ['React mount (ms)',      'reactMountMs'],
       ['Lines of code',         'loc'],
     ];
     const rows = VARIANCE_ROWS.map(([label, key]) => {

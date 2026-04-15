@@ -655,27 +655,61 @@ function renderMarkdown(report) {
     if (perf && perf.iterationsWithResults > 0) {
       md += `| Metric | Value |\n|--------|-------|\n`;
       md += `| Iterations measured | ${perf.iterationsWithResults}/${data.successfulIterations} |\n`;
+      md += `| Lighthouse runs / iteration | ${perf.runsPerIteration} |\n`;
       if (perf.avgFcpMs !== null) {
         md += `| Avg FCP | ${perf.avgFcpMs}ms |\n`;
       }
       if (perf.avgLcpMs !== null) {
         md += `| Avg LCP | ${perf.avgLcpMs}ms |\n`;
       }
-      if (perf.avgRenderMs !== null) {
-        md += `| Avg render time | ${perf.avgRenderMs}ms |\n`;
-        md += `| Min render time | ${perf.minRenderMs}ms |\n`;
-        md += `| Max render time | ${perf.maxRenderMs}ms |\n`;
-        md += `| Samples per iteration | ${perf.samplesPerIteration} |\n`;
+      if (perf.avgTbtMs !== null) {
+        md += `| Avg TBT (Total Blocking Time) | ${perf.avgTbtMs}ms |\n`;
+      }
+      if (perf.avgTtiMs !== null) {
+        md += `| Avg TTI (Time to Interactive) | ${perf.avgTtiMs}ms |\n`;
+      }
+      if (perf.avgSpeedIndex !== null) {
+        md += `| Avg Speed Index | ${perf.avgSpeedIndex}ms |\n`;
+      }
+      if (perf.avgPerformanceScore !== null) {
+        md += `| Avg Lighthouse score | ${perf.avgPerformanceScore} |\n`;
+      }
+      if (perf.reactMountMs !== null) {
+        md += `| Avg React initial mount | ${perf.reactMountMs}ms |\n`;
+      }
+      if (perf.avgReactCommitCount !== null) {
+        md += `| Avg React commit count | ${perf.avgReactCommitCount} |\n`;
+      }
+      if (perf.avgReactUpdateMs !== null) {
+        md += `| Avg React update time | ${perf.avgReactUpdateMs}ms |\n`;
       }
       md += `\n`;
 
       if (perf.perIteration.length > 0) {
-        md += `| Iteration | FCP (ms) | LCP (ms) | Avg Render (ms) |\n|-----------|----------|----------|------------------|\n`;
-        for (const p of perf.perIteration) {
-          const fcp = p.fcpMs !== null ? p.fcpMs : "N/A";
-          const lcp = p.lcpMs !== null ? p.lcpMs : "N/A";
-          const render = p.avgRenderMs !== null ? p.avgRenderMs : "N/A";
-          md += `| ${p.iteration} | ${fcp} | ${lcp} | ${render} |\n`;
+        const hasReact = perf.perIteration.some((p) => p.reactMountMs !== null);
+        if (hasReact) {
+          md += `| Iteration | FCP (ms) | TBT (ms) | Score | React mount (ms) | React commits | React avg update (ms) |\n`;
+          md += `|-----------|----------|----------|-------|------------------|---------------|----------------------|\n`;
+          for (const p of perf.perIteration) {
+            const fcp    = p.fcpMs            ?? "N/A";
+            const tbt    = p.tbtMs            ?? "N/A";
+            const score  = p.performanceScore ?? "N/A";
+            const mount  = p.reactMountMs     ?? "N/A";
+            const count  = p.reactCommitCount ?? "N/A";
+            const update = p.reactAvgUpdateMs ?? "N/A";
+            md += `| ${p.iteration} | ${fcp} | ${tbt} | ${score} | ${mount} | ${count} | ${update} |\n`;
+          }
+        } else {
+          md += `| Iteration | FCP (ms) | LCP (ms) | TBT (ms) | TTI (ms) | Score |\n`;
+          md += `|-----------|----------|----------|----------|----------|-------|\n`;
+          for (const p of perf.perIteration) {
+            const fcp   = p.fcpMs            ?? "N/A";
+            const lcp   = p.lcpMs            ?? "N/A";
+            const tbt   = p.tbtMs            ?? "N/A";
+            const tti   = p.ttiMs            ?? "N/A";
+            const score = p.performanceScore ?? "N/A";
+            md += `| ${p.iteration} | ${fcp} | ${lcp} | ${tbt} | ${tti} | ${score} |\n`;
+          }
         }
         md += `\n`;
       }
@@ -828,48 +862,58 @@ function analyzePerformance(iterations) {
       totalIterations: iterations.length,
       avgFcpMs: null,
       avgLcpMs: null,
-      avgRenderMs: null,
-      minRenderMs: null,
-      maxRenderMs: null,
-      samplesPerIteration: 0,
+      avgTbtMs: null,
+      avgTtiMs: null,
+      avgSpeedIndex: null,
+      avgPerformanceScore: null,
+      runsPerIteration: 0,
+      reactMountMs: null,
+      avgReactCommitCount: null,
+      avgReactUpdateMs: null,
       perIteration: [],
     };
   }
 
-  const fcpValues = withResults
-    .map((r) => r.perfResults.fcpMs)
-    .filter((v) => v !== null);
-  const lcpValues = withResults
-    .map((r) => r.perfResults.lcpMs)
-    .filter((v) => v !== null);
-  const renderAvgs = withResults
-    .map((r) => r.perfResults.renderTimes?.averageMs)
-    .filter((v) => v !== null);
-  const allRenderSamples = withResults.flatMap(
-    (r) => r.perfResults.renderTimes?.samples || [],
-  );
+  const fcpValues   = withResults.map((r) => r.perfResults.fcpMs).filter((v) => v !== null);
+  const lcpValues   = withResults.map((r) => r.perfResults.lcpMs).filter((v) => v !== null);
+  const tbtValues   = withResults.map((r) => r.perfResults.tbtMs).filter((v) => v !== null);
+  const ttiValues   = withResults.map((r) => r.perfResults.ttiMs).filter((v) => v !== null);
+  const siValues    = withResults.map((r) => r.perfResults.speedIndex).filter((v) => v !== null);
+  const scoreValues = withResults.map((r) => r.perfResults.performanceScore).filter((v) => v !== null);
+
+  // React Profiler — only present when the page used a dev-mode React build.
+  const reactMountValues      = withResults.map((r) => r.perfResults.reactProfile?.mountMs).filter((v) => v != null);
+  const reactCommitCounts     = withResults.map((r) => r.perfResults.reactProfile?.commitCount).filter((v) => v != null);
+  const reactAvgUpdateValues  = withResults.map((r) => r.perfResults.reactProfile?.avgUpdateMs).filter((v) => v != null);
 
   const perIteration = withResults.map((r) => ({
-    iteration: r.iteration,
-    fcpMs: r.perfResults.fcpMs,
-    lcpMs: r.perfResults.lcpMs,
-    avgRenderMs: r.perfResults.renderTimes?.averageMs ?? null,
-    minRenderMs: r.perfResults.renderTimes?.minMs ?? null,
-    maxRenderMs: r.perfResults.renderTimes?.maxMs ?? null,
-    sampleCount: r.perfResults.renderTimes?.count ?? 0,
+    iteration:        r.iteration,
+    fcpMs:            r.perfResults.fcpMs,
+    lcpMs:            r.perfResults.lcpMs,
+    tbtMs:            r.perfResults.tbtMs ?? null,
+    ttiMs:            r.perfResults.ttiMs ?? null,
+    speedIndex:       r.perfResults.speedIndex ?? null,
+    performanceScore: r.perfResults.performanceScore ?? null,
+    runCount:         r.perfResults.runs ?? 0,
+    reactMountMs:     r.perfResults.reactProfile?.mountMs ?? null,
+    reactCommitCount: r.perfResults.reactProfile?.commitCount ?? null,
+    reactAvgUpdateMs: r.perfResults.reactProfile?.avgUpdateMs ?? null,
+    reactMaxUpdateMs: r.perfResults.reactProfile?.maxUpdateMs ?? null,
   }));
 
   return {
     iterationsWithResults: withResults.length,
-    totalIterations: iterations.length,
-    avgFcpMs: fcpValues.length > 0 ? round(mean(fcpValues)) : null,
-    avgLcpMs: lcpValues.length > 0 ? round(mean(lcpValues)) : null,
-    avgRenderMs: renderAvgs.length > 0 ? round(mean(renderAvgs)) : null,
-    minRenderMs:
-      allRenderSamples.length > 0 ? round(Math.min(...allRenderSamples)) : null,
-    maxRenderMs:
-      allRenderSamples.length > 0 ? round(Math.max(...allRenderSamples)) : null,
-    samplesPerIteration: withResults[0]?.perfResults?.samples ?? 0,
+    totalIterations:       iterations.length,
+    avgFcpMs:              fcpValues.length        > 0 ? round(mean(fcpValues))           : null,
+    avgLcpMs:              lcpValues.length        > 0 ? round(mean(lcpValues))           : null,
+    avgTbtMs:              tbtValues.length        > 0 ? round(mean(tbtValues))           : null,
+    avgTtiMs:              ttiValues.length        > 0 ? round(mean(ttiValues))           : null,
+    avgSpeedIndex:         siValues.length         > 0 ? round(mean(siValues))            : null,
+    avgPerformanceScore:   scoreValues.length      > 0 ? round(mean(scoreValues))         : null,
+    runsPerIteration:      withResults[0]?.perfResults?.runs ?? 0,
+    reactMountMs:          reactMountValues.length > 0 ? round(mean(reactMountValues))    : null,
+    avgReactCommitCount:   reactCommitCounts.length > 0 ? round(mean(reactCommitCounts))  : null,
+    avgReactUpdateMs:      reactAvgUpdateValues.length > 0 ? round(mean(reactAvgUpdateValues)) : null,
     perIteration,
   };
 }
