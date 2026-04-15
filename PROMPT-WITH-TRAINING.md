@@ -5,7 +5,7 @@ Create a simple interface that mimics Sanity Studio using Sanity UI.
 * Use the latest version of Sanity Icons and Sanity UI for the interface. YOU ARE NOT ALLOWED INSTALL A SPECIFIC VERSION. YOU HAVE TO EXPLICITLY INSTALL THE LATEST VERSION OF EACH PACKAGE WITH THE FOLLOWING COMMANDS:
   * Sanity icons: `npm i @sanity/icons@latest`
   * Sanity UI: `npm i @sanity/ui@latest`
-* DO NOT import `Box`, `Flex`, `Grid`, `Text`, `Heading`, or `Divider` from `@sanity/ui`. These four components are **superseded** by the `ui-poc` package, which will be present in your project at `./ui-poc/packages/ui/src/`. Import them like this:
+* DO NOT import `Box`, `Flex`, `Grid`, `Text`, `Heading`, `Divider`, or `Card` from `@sanity/ui`. These four components are **superseded** by the `ui-poc` package, which will be present in your project at `./ui-poc/packages/ui/src/`. Import them like this:
 
   ```tsx
   import { Box }     from './ui-poc/packages/ui/src/components/Box'
@@ -14,6 +14,7 @@ Create a simple interface that mimics Sanity Studio using Sanity UI.
   import { Text }    from './ui-poc/packages/ui/src/components/Text'
   import { Heading } from './ui-poc/packages/ui/src/components/Heading'
   import { Divider } from './ui-poc/packages/ui/src/components/Divider'
+  import { Card }    from './ui-poc/packages/ui/src/components/Card'
   ```
 
   Add `classnames` to your `package.json` dependencies — the `ui-poc` components require it:
@@ -24,7 +25,7 @@ Create a simple interface that mimics Sanity Studio using Sanity UI.
 
   **Do NOT write your own versions of Box, Flex, Grid, or Divider.** They already exist in `./ui-poc/packages/ui/src/components/`. Use them directly.
 
-  All other `@sanity/ui` components — `Avatar`, `Card`, `Stack`, `Button`, `Badge`, `TextInput`, `Label`, `Tooltip`, `Menu`, `MenuItem`, `MenuButton`, `Toast`, `Popover`, etc. — continue to be imported from `@sanity/ui` as normal.
+  All other `@sanity/ui` components — `Avatar`, `Stack`, `Button`, `Badge`, `TextInput`, `Label`, `Tooltip`, `Menu`, `MenuItem`, `MenuButton`, `Toast`, `Popover`, etc. — continue to be imported from `@sanity/ui` as normal.
 
   **Quick import reference:**
 
@@ -50,13 +51,13 @@ Create a simple interface that mimics Sanity Studio using Sanity UI.
 
 # Quick start
 
-This guide walks you through setting up a Sanity UI project from scratch. By the end you will have a working Vite + React app with a sidebar, toolbar, content area, and proper accessibility structure.
+This guide walks you through setting up a Sanity UI project from scratch. By the end, you will have a working Vite + React app. It includes a sidebar, toolbar, content area, and proper accessibility structure.
 
 ## Create the project
 
 Start with a Vite project and add the packages Sanity UI needs.
 
-```
+```sh
 npm create vite@latest my-app -- --template react-ts
 cd my-app
 npm install @sanity/ui @sanity/icons styled-components classnames
@@ -64,7 +65,7 @@ npm install @sanity/ui @sanity/icons styled-components classnames
 
 > **Important:** Use the Babel React plugin, not SWC. `@sanity/ui` uses styled-components which requires Babel for correct behavior:
 >
-> ```
+> ```sh
 > npm install @vitejs/plugin-react
 > ```
 >
@@ -74,7 +75,7 @@ npm install @sanity/ui @sanity/icons styled-components classnames
 
 After setup, you will have these files:
 
-```
+```text
 my-app/
 ├── index.html
 ├── package.json
@@ -90,7 +91,8 @@ my-app/
 │                   ├── Flex.tsx
 │                   ├── Grid.tsx
 │                   ├── Heading.tsx
-│                   └── Text.tsx
+│                   ├── Text.tsx
+│                   └── Card.tsx
 └── src/
     ├── main.tsx
     ├── App.tsx
@@ -99,23 +101,24 @@ my-app/
 
 ## Import `ui-poc` components
 
-> ⚠ **You must also import the stylesheet.** See the `main.tsx` section below — `ui-poc/packages/ui/src/styles.css` must be imported at the app entry point or components will render without styles (no error is thrown).
+> ⚠ **You must also import the stylesheet.** See the `main.tsx` section below. Import `ui-poc/packages/ui/src/styles.css` at the app entry point. Without it, components render without styles. The app throws no error.
 
-```
-// Box, Flex, Grid, Divider, Heading, and Text come from ui-poc — NOT from @sanity/ui
+```tsx
+// Box, Flex, Grid, Divider, Heading, Text, and Card come from ui-poc — NOT from @sanity/ui
 import { Box }     from '../ui-poc/packages/ui/src/components/Box'
 import { Flex }    from '../ui-poc/packages/ui/src/components/Flex'
 import { Grid }    from '../ui-poc/packages/ui/src/components/Grid'
 import { Divider } from '../ui-poc/packages/ui/src/components/Divider'
 import { Heading } from '../ui-poc/packages/ui/src/components/Heading'
 import { Text }    from '../ui-poc/packages/ui/src/components/Text'
+import { Card }    from '../ui-poc/packages/ui/src/components/Card'
 ```
 
 ## index.html
 
 Set `lang="en"` on the `<html>` element. Without it, screen readers cannot detect the page language (WCAG 3.1.1 A).
 
-```
+```html
 <!doctype html>
 <html lang="en">
   <head>
@@ -132,9 +135,9 @@ Set `lang="en"` on the `<html>` element. Without it, screen readers cannot detec
 
 ## reduced-motion.css
 
-Sanity UI buttons and interactive parts apply `transition-duration: 0.1s` through styled-components. These transitions do not respect `prefers-reduced-motion` at the library level. This file overrides them. Import it in `main.tsx`. It is required in every project.
+Sanity UI buttons and interactive parts apply `transition-duration: 0.1s` through styled-components. These transitions do not respect `prefers-reduced-motion` at the library level. This file overrides them. Import it in `main.tsx`. Every project needs it.
 
-```
+```css
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -151,7 +154,7 @@ Sanity UI buttons and interactive parts apply `transition-duration: 0.1s` throug
 
 Add a Vite alias so that `import { Box } from 'ui'` resolves to the ui-poc source. Also set up the `@vitejs/plugin-react` plugin.
 
-```
+```ts
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { fileURLToPath, URL } from 'node:url'
@@ -176,7 +179,7 @@ Wrap the app in `ThemeProvider` with `studioTheme` and `ToastProvider`. Both are
 
 **`ToastProvider` is required for `useToast()`.** It is NOT included in `ThemeProvider`. Omitting it causes a runtime error with no helpful message. Always include it in your provider stack. See `toast.md` for the full API.
 
-```
+```tsx
 import { createRoot } from 'react-dom/client'
 import { ThemeProvider, studioTheme, ToastProvider } from '@sanity/ui'
 import App from './App'
@@ -194,29 +197,29 @@ createRoot(document.getElementById('root')!).render(
 
 > ⚠ **Both imports are required.**
 > - `reduced-motion.css` — suppresses animations for users with vestibular disorders.
-> - `ui-poc/…/styles.css` — **required for all ui-poc component styles** (Box, Flex, Grid, Heading, Text). Without this import, components render silently unstyled with no error messages.
+> - `ui-poc/…/styles.css` — **required for all ui-poc component styles** (Box, Flex, Grid, Heading, Text, Card). Without this import, components render silently unstyled with no error messages.
 >
 > **If `Box`, `Flex`, or `Grid` appear to have no borders, padding, or layout behaviour, this import is missing.**
 
 ## App.tsx — full scaffold
 
-This file creates a three-region layout: a navigation sidebar, a main content area with a toolbar, and a list of items. It follows the accessibility standards from the component documentation.
+This file creates a three-region layout. It includes a navigation sidebar, a main content area with a toolbar, and a document list. It follows the accessibility standards from the component documentation.
 
-```
+```tsx
 import { useState } from 'react'
 import {
-  Card,
   Stack,
   Button,
   TextInput,
   Badge,
 } from '@sanity/ui'
 
-// Box, Flex, Heading, and Text come from ui-poc — NOT from @sanity/ui
+// Box, Flex, Grid, Divider, Heading, Text, and Card come from ui-poc — NOT from @sanity/ui
 import { Box }     from '../ui-poc/packages/ui/src/components/Box'
 import { Flex }    from '../ui-poc/packages/ui/src/components/Flex'
 import { Heading } from '../ui-poc/packages/ui/src/components/Heading'
 import { Text }    from '../ui-poc/packages/ui/src/components/Text'
+import { Card }    from '../ui-poc/packages/ui/src/components/Card'
 
 import { SearchIcon, AddIcon, MenuIcon, CloseIcon } from '@sanity/icons'
 
@@ -290,7 +293,7 @@ function App() {
               )}
               <Heading
                 level={1}
-                style={{ overflowWrap: 'break-word', wordBreak: 'break-word' }}
+                lines={1}
               >
                 All Documents
               </Heading>
@@ -302,7 +305,7 @@ function App() {
         <Box padding={4} flexGrow={1} overflowY="auto">
           <Stack space={3}>
             {DOCUMENTS.map((title) => (
-              <Card key={title} padding={3} border radius={2}>
+              <Card key={title}>
                 <Flex alignItems="center" justifyContent="space-between">
                   <Stack space={2}>
                     <Heading level={2}>{title}</Heading>
@@ -324,7 +327,7 @@ export default App
 
 ## Run it
 
-```
+```sh
 npm run dev
 ```
 
@@ -349,7 +352,7 @@ Open `http://localhost:5173` in a browser. You should see a sidebar with a searc
 
 Every Sanity UI component reads color, spacing, and font values from the theme. Without `ThemeProvider`, components render with no styles.
 
-```
+```tsx
 import { ThemeProvider, studioTheme } from '@sanity/ui'
 
 <ThemeProvider theme={studioTheme}>
@@ -361,18 +364,19 @@ import { ThemeProvider, studioTheme } from '@sanity/ui'
 
 Box and Flex handle structural layout — landmarks, toolbars, padding regions, and scroll containers. They do not add a background color or visual surface. Use them anywhere you are grouping or positioning elements without needing a distinct content surface.
 
-```
-// Box, Flex, Heading, and Text come from ui-poc — NOT from @sanity/ui
+```tsx
+// Box, Flex, Heading, Text, and Card come from ui-poc — NOT from @sanity/ui
 import { Box }     from '../ui-poc/packages/ui/src/components/Box'
 import { Flex }    from '../ui-poc/packages/ui/src/components/Flex'
 import { Heading } from '../ui-poc/packages/ui/src/components/Heading'
 import { Text }    from '../ui-poc/packages/ui/src/components/Text'
+import { Card }    from '../ui-poc/packages/ui/src/components/Card'
 
 // Everything else comes from @sanity/ui
 import { Button } from '@sanity/ui'
 ```
 
-```
+```jsx
 {/* Navigation sidebar — structural landmark, no card surface */}
 <Box
   as="nav"
@@ -411,9 +415,9 @@ import { Button } from '@sanity/ui'
 
 Card renders a distinct visual surface with a background, border, and optional tone. Use it to group related content that deserves its own visual container. Do not use Card for structural UI regions like sidebars, toolbars, or scroll containers — those are layout, not content surfaces.
 
-```
+```jsx
 {/* ✓ A content surface — grouped content on a distinct background */}
-<Card padding={3} border radius={2}>
+<Card>
   <Flex alignItems="center" justifyContent="space-between">
     <Stack space={2}>
       <Heading level={2}>Document title</Heading>
@@ -424,7 +428,7 @@ Card renders a distinct visual surface with a background, border, and optional t
 </Card>
 
 {/* ✗ Card used as a toolbar — use Box instead */}
-<Card padding={3} borderBottom>
+<Card>
   <Flex alignItems="center" justifyContent="space-between">
     <Heading level={1}>All Documents</Heading>
     <Button text="New document" icon={AddIcon} />
@@ -436,7 +440,7 @@ Card renders a distinct visual surface with a background, border, and optional t
 
 Stack adds even spacing between children. The prop is `space`, not `gap`. (`Flex` uses `gap`; `Stack` uses `space`. They are different props on different components.)
 
-```
+```jsx
 <Stack space={3}>
   <Heading level={2}>Title</Heading>
   <Text size={1}>Description</Text>
@@ -447,7 +451,7 @@ Stack adds even spacing between children. The prop is `space`, not `gap`. (`Flex
 
 Flex defaults to horizontal direction. Use `alignItems`, `justifyContent`, `gap`, and `flexWrap` to control the layout. Add `flexWrap="wrap"` to any row that might overflow at narrow widths.
 
-```
+```jsx
 <Flex alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={2}>
   <Heading level={1}>Page Title</Heading>
   <Button text="Action" />
@@ -456,9 +460,9 @@ Flex defaults to horizontal direction. Use `alignItems`, `justifyContent`, `gap`
 
 ### Heading needs a `level` prop
 
-The ui-poc Heading renders `<h2>` by default when `level` is omitted. That means silently using the wrong heading level for the content hierarchy. Always set `level` explicitly. Use `size` for visual sizing — size and heading level are independent.
+The ui-poc Heading renders `<h2>` by default when you omit `level`. That means silently using the wrong heading level for the content hierarchy. Always set `level` explicitly. Use `size` for visual sizing — size and heading level are independent.
 
-```
+```jsx
 {/* ✗ Defaults to <h2> — may be the wrong semantic level for this context */}
 <Heading size={0}>Title</Heading>
 
@@ -473,7 +477,7 @@ The ui-poc Heading renders `<h2>` by default when `level` is omitted. That means
 
 When a button has only an icon and no `text` prop, add `aria-label`. The `tooltip` prop does not set an accessible name — it is only visible on hover and does not reach screen readers.
 
-```
+```jsx
 {/* ✗ No accessible name */}
 <Button icon={SearchIcon} mode="bleed" />
 
@@ -484,10 +488,241 @@ When a button has only an icon and no `text` prop, add `aria-label`. The `toolti
 ## Next steps
 
 - Add an inspector sidebar with `Box as="aside" aria-label="Inspector"`.
-- Add a `Menu` and `MenuButton` for dropdown actions. `MenuButton` requires an `id` prop for ARIA and `popover={{ portal: true }}` inside `overflow: hidden` containers. See `menu.md`.
+- Add a `Menu` and `MenuButton` for dropdown actions. `MenuButton` requires an `id` prop for ARIA and a `popover` prop with `portal: true` inside `overflow: hidden` containers. See `menu.md`.
 - Use `tone` on Card and Button to show status (`"positive"`, `"caution"`, `"critical"`). Pair each tone with an icon. Do not use `tone="primary"` in default mode — it fails contrast.
 - Use `useToast()` for async action feedback. See `toast.md` for the full `toast.push()` API.
 - See the component docs for Button, Card, Stack, Flex, Box, Heading, and Text for full prop references and accessibility guidelines.
+
+# Inline style overrides
+
+**Before you write `style={{...}}` on any component, check this guide.** Most inline styles have a prop-based option. For gaps where no prop exists, this guide shows the canonical workaround.
+
+## Rule
+
+Use `style` only when this guide lists it as acceptable. If this guide shows a prop, use the prop. If a pattern is not listed here, check whether a prop covers it before reaching for `style`.
+
+## Quick lookup: CSS property → prop
+
+Use this table when you know the CSS property you want to set.
+
+| CSS property | Inline style (don't) | Prop (do) |
+|---|---|---|
+| `display: flex` | `style={{ display: 'flex' }}` | Use `<Flex>` instead of `<Box>` |
+| `display: grid` | `style={{ display: 'grid' }}` | Use `<Grid>` instead of `<Box>` |
+| `flex-direction` | `style={{ flexDirection: 'column' }}` | `<Flex flexDirection="column">` |
+| `flex-wrap` | `style={{ flexWrap: 'wrap' }}` | `<Flex flexWrap="wrap">` |
+| `align-items` | `style={{ alignItems: 'center' }}` | `<Flex alignItems="center">` |
+| `justify-content` | `style={{ justifyContent: 'space-between' }}` | `<Flex justifyContent="space-between">` |
+| `gap` | `style={{ gap: 8 }}` | `<Flex gap={2}>` (token scale 0–9) |
+| `flex-grow` | `style={{ flexGrow: 1 }}` | `flexGrow={1}` on Box or Flex |
+| `flex-shrink` | `style={{ flexShrink: 0 }}` | `flexShrink={0}` on Box or Flex |
+| `flex-basis` | `style={{ flexBasis: '260px' }}` | `flexBasis="260px"` on Box or Flex |
+| `flex` (shorthand) | `style={{ flex: '1 1 0' }}` | `flexGrow={1} flexShrink={1} flexBasis="0"` |
+| `width` | `style={{ width: '260px' }}` | `width="260px"` on Box or Flex |
+| `min-width` | `style={{ minWidth: 0 }}` | `minWidth="0"` on Box or Flex |
+| `max-width` | `style={{ maxWidth: '320px' }}` | `maxWidth="320px"` on Box or Flex |
+| `height` | `style={{ height: '48px' }}` | `height="48px"` on Box or Flex |
+| `min-height` | `style={{ minHeight: '100vh' }}` | `minHeight="100vh"` on Box or Flex |
+| `max-height` | `style={{ maxHeight: '100vh' }}` | `maxHeight="100vh"` on Box or Flex |
+| `overflow` | `style={{ overflow: 'hidden' }}` | `overflow="hidden"` on Box or Flex |
+| `overflow-x` | `style={{ overflowX: 'auto' }}` | `overflowX="auto"` on Box or Flex |
+| `overflow-y` | `style={{ overflowY: 'auto' }}` | `overflowY="auto"` on Box or Flex |
+| `position` | `style={{ position: 'sticky' }}` | `position="sticky"` on Box or Flex |
+| `top` / `right` / `bottom` / `left` | `style={{ top: 0 }}` | `top={0}` on Box or Flex (scale 0–9) |
+| `padding` | `style={{ padding: 16 }}` | `padding={4}` (token scale 0–9) |
+| `margin` | `style={{ margin: '0 auto' }}` | `marginY={0} marginX="auto"` |
+| `margin-left: auto` | `style={{ marginLeft: 'auto' }}` | `marginLeft="auto"` on Box |
+| `border-radius` | `style={{ borderRadius: '50%' }}` | `radius="full"` on Box or Flex |
+| `background` (themed) | `style={{ background: 'var(--card-bg-color)' }}` | `tone="neutral"` on Box or Flex |
+| `border` (themed) | `style={{ borderColor: 'var(--card-border-color)' }}` | `border` prop on Box or Flex |
+| `color` (themed) | `style={{ color: 'var(--card-fg-color)' }}` | `<Text color="default">` wrapping content |
+| `font-size` (for icons) | `style={{ fontSize: '1.25rem' }}` | Wrap in `<Text as="span" size={N}>` |
+
+**Width, height, minWidth, maxWidth, minHeight, and maxHeight accept any CSS string value.** They are not limited to the token scale. Pixel values, viewport units, percentages, and `calc()` all work as prop values.
+
+## Components that reject layout props
+
+Card, Stack, and Button do not accept flex-child or overflow props. Passing `flexGrow`, `flexShrink`, `flexBasis`, `minWidth`, `overflow`, or `overflowY` to these components does nothing. No error is thrown.
+
+**The fix is always the same: wrap in a Box or Flex.**
+
+### Card inside a Flex
+
+Card needs its own visual surface (background, border, shadow). It does not control its own layout sizing. Put sizing props on a wrapper.
+
+```jsx
+// ✗ flexGrow on Card does nothing
+<Card flexGrow={1} padding={3}>...</Card>
+
+// ✓ Box handles layout, Card handles the surface
+<Box flexGrow={1} minWidth="0" overflow="hidden">
+  <Card padding={3}>...</Card>
+</Box>
+```
+
+### Stack inside a Flex
+
+Stack spaces children in a column. It does not grow or shrink as a flex child. Wrap it when it sits inside a Flex parent.
+
+```jsx
+// ✗ flexGrow on Stack does nothing
+<Stack flexGrow={1} space={3}>...</Stack>
+
+// ✓ Box handles layout, Stack handles spacing
+<Box flexGrow={1}>
+  <Stack space={3}>...</Stack>
+</Box>
+```
+
+### Button full width
+
+Button has no `fullWidth` prop. Wrap it in a Box with `width="100%"`.
+
+```jsx
+// ✗ Inline style on Button
+<Button style={{ width: '100%' }} text="Action" />
+
+// ✓ Box controls width
+<Box width="100%">
+  <Button text="Action" />
+</Box>
+```
+
+### Button with complex children
+
+Button's internal flex layout clips custom children. Do not place Box or Flex inside Button children. For a row with icon + label + badge, use Box or Flex with `onClick` and the right ARIA roles. Or keep Button's built-in `icon` and `text` props.
+
+## Scrollable regions
+
+Box and Flex both accept `overflow`, `overflowX`, and `overflowY` as props. Valid values: `'auto'`, `'hidden'`, `'scroll'`, `'clip'`, `'visible'`. No inline style is needed.
+
+```jsx
+// ✗ Inline style for scroll
+<Box style={{ overflowY: 'auto', height: '100%' }}>
+  {/* content */}
+</Box>
+
+// ✓ Props for scroll
+<Box overflowY="auto" height="100%">
+  {/* content */}
+</Box>
+```
+
+## Full-height layout containers
+
+Building a full-height app shell does not need inline styles. Box and Flex accept `minHeight` and `height` as string props.
+
+```jsx
+// ✗ Inline style for viewport height
+<Flex style={{ minHeight: '100vh' }}>
+  ...
+</Flex>
+
+// ✓ Prop for viewport height
+<Flex minHeight="100vh">
+  ...
+</Flex>
+```
+
+The same applies to fixed-height headers and sidebars:
+
+```jsx
+// ✗ Inline style for fixed height
+<Box style={{ height: '48px' }}>...</Box>
+
+// ✓ Prop for fixed height
+<Box height="48px">...</Box>
+```
+
+## Sidebar and panel widths
+
+Sidebar widths like `260px` or `320px` are not token-scale values. They still work as prop values. Box and Flex accept any CSS string for `width`, `maxWidth`, `flexBasis`, etc.
+
+```jsx
+// ✗ Inline style for sidebar width
+<Box style={{ width: '260px', flexShrink: 0 }}>
+  {/* sidebar */}
+</Box>
+
+// ✓ Props for sidebar width
+<Box width="260px" flexShrink={0}>
+  {/* sidebar */}
+</Box>
+
+// ✓ Responsive sidebar that stacks at narrow widths
+<Flex
+  as="nav"
+  aria-label="Main navigation"
+  flexGrow={1} flexShrink={1} flexBasis="100%"
+  maxWidth="260px"
+>
+  {/* sidebar */}
+</Flex>
+```
+
+## Icon sizing outside Button or Heading
+
+Icons render at `1em` and inherit font size. Inside Button's `icon` prop or inside Heading, sizing is handled for you. In a standalone context, wrap the icon in Text:
+
+```jsx
+// ✗ Inline font-size on Box
+<Box style={{ fontSize: '1.25rem', lineHeight: 1 }}>
+  <RocketIcon />
+</Box>
+
+// ✓ Text controls icon size through the type scale
+<Text as="span" size={2}>
+  <RocketIcon />
+</Text>
+```
+
+Size `1` produces a 21px icon. Size `3` produces a 29px icon.
+
+## CSS custom properties
+
+Box and Flex provide `tone` and `border` props that apply themed colors. Use these instead of `--card-*` variables.
+
+```jsx
+// ✗ Manual CSS variable reference
+<Box style={{
+  background: 'var(--card-muted-bg-color)',
+  borderBottom: '1px solid var(--card-border-color)'
+}}>
+  ...
+</Box>
+
+// ✓ Props apply themed values
+<Box tone="neutral" borderBottom>
+  ...
+</Box>
+```
+
+**`--card-*` variables only resolve inside a Card ancestor.** A Box outside any Card gets undefined values and no visual effect. Use `tone` on the Box itself.
+
+If you need a themed container without Card's visual surface, use `Card` with `border={false}` and `padding={0}`. Or use `tone` on a Box.
+
+## When inline style is acceptable
+
+Use `style` only for values with no prop AND no workaround above:
+
+- `cursor: 'pointer'` — no prop exists
+- `user-select: 'none'` — no prop exists
+- `opacity` — no prop exists
+- `transform` / `transition` — no prop exists
+- `z-index` — no prop exists
+- `white-space` — no prop exists
+
+Keep inline styles to the fewest properties needed. Setting more than two style properties on one element is a sign that props can replace most of them. Check this guide again.
+
+## Do not use Card as="button"
+
+`Card as="button"` inherits browser button defaults (border, background, cursor, width). Sanity UI does not reset these. Use Button for interactive elements. For a card-like clickable surface, use a different pattern.
+
+## Cross-references
+
+- **Full prop reference:** `core-component-props.md` lists every shared prop for Box, Flex, and Grid.
+- **Layout patterns:** `layouts.md` and `stretch-layouts.md` show full app shell compositions using props.
+- **Component choice:** The "Choosing between Box, Flex, Grid, Stack, Inline, and Container" table in `box.md` and `flex.md` helps pick the right component.
 
 # Accessibility standards
 
@@ -576,17 +811,15 @@ Use `Box` or `Flex` for structural regions that have no visual surface (sidebars
 
 Every page must have at least one `<main>` landmark. A layout with a sidebar should also include `<nav>` and `<aside>`. Without landmarks, screen reader users experience the page as a flat list of elements.
 
-Use the `as` prop on Card to render landmark elements:
+Use the `as` prop on `Box` or `Flex` to render landmark elements:
 
-```
+```jsx
 <Box as="nav" aria-label="Main navigation">...</Box>
-
 <Flex as="main">...</Flex>
-
 <Box as="aside" aria-label="Document inspector">...</Box>
 ```
 
-### Label landmarks when needed
+### Label landmarks when needed
 
 | **Element** | **When to label** |
 | --- | --- |
@@ -603,59 +836,51 @@ Use the `as` prop on Card to render landmark elements:
 
 Headings give screen reader users an outline of the page. A page with zero headings forces users to read every element in sequence. Use `<Heading level={1}>` for the page title and `<Heading level={2}>` for each major section.
 
-**Only one h1 per page.** The h1 is the main content title — not the app name or studio label. If your sidebar has a heading like "My Studio," make it `<Heading as="h2">`. The content area title ("All Documents") is the h1. Two h1 elements confuse screen readers about which heading represents the page.
+**Only one h1 per page.** The h1 is the main content title — not the app name or studio label. If your sidebar has a heading like "My Studio," make it `<Heading level={2}>`. The content area title ("All Documents") is the h1. Two h1 elements confuse screen readers about which heading represents the page.
 
-`/* ✗ Two h1 elements — screen readers cannot determine the page title */`
+```jsx
+// ✗ Two h1 elements — screen readers cannot determine the page title
+<Box as="nav"><Heading level={1}>My Studio</Heading></Box>
+<Box as="main"><Heading level={1}>Documents</Heading></Box>
 
-`<Box as="nav"><Heading level={1}>My Studio</Heading></Box>`
+// ✓ One h1 for the page title — sidebar heading is h2
+<Box as="nav"><Heading level={2}>My Studio</Heading></Box>
+<Box as="main"><Heading level={1}>Documents</Heading></Box>
+```
 
-`<Box as="main"><Heading level={1}>Documents</Heading></Box>`
+### Always set the `level` prop
 
-`/* ✓ One h1 for the page title — sidebar heading is h2 */`
+The `Heading` component defaults to `level={2}`. Set `level` on every `Heading`. This keeps the hierarchy clear and intentional.
 
-`<Box as="nav"><Heading level={2}>My Studio</Heading></Box>`
+```jsx
+// ✗ Renders as <h2> by default — the level may be wrong
+<Heading>Page Title</Heading>
 
-`<Box as="main"><Heading level={1}>Documents</Heading></Box>`
+// ✓ Renders as <h1> — screen readers find it
+<Heading level={1}>Page Title</Heading>
+```
 
-### Always set the `as` prop
+### Do not skip heading levels
 
-The Heading component renders a `<div>` by default. That has no heading role. Screen readers skip it.
+Heading levels must descend in sequence: H1 → H2 → H3. Do not skip from H1 to H3. The `level` prop sets the semantic level. The `size` prop sets the visual size. They are independent.
 
-`/* ✗ Looks like a heading but has no heading role */`
+**Rule: items in a list under an h1 are h2, not h3.** This is the most common heading skip. When a page title is `<Heading level={1}>` and you show a list of documents below it, each document heading must be `<Heading level={2}>`.
 
-`<Heading>Page Title</Heading>`
+```jsx
+// ✗ Skips h2 — agents default to h3 for "small" list items
+<Heading level={1}>All Documents</Heading>
+<Card padding={3} border>
+  <Heading level={3}>Getting Started Guide</Heading>
+</Card>
 
-`/* ✓ Renders as <h1> — screen readers find it */`
+// ✓ h2 follows h1 — use size={1} to make it look small
+<Heading level={1}>All Documents</Heading>
+<Card padding={3} border>
+  <Heading level={2}>Getting Started Guide</Heading>
+</Card>
+```
 
-`<Heading level={1}>Page Title</Heading>`
 
-### Do not skip heading levels
-
-Heading levels must descend in sequence: H1 → H2 → H3. Do not skip from H1 to H3. The `as` prop sets the semantic level. The `size` prop sets the visual size. They are independent.
-
-**Rule: items in a list under an h1 are h2, not h3.** This is the most common heading skip. When a page title is `<Heading as="h1">` and you show a list of documents below it, each document heading must be `<Heading level={2}>`. 
-
-`/* ✗ Skips h2 — agents default to h3 for "small" list items */`
-
-`<Heading level={1}>All Documents</Heading>`
-
-`<Card padding={3} border>`
-
-`  <Heading level={3}>Getting Started Guide</Heading>`
-
-`</Card>`
-
-`/* ✓ h2 follows h1 — use size={1} to make it look small */`
-
-`<Heading level={1}>All Documents</Heading>`
-
-`<Card padding={3} border>`
-
-`  <Heading level={2}>Getting Started Guide</Heading>`
-
-`</Card>`
-
-
 
 ## 3. Accessible names
 
@@ -663,73 +888,58 @@ Heading levels must descend in sequence: H1 → H2 → H3. Do not skip from H1 t
 
 When a Button has only an icon and no `text` prop, it has no accessible name. The `tooltip` prop renders visible hover text but does not set `aria-label`. You must add it yourself.
 
-`/* ✗ No accessible name — screen readers say "button" */`
+```jsx
+// ✗ No accessible name — screen readers say "button"
+<Button icon={SearchIcon} mode="bleed" />
 
-`<Button icon={SearchIcon} mode="bleed" />`
+// ✗ Tooltip does not set aria-label
+<Button icon={SearchIcon} mode="bleed" tooltip={{ content: 'Search' }} />
 
-`/* ✗ Tooltip does not set aria-label */`
+// ✓ Screen readers announce "Search"
+<Button icon={SearchIcon} mode="bleed" aria-label="Search" />
+```
 
-`<Button icon={SearchIcon} mode="bleed" tooltip={{ content: 'Search' }} />`
 
-`/* ✓ Screen readers announce "Search" */`
-
-`<Button icon={SearchIcon} mode="bleed" aria-label="Search" />`
-
-
 
 The same applies to MenuButton triggers:
 
-`/* ✗ Trigger has no accessible name */`
+```jsx
+// ✗ Trigger has no accessible name
+<MenuButton
+  id="doc-menu"
+  button={<Button icon={EllipsisVerticalIcon} mode="bleed" />}
+  menu={<Menu><MenuItem text="Edit" /></Menu>}
+/>
 
-`<MenuButton`
+// ✓ Trigger has aria-label
+<MenuButton
+  id="doc-menu"
+  button={
+    <Button icon={EllipsisVerticalIcon} mode="bleed" aria-label="Document options" />
+  }
+  menu={<Menu><MenuItem text="Edit" /></Menu>}
+/>
+```
 
-`  id="doc-menu"`
-
-`  button={<Button icon={EllipsisVerticalIcon} mode="bleed" />}`
-
-`  menu={<Menu><MenuItem text="Edit" /></Menu>}`
-
-`/>`
-
-`/* ✓ Trigger has aria-label */`
-
-`<MenuButton`
-
-`  id="doc-menu"`
-
-`  button={`
-
-`    <Button icon={EllipsisVerticalIcon} mode="bleed" aria-label="Document options" />`
-
-`  }`
-
-`  menu={<Menu><MenuItem text="Edit" /></Menu>}`
-
-`/>`
-
-### Form inputs need labels
+### Form inputs need labels
 
 A `placeholder` attribute is not a label. Screen readers may read it, but it vanishes when the user types.
 
-`/* ✗ Placeholder is not a label */`
+```jsx
+// ✗ Placeholder is not a label
+<TextInput placeholder="Search content..." />
 
-`<TextInput placeholder="Search content..." />`
+// ✓ aria-label
+<TextInput placeholder="Search content..." aria-label="Search content" />
 
-`/* ✓ aria-label */`
+// ✓ Visible label linked by id
+<Stack space={2}>
+  <Label size={0} htmlFor="search-input">Search</Label>
+  <TextInput id="search-input" placeholder="Search content..." />
+</Stack>
+```
 
-`<TextInput placeholder="Search content..." aria-label="Search content" />`
-
-`/* ✓ Visible label linked by id */`
-
-`<Stack space={2}>`
-
-`  <Label size={0} htmlFor="search-input">Search</Label>`
-
-`  <TextInput id="search-input" placeholder="Search content..." />`
-
-`</Stack>`
-
-### Tooltips must not repeat the accessible name
+### Tooltips must not repeat the accessible name
 
 If a button already has `aria-label="Settings"`, a tooltip that also says "Settings" adds no value. The tooltip should provide extra context or be omitted.
 
@@ -754,23 +964,21 @@ The fix: **use **`tone="default"` for primary actions. For navigation menus, avo
 
 `mode="ghost"`** with **`tone="primary"`** does NOT always pass.** At 13px normal weight, the primary blue text (`#556bfc`) on the light blue ghost tint (`#e5edff`) produces 3.65:1 — below 4.5:1 AA. Ghost mode only passes for large or bold text. Do not use it for standard-size nav item text.
 
-`/* ✗ Fails contrast — 4.29:1 (white on primary blue) */`
+```jsx
+// ✗ Fails contrast — 4.29:1 (white on primary blue)
+<Button tone="primary" text="New document" />
 
-`<Button tone="primary" text="New document" />`
+// ✗ Fails contrast — selected MenuItem uses primary blue background
+<MenuItem text="Documents" selected />
 
-`/* ✗ Fails contrast — selected MenuItem uses primary blue background */`
+// ✗ May fail contrast — ghost primary at standard font sizes (3.65:1)
+<Button tone="primary" mode="ghost" text="Nav item" />
 
-`<MenuItem text="Documents" selected />`
+// ✓ Passes — use tone="default" for buttons
+<Button tone="default" text="New document" />
+```
 
-`/* ✗ May fail contrast — ghost primary at standard font sizes (3.65:1) */`
-
-`<Button tone="primary" mode="ghost" text="Nav item" />`
-
-`/* ✓ Passes — use tone="default" for buttons */`
-
-`<Button tone="default" text="New document" />`
-
-### Do not build custom colored elements with white text
+### Do not build custom colored elements with white text
 
 Agents sometimes build custom avatar circles, status badges, or nav items using hardcoded background colors from the palette with white text. Many palette colors fail contrast at small text sizes:
 
@@ -786,15 +994,15 @@ Use the Sanity UI `Avatar` component for user initials — it handles contrast. 
 
 Color must not be the only way to convey meaning. Every use of `tone="positive"`, `tone="caution"`, or `tone="critical"` must include an icon, a text label, or both (WCAG 1.4.1 A).
 
-`/* ✗ Color alone — users with color vision differences miss the meaning */`
+```jsx
+// ✗ Color alone — users with color vision differences miss the meaning
+<Button tone="critical" text="Delete" />
 
-`<Button tone="critical" text="Delete" />`
+// ✓ Icon reinforces the meaning
+<Button tone="critical" text="Delete" icon={TrashIcon} />
+```
 
-`/* ✓ Icon reinforces the meaning */`
-
-`<Button tone="critical" text="Delete" icon={TrashIcon} />`
-
-### Do not add `aria-selected` to plain `<div>` elements
+### Do not add `aria-selected` to plain `<div>` elements
 
 The `aria-selected` attribute is only valid on elements with roles like `option`, `row`, `tab`, `gridcell`, or `treeitem`. A `<div>` with no explicit role cannot carry `aria-selected`. Automated tests flag this as a critical violation (WCAG 4.1.2 A).
 
@@ -811,31 +1019,23 @@ Sanity UI Button, MenuButton, and other interactive parts apply `transition-dura
 
 Create `src/reduced-motion.css`:
 
-`@media (prefers-reduced-motion: reduce) {`
-
-`  *, *::before, *::after {`
-
-`    animation-duration: ``0``.``01ms ``!important;`
-
-`    animation-iteration-count: ``1 ``!important;`
-
-`    transition-duration: ``0``.``01ms ``!important;`
-
-`    scroll-behavior: auto !important;`
-
-`  }`
-
-`}`
-
-
+```css
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+```
 
 Import it in your entry file:
 
-`// main.tsx`
-
-`import './reduced-motion.css'`
-
-
+```tsx
+// main.tsx
+import './reduced-motion.css'
+```
 
 The `0.01ms` value triggers transition-end events that some components rely on, but it is fast enough to count as instant. Automated tests treat any duration under 1ms as passing.
 
@@ -851,27 +1051,21 @@ All interactive targets must meet 24×24 CSS pixels (WCAG 2.5.8 AA). Inline link
 
 The 24×24px rule applies to the clickable area, not only the visual size. When buttons sit next to each other in a toolbar, each button must have at least 24px of unobscured clickable space. Buttons placed with `gap={1}` (4px) may overlap each other's target zones. Use `gap={2}` (8px) or higher between adjacent buttons in toolbars and action rows.
 
-`/* ✗ Buttons too close — target zones overlap */`
+```jsx
+// ✗ Buttons too close — target zones overlap
+<Flex gap={1}>
+  <Button icon={AddIcon} mode="bleed" aria-label="New document" />
+  <Button icon={CloseIcon} mode="bleed" aria-label="Hide navigation" />
+</Flex>
 
-`<Flex gap={1}>`
+// ✓ Enough space between targets
+<Flex gap={2}>
+  <Button icon={AddIcon} mode="bleed" aria-label="New document" />
+  <Button icon={CloseIcon} mode="bleed" aria-label="Hide navigation" />
+</Flex>
+```
 
-`  <Button icon={AddIcon} mode="bleed" aria-label="New document" />`
-
-`  <Button icon={CloseIcon} mode="bleed" aria-label="Hide navigation" />`
-
-`</Flex>`
-
-`/* ✓ Enough space between targets */`
-
-`<Flex gap={2}>`
-
-`  <Button icon={AddIcon} mode="bleed" aria-label="New document" />`
-
-`  <Button icon={CloseIcon} mode="bleed" aria-label="Hide navigation" />`
-
-`</Flex>`
-
-### Do not use bare native inputs
+### Do not use bare native inputs
 
 Browser-default `<input type="checkbox">` and `<input type="radio">` render at about 13×13px. Use the Sanity UI `Checkbox`, `Radio`, or `Switch` components instead — they render at compliant sizes.
 
@@ -883,13 +1077,13 @@ If you must use a native checkbox or radio, wrap it in a `<label>` with enough p
 
 Layouts must work at 320px viewport width with no horizontal scrolling (WCAG 1.4.10 AA). This simulates 400% zoom on a 1280px screen.
 
-**Every **`<Flex>`** with more than one child must have **`flexWrap="wrap"`**.** This applies at every level of the component tree — the outer layout Flex, the toolbar Flex inside the content area, the actions row inside a card, and any other horizontal row. A single non-wrapping Flex is enough to cause overflow at 320px. There are no exceptions.
+**Every **`<Flex>`** with more than one child must have **`flexWrap="wrap"`**.** This applies at every level of the tree — outer layout, toolbar, action rows, and any other horizontal row. A single non-wrapping Flex is enough to cause overflow at 320px. There are no exceptions.
 
 **Reflow checklist.** Before shipping, confirm each of these. A single missed item causes the test to fail.
 
 - Outer layout Flex has `flexWrap="wrap"`
-- Sidebar uses `flex: '1 1 100%'` with `maxWidth`, not `width` with `flexShrink: 0`
-- Content Card has `overflow: 'hidden'`
+- Sidebar uses `flexGrow={1} flexShrink={1} flexBasis="100%"` with `maxWidth`, not `width` with `flexShrink={0}`
+- Content `Flex` has `overflow="hidden"`
 - Toolbar Flex (heading + buttons) has `flexWrap="wrap"` and `gap={2}`
 - Every actions row inside a Card has `flexWrap="wrap"`
 - Outer Flex uses `minHeight: '100vh'`, not `height: '100vh'`
@@ -897,64 +1091,60 @@ Layouts must work at 320px viewport width with no horizontal scrolling (WCAG 1.4
 
 ### The pattern that fails every time
 
-`/* ✗ Fixed sidebar + 100vh forces overflow at 320px */`
-
-`<Flex style={{ height: '100vh' }}>`
-
-`  <Card style={{ width: '260px', flexShrink: 0 }}>Sidebar</Card>`
-
-`  <Card style={{ flex: '1 1 auto' }}>Content</Card>`
-
-`</Flex>`
-
-
+```jsx
+// ✗ Fixed sidebar + 100vh forces overflow at 320px
+<Flex height="100vh">
+  <Card style={{ width: '260px', flexShrink: 0 }}>Sidebar</Card>
+  <Card style={{ flex: '1 1 auto' }}>Content</Card>
+</Flex>
+```
 
 At 320px, the 260px sidebar plus any content exceeds the viewport.
 
 ### The pattern that passes
 
-`/* ✓ Sidebar stacks above content at narrow widths */`
+```jsx
+/* ✓ Sidebar stacks above content at narrow widths */
+<Flex flexWrap="wrap" minHeight="100vh">
+  <Flex
+    as="nav"
+    aria-label="Main navigation"
+    flexGrow={1} 
+    flexShrink={1} 
+    flexBasis="100%"
+    maxWidth="260px"
+    padding={3}
+  >
+    Sidebar
+  </Flex>
+  <Flex 
+    as="main" 
+    flexGrow={1} 
+    flexShrink={1} 
+    flexBasis="0" 
+    minWidth="0" 
+    overflow="hidden" 
+    padding={4}
+  >
+    Content
+  </Flex>
+</Flex>
+```
 
-`<Flex flexWrap="wrap" style={{ minHeight: '100vh' }}>`
-
-`  <Card`
-
-`    as="nav"`
-
-`    aria-label="Main navigation"`
-
-`    style={{ flex: '1 1 100%', maxWidth: '260px' }}`
-
-`    padding={3}`
-
-`  >`
-
-`    Sidebar`
-
-`  </Card>`
-
-`  <Card as="main" style={{ flex: '1 1 0', minWidth: 0, overflow: 'hidden' }} padding={4}>`
-
-`    Content`
-
-`  </Card>`
-
-`</Flex>`
-
-### Key differences
+### Key differences
 
 | **Prop** | **Fails** | **Passes** |
 | --- | --- | --- |
 | Container | `Flex` (no flexWrap) | `Flex flexWrap="wrap"` |
-| Sidebar sizing | `width: '260px', flexShrink: 0` | `flex: '1 1 100%', maxWidth: '260px'` |
-| Container height | `height: '100vh'` | `minHeight: '100vh'` |
-| Content card | `style={{ flex: '1 1 auto' }}` | `style={{ flex: '1 1 0', minWidth: 0, overflow: 'hidden' }}` |
+| Sidebar sizing | `width: '260px', flexShrink: 0` | `flexGrow={1} flexShrink={1} flexBasis="100%" maxWidth="260px"` |
+| Container height | `height: '100vh'` | `minHeight="100vh"` |
+| Content `Flex` | `style={{ flex: '1 1 auto' }}` | `flexGrow={1} flexShrink={1} flexBasis="0" minWidth="0" overflow="hidden"` |
 
-**Do not use **`flexShrink: 0` on sidebars. It prevents the sidebar from shrinking below its width.
+**Do not use **`flexShrink={0}` on sidebars. It prevents the sidebar from shrinking below its width.
 
-**Do not use **`height: '100vh'` on the outer Flex. Use `minHeight: '100vh'`. A fixed height stops the container from growing when content stacks.
+**Do not use **`height: '100vh'` on the outer Flex. Use `minHeight="100vh"`. A fixed height stops the container from growing when content stacks.
 
-**Always set **`overflow: 'hidden'` on the content Card. Long headings or button rows can push the page `scrollWidth` past the viewport.
+**Always set **`overflow="hidden"` on the content `Flex`. Long headings or button rows can push the page `scrollWidth` past the viewport.
 
 ### Toolbar rows must wrap — this is the most common remaining failure
 
@@ -962,35 +1152,23 @@ At 320px, the 260px sidebar plus any content exceeds the viewport.
 
 **Copy this exact toolbar pattern into every content area:**
 
-`/* ✗ FAILS EVERY TIME — no wrap on toolbar Flex */`
+```jsx
+{ /* ✗ FAILS EVERY TIME — no wrap on toolbar Flex */}
+<Flex as="main" flexGrow={1} flexShrink={1} flexBasis="0" minWidth="0" overflow="hidden" padding={4}>
+  <Flex alignItems="center" justifyContent="space-between">
+    <Heading level={1}>All Documents</Heading>
+    <Button text="New document" icon={AddIcon} />
+  </Flex>
+</Flex>
 
-`<Card as="main" style={{ flex: '1 1 0', minWidth: 0, overflow: 'hidden' }} padding={4}>`
-
-`  <Flex alignItems="center" justifyContent="space-between">`
-
-`    <Heading level={1}>All Documents</Heading>`
-
-`    <Button text="New document" icon={AddIcon} />`
-
-`  </Flex>`
-
-`</Card>`
-
-`/* ✓ PASSES — flexWrap="wrap" and gap={2} on toolbar Flex */`
-
-`<Card as="main" style={{ flex: '1 1 0', minWidth: 0, overflow: 'hidden' }} padding={4}>`
-
-`  <Flex alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={2}>`
-
-`    <Heading level={1}>All Documents</Heading>`
-
-`    <Button text="New document" icon={AddIcon} tone="default" />`
-
-`  </Flex>`
-
-`</Card>`
-
-
+{ /* ✓ PASSES — flexWrap="wrap" and gap={2} on toolbar Flex */ }
+<Flex as="main" flexGrow={1} flexShrink={1} flexBasis="0" minWidth="0" overflow="hidden" padding={4}>
+  <Flex alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={2}>
+    <Heading level={1}>All Documents</Heading>
+    <Button text="New document" icon={AddIcon} tone="default" />
+  </Flex>
+</Flex>
+```
 
 The difference is one prop: `flexWrap="wrap"` on the toolbar `Flex`. Without it, the heading and button sit in a single non-breaking row that exceeds 320px. With it, the button flows to the next line at narrow widths.
 
@@ -1000,17 +1178,13 @@ The difference is one prop: `flexWrap="wrap"` on the toolbar `Flex`. Without it,
 
 Every page must declare its language on `<html>` (WCAG 3.1.1 A).
 
-`<!DOCTYPE html>`
-
-`<html lang=``"``en``"``>`
-
-`  <head>...</head>`
-
-`  <body>...</body>`
-
-`</html>`
-
-
+```html
+<!DOCTYPE html>
+<html lang="en">
+  <head>...</head>
+  <body>...</body>
+</html>
+```
 
 In a Vite project, set this in `index.html`.
 
@@ -1034,84 +1208,63 @@ The `ToastProvider` component renders a `<ul>` element with `list-style: none`. 
 
 This scaffold passes all automated accessibility tests. Use it as a starting point.
 
-`<ThemeProvider theme={theme}>`
+```jsx
+<ThemeProvider theme={theme}>
+  <Flex flexWrap="wrap" minHeight="100vh">
+    {/* Sidebar — <nav> landmark */}
+    <Box
+      as="nav"
+      aria-label="Main navigation"
+      padding={3}
+      flexGrow={1} flexShrink={1} flexBasis="100%"
+      maxWidth="260px"
+    >
+      <Stack space={3}>
+        <Heading level={2}>Navigation</Heading>
+        {/* nav items */}
+      </Stack>
+    </Box>
 
-`  <Flex flexWrap="wrap" style={{ minHeight: '100vh' }}>`
+    {/* Content — <main> landmark */}
+    <Flex
+      as="main"
+      flexGrow={1} flexShrink={1} flexBasis="0"
+      minWidth="0" overflow="hidden" flexDirection="column"
+      padding={4}
+    >
+      {/* Toolbar — wrap prevents overflow at 320px */}
+      <Flex alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={2}>
+        <Heading level={1}>Page Title</Heading>
+        <Button text="New document" icon={AddIcon} tone="default" />
+      </Flex>
 
-`    {/* Sidebar — <nav> landmark */}`
+      {/* Document list — h2 follows h1, not h3 */}
+      <Stack space={3} marginTop={4}>
+        {documents.map(doc => (
+          <Card key={doc.id} padding={3} border radius={2}>
+            <Heading level={2}>{doc.title}</Heading>
+          </Card>
+        ))}
+      </Stack>
+    </Flex>
+  </Flex>
+</ThemeProvider>
+```
 
-`    <Card`
 
-`      as="nav"`
-
-`      aria-label="Main navigation"`
-
-`      padding={3}`
-
-`      style={{ flex: '1 1 100%', maxWidth: '260px' }}`
-
-`    >`
-
-`      <Stack space={3}>`
-
-`        <Heading level={2}>Navigation</Heading>`
-
-`        {/* nav items */}`
-
-`      </Stack>`
-
-`    </Card>`
-
-`    {/* Content — <main> landmark */}`
-
-`    <Card as="main" style={{ flex: '1 1 0', minWidth: 0, overflow: 'hidden' }} padding={4}>`
-
-`      {/* Toolbar — wrap prevents overflow at 320px */}`
-
-`      <Flex alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={2}>`
-
-`        <Heading level={1}>Page Title</Heading>`
-
-`        <Button text="New document" icon={AddIcon} tone="default" />`
-
-`      </Flex>`
-
-`      {/* Document list — h2 follows h1, not h3 */}`
-
-`      <Stack space={3} marginTop={4}>`
-
-`        {documents.map(doc => (`
-
-`          <Card key={doc.id} padding={3} border radius={2}>`
-
-`            <Heading level={2}>{doc.title}</Heading>`
-
-`          </Card>`
-
-`        ))}`
-
-`      </Stack>`
-
-`    </Card>`
-
-`  </Flex>`
-
-`</ThemeProvider>`
-
-
 
 **What this gives you:**
 
 | **Feature** | **How** |
 | --- | --- |
-| Landmarks | `Card as="nav"` and `Card as="main"` |
+| Landmarks | `Box as="nav"` and `Flex as="main"` |
 | Heading hierarchy | One `<h1>` for the page title. `<h2>` for sidebar heading, list items, and sections. Never skip to `<h3>`. Never use two `<h1>` elements. |
 | Page language | Set `<html lang="en">` in `index.html` |
 | Responsive reflow | `flexWrap="wrap"` + flex sizing (no fixed widths) |
 | Toolbar wrap | `flexWrap="wrap"` on toolbar Flex |
 | Target spacing | `gap={2}` or higher between adjacent buttons in toolbars |
 | Contrast | `tone="default"` instead of `tone="primary"`. Do not hardcode `#556bfc` with white text. |
-| Overflow clip | `overflow: 'hidden'` on content Card |
+| Overflow clip | `overflow="hidden"` on content `Flex` |
 
 # Accessibility checklist
 
@@ -1606,7 +1759,7 @@ All items from the initial audit have been resolved. The table below tracks only
 
 # Typography
 
-
+
 
 ## Best practices
 
@@ -1621,7 +1774,7 @@ All items from the initial audit have been resolved. The table below tracks only
 
 # Color
 
-
+
 
 ## Principles
 
@@ -1738,7 +1891,7 @@ Prefer `padding` over `margin` to avoid margin collapse issues. Prefer `gap` on 
 
 Every spacing prop accepts an array for responsive breakpoints. The array maps to the breakpoints defined in the theme.
 
-`/* padding={2} at small screens, padding={4} at 600px+ */`
+`/* padding={2} at small screens, padding={4} at 600px+ */`
 
 `<Card padding={[2, , 4]}>Content</Card>`
 
@@ -1750,7 +1903,7 @@ Every spacing prop accepts an array for responsive breakpoints. The array maps t
 
 `</Stack>`
 
-
+
 
 An empty slot (`, ,`) means "keep the previous value."
 
@@ -1787,7 +1940,7 @@ Content must also reflow at 320px viewport width without horizontal scrolling (W
 
 # Iconography
 
-
+
 
 ### **Usage guidelines**
 
@@ -1824,6 +1977,7 @@ Content must also reflow at 320px viewport width without horizontal scrolling (W
 - Don’t color icons specifically to increase visual emphasis.
 - Don’t use filled variants of icons to increase visual weight.
 - Don't manually style icons with inline styles. Wrap icons in the `<Text />` component to inherit styles.
+- Don't wrap icons in `<Box />` as a container. Use `<Flex />` instead.
 
 ### Treatments
 
@@ -2035,6 +2189,22 @@ Icon names follow PascalCase with an `Icon` suffix. Modifiers appear between the
 #### Presentation & layout
 
 `MenuIcon`, `ThLargeIcon`, `ThListIcon`, `StackIcon`, `StackCompactIcon`, `SplitHorizontalIcon`, `SplitVerticalIcon`, `TiersIcon`, `DesktopIcon`, `MobileDeviceIcon`, `TabletDeviceIcon`, `ToggleArrowRightIcon`, `EllipsisHorizontalIcon`, `EllipsisVerticalIcon`, `DotIcon`, `CircleIcon`, `SquareIcon`, `TriangleOutlineIcon`
+
+
+### Code examples
+
+ Icon containers use `Flex`. Any small container that centers an icon needs flex centering. Don't add `style={{ display: 'flex' }}` to a `Box`:
+```tsx
+{/* ✗ Box converted to flex container via style prop */}
+<Box padding={1} radius={2} tone="primary" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+  <DocumentsIcon />
+</Box>
+
+{/* ✓ Flex with tone/radius — no inline styles */}
+<Flex padding={1} radius={2} tone="primary" alignItems="center" justifyContent="center">
+  <DocumentsIcon />
+</Flex>
+```
 
 # Theming
 
@@ -2254,7 +2424,7 @@ Set color at the Card level. Let children inherit. Do not style children one by 
 
 The theme generates `--card-*` CSS custom properties for each color context. These are how color reaches every element.
 
-**When to use them.** Reference `--card-*` properties only when you build a custom element that must follow the current Card color context — for example, a custom border, a custom divider, or a status dot that inherits the tone's foreground color. Always prefer component props (`tone`, `muted`, `scheme`) over raw CSS variables. If a Sanity UI component already has a prop for the color you need, use the prop.
+**When to use them.** Reference `--card-*` properties only for custom elements that must match the Card color context. Examples include a custom border, a custom divider, or a status dot that inherits the tone's foreground color. Always prefer component props (`tone`, `muted`, `scheme`) over raw CSS variables. If a Sanity UI component already has a prop for the color you need, use the prop.
 
 **When NOT to use them.** Do not reference `--card-*` variables in global styles, in components outside a Card context, or to override a Sanity UI component's built-in colors. The variables are scoped to the nearest Card ancestor. Outside a Card, they may be undefined.
 
@@ -2488,6 +2658,7 @@ Dark mode support is not optional polish. It is a core requirement. Avoiding har
 - Don't assign meaning to raw hues. Users should see "positive" or "critical," not "green" or "red." The mapping from tone to hue is the theme's job.
 - Don't set `font-size`, `font-weight`, `color`, or `background-color` through inline styles or custom CSS when a component prop exists for that purpose.
 - Don't create your own spacing values outside the 0–9 scale. Stick to the theme's scale for consistency.
+- Don't hardcode dark/light background colors on the root `<Box>`. Instead, set `body { background: var(--card-bg-color); color: var(--card-fg-color); }` in `global.css`. When `ThemeProvider` changes scheme, these variables update automatically — no inline style needed on any component.
 
 ---
 
@@ -2729,7 +2900,7 @@ This layout consists of a single view application with no toolbar for title/acti
 
 [https://cdn.sanity.io/images/canvases/cac1Na6lwtEI/c1264755dfc794920bb98f0f5ee8b68227b51691-2460x1664.png](https://cdn.sanity.io/images/canvases/cac1Na6lwtEI/c1264755dfc794920bb98f0f5ee8b68227b51691-2460x1664.png)
 
-`<AppShell>`
+`<AppShell>`
 
 `<AppShell.Main>`
 
@@ -2739,7 +2910,7 @@ This layout consists of a single view application with no toolbar for title/acti
 
 `</AppShell>`
 
-#### When to use
+#### When to use
 
 - The application consists of one view/page and all content, logic, and actions are contained within the main content window. Example: A single form with a submit action.
 
@@ -2755,9 +2926,9 @@ This layout supports a single view application with persistent actions. It’s i
 
 [https://cdn.sanity.io/images/canvases/cac1Na6lwtEI/7a1ac4bcc6e9058cb9fa1061c573de9c1129d2e6-2460x1664.png](https://cdn.sanity.io/images/canvases/cac1Na6lwtEI/7a1ac4bcc6e9058cb9fa1061c573de9c1129d2e6-2460x1664.png)
 
-
 
-
+
+
 
 #### When to use
 
@@ -2774,9 +2945,9 @@ This layout supports a single view application with persistent actions and viewi
 
 [https://cdn.sanity.io/images/canvases/cac1Na6lwtEI/657db2d89170b0d29b1b29d7a53c632b664af245-2460x1684.png](https://cdn.sanity.io/images/canvases/cac1Na6lwtEI/657db2d89170b0d29b1b29d7a53c632b664af245-2460x1684.png)
 
-
 
-
+
+
 
 #### When to use
 
@@ -2793,9 +2964,9 @@ This layout supports a multi-vew application with persistent navigation and acti
 
 [https://cdn.sanity.io/images/canvases/cac1Na6lwtEI/52929b4932b2ce4220010c04a152f45ec8968d98-2460x1684.png](https://cdn.sanity.io/images/canvases/cac1Na6lwtEI/52929b4932b2ce4220010c04a152f45ec8968d98-2460x1684.png)
 
-
 
-
+
+
 
 #### When to use
 
@@ -2812,9 +2983,9 @@ This layout supports a multi-vew application with persistent navigation, actions
 
 [https://cdn.sanity.io/images/canvases/cac1Na6lwtEI/d7ac09129bd1fd904410122297e346ef8d947a57-2460x1684.png](https://cdn.sanity.io/images/canvases/cac1Na6lwtEI/d7ac09129bd1fd904410122297e346ef8d947a57-2460x1684.png)
 
-
 
-
+
+
 
 #### When to use
 
@@ -3305,6 +3476,48 @@ The layouts doc covers content rules across several subsections. This section co
 - **Sidebar focus management.** When a sidebar opens, move focus to the first focusable element inside it. When it closes, return focus to the toggle button. Hidden sidebar content must be removed from tab order (WCAG 2.4.3 A).
 - **Heading hierarchy.** Each layout region should use headings that fit the page hierarchy. The content area heading should be `<h1>`. Sidebar headings should be `<h2>` or lower. Do not skip heading levels across regions (WCAG 2.4.6 AA).
 
+## Scrollable regions
+
+Box and Flex both accept `overflow`, `overflowX`, and `overflowY` as props. Do not use inline styles for scroll behavior.
+
+Valid values: `'auto'`, `'hidden'`, `'scroll'`, `'clip'`, `'visible'`.
+
+```jsx
+// ✗ Inline style for scroll
+<Box style={{ overflowY: 'auto', maxHeight: '400px' }}>
+  {/* long content */}
+</Box>
+
+// ✓ Props handle scroll
+<Box overflowY="auto" maxHeight="400px">
+  {/* long content */}
+</Box>
+```
+
+### Full-height scrollable panel
+
+A common pattern for app shells: the outer container sets the height, the inner content area scrolls.
+
+```jsx
+<Flex minHeight="100vh">
+  <Box as="nav" width="260px" flexShrink={0} overflowY="auto">
+    {/* sidebar scrolls on its own */}
+  </Box>
+  <Flex as="main" flexDirection="column" flexGrow={1} minWidth="0" overflow="hidden">
+    <Box padding={3} borderBottom>{/* toolbar — fixed */}</Box>
+    <Box flexGrow={1} overflowY="auto" padding={4}>
+      {/* content scrolls */}
+    </Box>
+  </Flex>
+</Flex>
+```
+
+Key details:
+- `overflow="hidden"` on the main Flex prevents long content from pushing the page wider.
+- `overflowY="auto"` on the content Box lets it scroll.
+- `minWidth="0"` on the main Flex prevents flex children from overflowing.
+- No inline styles are needed. Every value is a prop.
+
 # Core component props
 
 Under review
@@ -3396,9 +3609,9 @@ Props shared across **all three** components (Box, Flex, Grid).
 
 | Prop | Type | Description | Values | Required | Default |
 | :---- | :---- | :---- | :---- | :---: | :---- |
-| overflow | Responsive\<Overflow\> | CSS overflow on both axes | visible, hidden, auto | No | — |
-| overflowX | Responsive\<Overflow\> | CSS overflow-x | visible, hidden, auto | No | — |
-| overflowY | Responsive\<Overflow\> | CSS overflow-y | visible, hidden, auto | No | — |
+| overflow | Responsive\<Overflow\> | CSS overflow on both axes | visible, hidden, auto, scroll, clip | No | — |
+| overflowX | Responsive\<Overflow\> | CSS overflow-x | visible, hidden, auto, scroll, clip | No | — |
+| overflowY | Responsive\<Overflow\> | CSS overflow-y | visible, hidden, auto, scroll, clip | No | — |
 
 ### Flex Child (self-alignment inside a Flex parent)
 
@@ -3426,8 +3639,22 @@ Props shared across **all three** components (Box, Flex, Grid).
 | Prop | Type | Description | Values | Required | Default |
 | :---- | :---- | :---- | :---- | :---: | :---- |
 | gap | Responsive\<Space\> | CSS gap — spacing between all children | 0–9 | No | — |
-| gapX | Responsive\<Space\> | CSS column-gap — horizontal spacing between children | 0–9 | No | — |
-| gapY | Responsive\<Space\> | CSS row-gap — vertical spacing between children | 0–9 | No | — |
+| columnGap | Responsive\<Space\> | CSS column-gap — horizontal spacing between children | 0–9 | No | — |
+| rowGap | Responsive\<Space\> | CSS row-gap — vertical spacing between children | 0–9 | No | — |
+
+---
+
+## Components that reject layout props
+
+Not every component accepts the props above. Card, Stack, and Button ignore flex-child, overflow, and sizing props. No error is thrown. The prop has no effect.
+
+| Component | Rejects these props | Fix |
+|---|---|---|
+| Card | `flexGrow`, `flexShrink`, `flexBasis`, `minWidth`, `overflow`, `overflowY`, `width`, `height` | Wrap Card in a Box or Flex. Put layout props on the wrapper. |
+| Stack | `flexGrow`, `flexShrink`, `flexBasis`, `overflow` | Wrap Stack in a Box or Flex. Put layout props on the wrapper. |
+| Button | `flexGrow`, `flexShrink`, `width` (no `fullWidth` prop) | Wrap Button in a Box. Set `width="100%"` on the Box. |
+
+See `style-overrides.md` for full examples and canonical workarounds.
 
 # Box
 
@@ -3481,7 +3708,8 @@ Box also inherits shared layout props (padding, margin, sizing, border, overflow
 - Use padding over margin when possible to avoid spacing issues related to margin collapse
 
 #### **Don't**
-- Don't use `style` to adjust visual attributes of `Box` when a style prop exists. If you find yourself setting `width`, `height`, `borderRadius`, `background`, `color`, `fontSize`, `fontWeight`, or `cursor` as inline styles on a `Flex` or `Box`, stop — you're likely reinventing a component that already exists. Check whether `Avatar`, `Badge`, `Button`, or `Card` with appropriate props covers your use case before writing a custom element. See "All available props" at the bottom of this document for the complete reference.
+- Don't use `style` to adjust visual attributes of `Box` when a style prop exists. Avoid inline styles for `width`, `height`, `borderRadius`, `background`, `color`, `fontSize`, `fontWeight`, and `cursor` on `Flex` or `Box`. Use the matching style prop instead. Check whether `Avatar`, `Badge`, `Button`, or `Card` with appropriate props covers your use case before writing a custom element. See "All available props" at the bottom of this document for the complete reference.
+- Don't give Box inline styles to display as flex. Sanity UI components are meant to be modular, single purpose and composable. If you need a container with a background and flex display, use wrap Flex with Box that uses `tone`: `<Box tone="neutral" ... ><Flex ... > ... </Flex></Box>`
 - Avoid adding margin/padding to individual elements like Buttons or Text to set placement.  Instead, wrap elements in Box with margin/padding.  
 - Don't add onClick to Box
 
@@ -3506,26 +3734,28 @@ Box also inherits shared layout props (padding, margin, sizing, border, overflow
 
 ### CSS custom properties and Card context
 
-- **`--card-bg-color`, `--card-border-color`, `--card-muted-bg-color` and all other `--card-*` variables are only available inside a `Card` ancestor.** `Card` establishes the color context — it writes these CSS custom properties onto its DOM subtree. Using them in a `Box` or custom element that lives outside any `Card` ancestor produces undefined values and no visual effect.
-- If you need a themed container without Card's visible surface, use `Card` with `border={false}` and `padding={0}` rather than trying to reference `--card-*` variables from a raw `Box`.
+- **`--card-bg`, `--card-border-color`, `--card-color` and other `--card-*` variables are only available inside a `Card` ancestor.** `Card` establishes the color context. It writes these CSS custom properties onto its DOM subtree. Any `Box` or custom element outside a `Card` ancestor gets undefined values and no visual effect.
+- For a themed container without Card's visible surface, use `Card` with `border={false}`. Do not reference `--card-*` variables from a raw `Box`.
+
+> Before using `style={{...}}` on Box, check the "Inline style overrides" section for prop-based options.
 
 ### Code examples 
 
 #### Anti-patterns
-```
-/* Don't use inline styles for attributes that exist as props */
+```jsx
+{/* ✗ Don't use inline styles for attributes that exist as props */}
 <Box
   padding={2}
   radius={2}
   
-  style={{ background: 'var(--card-muted-bg-color)', flexShrink: 0, width: '260px' }}
+  style={{ background: 'var(--card-bg)', flexShrink: 0, width: '260px' }}
 >
   <Text size={1} color="muted">
     <DocumentTextIcon />
   </Text>
 </Box>
 
-/* Use Box's style props instead */
+{* ✓ Use Box's style props instead *}
 <Box
   padding={2}
   radius={2}
@@ -3537,31 +3767,33 @@ Box also inherits shared layout props (padding, margin, sizing, border, overflow
     <DocumentTextIcon />
   </Text>
 </Box>
+```
 
+```jsx
+{/* ✗ Don't use inline styles for flex-shrink rules */}
+<Box style={{ flexShrink: 0, width: 32, height: 32 }}>
+  <SomeIcon />
+</Box>
 
-/* Don't use tokens for unintended purposes to get a desired style */
+{/* ✓ Use flexShrink prop — no inline style needed */}
+<Box flexShrink={0} width="32px" height="32px">
+   <DocumentTextIcon />
+</Box>
+```
+
+```jsx
+{/* ✗ Don't use tokens for unintended purposes to get a desired style */}
 <Box
   padding={1}
   radius={2}
-  style={{ background: 'var(--card-focus-ring-color, #556bfc)' }}
+  style={{ background: 'var(--blue-600)' }}
 >
   <Text size={1} style={{ color: '#fff', lineHeight: 1 }}>
     <DocumentsIcon />
   </Text>
 </Box>
 
-/* Don't use tokens for unintended purposes to get a desired style */
-<Box
-  padding={1}
-  radius={2}
-  style={{ background: 'var(--card-focus-ring-color, #556bfc)' }}
->
-  <Text size={1} style={{ color: '#fff', lineHeight: 1 }}>
-    <DocumentsIcon />
-  </Text>
-</Box>
-
-/* Work within the system's intentional constraints */
+{/* ✓ Work within the system's intentional constraints */}
 <Box
   padding={1}
   radius={2}
@@ -3571,6 +3803,38 @@ Box also inherits shared layout props (padding, margin, sizing, border, overflow
     <DocumentsIcon />
   </Text>
 </Box>
+```
+
+
+```jsx
+{/* ✗ Don't use Box as a flex container via inline styles */}
+<Box style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32 }}>
+  <Icon />
+</Box>
+
+{/* ✓ Use Flex directly */}
+<Flex alignItems="center" justifyContent="center" width="32px" height="32px">
+  <Icon />
+</Flex>
+```
+
+```jsx
+{/* ✗ Don't use styling to mimic components that already exist, such as Avatar */}
+<Box style={{ width: '28px', height: '28px', borderRadius: '50%', background: '#556bfc',
+  display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+  <Text>AJ</Text>
+</Box>
+
+{/* ✓ Use the Avatar component */}
+<Avatar>AJ</Avatar>
+```
+
+```jsx
+{/* ✗ Don't build a divider from scratch */ }
+<Box style={{ borderTop: '1px solid var(--card-border-color)', marginTop: '4px', marginBottom: '4px' }} />
+
+{/* ✓ Use the Divider component */ }
+<Divider />
 ```
 
 ## All available props
@@ -3678,27 +3942,33 @@ Use these when Box is a direct child of Grid.
 | `gridRowStart` | string | `grid-row-start` |
 | `gridRowEnd` | string | `grid-row-end` |
 
+> See the "Inline style overrides" section for the full inline style lookup guide, including workarounds for Card, Stack, and Button.
+
 ## Inline style alternatives
 
 Most inline styles are not needed for Box. Use the alternatives below when considering an inline style.
 
 | Inline style | Alternative |
 |--------------|-----------------|
-| `style={{ width: '100%' }}` | Use `<Box width="100%" ... >` |
-| `style={{ minWidth: '100%' }}` | Use `<Box minWidth="100%" ... >` |
-| `style={{ maxWidth: '260px' }}` | Use `<Box maxWidth="260px" ... >` |
-| `style={{ height: '100%' }}` | Use `<Box height="100% ... >` |
-| `style={{ minHeight: '0' }}` | Use `<Box minHeight="0" ... >` |
-| `style={{ maxHeight: '100vh' }}` | Use `<Box maxHeight="100vh" ... >` |
-| `style={{ overflow: 'hidden' }}` | Use `<Box overflow="hidden ... >` |
-| `style={{ flexShrink: 0 }}` | Use `<Box flexShrink={0} ... >` |
-| `style={{ flexGrow: 0 }}` | Use `<Box flexGrow={1} ... >` |
-| `style={{ flex: 1 }}` | Use `<Box flexGrow={1} flexShrink={1} flexBasis="0%"  ... >` |
-| `style={{ flex: 0 0 260px }}` | Use `<Box flexGrow={0} flexShrink={0} flexBasis="260px"  ... >` |
-| `style={{ background: '#f5f5f5' }}>` | Use `<Box tone="neutral" ... >` |
-| `style={{ textAlign: 'center' }}` | Use `<Flex justifyContent="center ... >` |
-| `style={{ display: 'flex' }} | Use `<Flex ... >` |
-| `<Box style={{ color: 'var(--card-fg-color)' }}><HomeIcon /></Box>` | Use `<Text color="neutral"><HomeIcon /</Text>` |
+| `<Box style={{ width: '100%' }} ... >` | Use `<Box width="100%" ... >` |
+| `<Box style={{ minWidth: '100%' }} ... >` | Use `<Box minWidth="100%" ... >` |
+| `<Box style={{ maxWidth: '260px' }} ... >` | Use `<Box maxWidth="260px" ... >` |
+| `<Box style={{ height: '100%' }} ... >` | Use `<Box height="100% ... >` |
+| `<Box style={{ minHeight: '0' }} ... >` | Use `<Box minHeight="0" ... >` |
+| `<Box style={{ maxHeight: '100vh' }} ... >` | Use `<Box maxHeight="100vh" ... >` |
+| `<Box style={{ overflow: 'hidden' }} ... >` | Use `<Box overflow="hidden ... >` |
+| `<Box style={{ flexShrink: 0 }} ... >` | Use `<Box flexShrink={0} ... >` |
+| `<Box style={{ flexGrow: 0 }} ... >` | Use `<Box flexGrow={1} ... >` |
+| `<Box style={{ borderRadius: '50%'}} ... >` | Use <Box radius="full" ... >` |
+| `<Box style={{ flex: 1 }} ... >` | Use `<Box flexGrow={1} flexShrink={1} flexBasis="0%"  ... >` |
+| `<Box style={{ margin: '0 16px' }} ... >` | Use `<Box marginY={0} marginX={4} ... >` |
+| `<Box style={{ flex: 0 0 260px }} ... >` | Use `<Box flexGrow={0} flexShrink={0} flexBasis="260px"  ... >` |
+| `<Box style={{ position: "sticky" }} ... >` | `<Box position="sticky" ... >` |
+| `<Box style={{ background: '#f5f5f5' }} ... >` | Use `<Box tone="neutral" ... >` |
+| `<Box style={{ textAlign: 'center' }} ...>` | Use `<Flex justifyContent="center ... >` |
+| `<Box style={{ display: 'flex' }} ...> | Use `<Flex ... >` |
+| `<Box tone="primary" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }} ...>` | Use `<Box tone="primary"><Flex alignItems="center" justifyContent="center">` |
+| `<Box style={{ color: 'var(--card-fg-color)' }} ... ><HomeIcon /></Box>` | Use `<Text color="neutral"><HomeIcon /</Text>` |
 
 # Flex
 
@@ -3731,7 +4001,7 @@ Flex's own props are `as`, `display`, and the flex-parent + gap props below. Eve
 | `rowGap` | `0`–`9` | `row-gap` |
 | `columnGap` | `0`–`9` | `column-gap` |
 
-All props support responsive arrays (e.g. `flexDirection={['column', null, 'row']}`). Flex also inherits shared layout props — see **All available props** at the bottom of this document for the complete reference.
+All props support responsive arrays (e.g. `flexDirection={['column', null, 'row']}`). Flex also inherits shared layout props — see **All available props** at the bottom for the full list.
 
 ### **Usage guidelines**
 
@@ -3765,11 +4035,11 @@ All props support responsive arrays (e.g. `flexDirection={['column', null, 'row'
 **Do**
 
 - Bias towards horiztonally start-aligned content over center alignment. Most interface elements with Sanity are start aligned–most notably menus and navigational elements. Only use center alignment to create visual distinction/emphasis–such as an empty state.
-- Consider responsive breakpoints when stacking items horizontally. In cases where the number of items can vary, make sure to use `flexWrap="wrap"` so that items do not clip.
+- Consider responsive breakpoints when stacking items horizontally. If the number of items can vary, use `flexWrap="wrap"` to prevent clipping.
 
 **Don't**
-- Don't use inline styles to create specific UI elements. If you find yourself setting `width`, `height`, `borderRadius`, `background`, `color`, `fontSize`, `fontWeight`, or `cursor` as inline styles on a `Flex` or `Box`, stop — you're likely reinventing a component that already exists. Check whether `Avatar`, `Badge`, `Button`, or `Card` with appropriate props covers your use case before writing a custom element. See "All available props" at the bottom of this document for the complete reference.
-- Don’t rely on `row-reverse` or `column-reverse` as a way to change sort order or logical order of items. These direction settings only change the visual layer and will not impact tab index or the way screen readers interpret Flex items.  
+- Don't use inline styles to create specific UI elements. If you find yourself setting `width`, `height`, `borderRadius`, `background`, `color`, `fontSize`, `fontWeight`, or `cursor` as inline styles on a `Flex` or `Box`, stop. You're likely reinventing a component that already exists. Check whether `Avatar`, `Badge`, `Button`, or `Card` with appropriate props covers your use case. See "All available props" at the bottom for the complete reference.
+- Don't rely on `row-reverse` or `column-reverse` as a way to change sort order or logical order of items. These direction settings only change the visual layer. They will not impact tab index or how screen readers interpret Flex items.  
 - Don’t add onClick to Flex. Flex is not intended to be an interactive element.
 
 ### Content
@@ -3801,7 +4071,7 @@ All props support responsive arrays (e.g. `flexDirection={['column', null, 'row'
 ### Code examples
 
 #### General layout patterns
-```
+```jsx
 {/* Horizontal row — space between */}
 <Flex alignItems="center" justifyContent="space-between" gap={3}>
   <Heading level={1}>Title</Heading>
@@ -3820,8 +4090,8 @@ All props support responsive arrays (e.g. `flexDirection={['column', null, 'row'
 </Flex>
 
 {/* Full-height two-panel layout */}
-<Flex style={{ minHeight: '100vh' }}>
-  <Box borderRight style={{ flex: '0 0 260px' }}>{/* sidebar */}</Box>
+<Flex minHeight="100vh">
+  <Box as="nav" aria-label="Main navigation" borderRight flexGrow={0} flexShrink={0} flexBasis="260px">{/* sidebar */}</Box>
   <Flex flexDirection="column" flexGrow={1} minWidth="0">{/* main */}</Flex>
 </Flex>
 ```
@@ -3829,11 +4099,11 @@ All props support responsive arrays (e.g. `flexDirection={['column', null, 'row'
 #### Full-height app shell layout
 
 The most common Studio-like layout pattern. Critical details: use `minHeight` (not `height`) on the outer container, and `minWidth="0"` on flex children to prevent overflow.
-```
+```jsx
 // Box and Flex come from ui — NOT from @sanity/ui
 import { Box, Flex } from 'ui'
 
-<Flex style={{ minHeight: '100vh' }}>
+<Flex minHeight="100vh">
   {/* Sidebar — fixed width, full height */}
   <Box
     as="nav"
@@ -3860,25 +4130,57 @@ import { Box, Flex } from 'ui'
 </Flex>
 ```
 
+#### Empty state
+```jsx
+{/* ✓ Empty state — minHeight as named prop, no style={} needed */}
+<Flex
+  alignItems="center"
+  justifyContent="center"
+  flexDirection="column"
+  minHeight="300px"
+  gap={3}
+  <Text muted>No documents yet</Text>
+  <Button text="Create document" icon={AddIcon} />
+</Flex>
+```
+
 #### Anti-patterns
 
+```jsx
+{ /* ✗ Don't use inline margin styles to move elements around Flex */ }
+<Flex alignItems="center">
+  <Text>Label</Text>
+  <Box style={{marginLeft: "auto"}}>
+    <Badge tone="positive">Published</Badge>
+  </Box>
+</Flex>
+
+{ /* ✓ To push an element to the far end of a Flex row, use `marginLeft="auto"` on the Box: */ }
+<Flex alignItems="center">
+  <Text>Label</Text>
+  <Box marginLeft="auto">
+    <Badge tone="positive">Published</Badge>
+  </Box>
+</Flex>
 ```
-/* Do not use inline styles to set visual attributes */
-  <Flex
-    alignItems="center"
-    justifyContent="center"
-    style={{
-      width: 28,
-      height: 28,
-      borderRadius: "50%",
-      fontSize: 12,
-      color: "red"
-      border: "1px solid #868686"
-      }}
-    ><Text>AJ</Text>
-  </Flex>
+
+```jsx
+{/* ✗ Don't use inline styles to set visual attributes */}
+<Flex
+  alignItems="center"
+  justifyContent="center"
+  style={{
+    width: 28,
+    height: 28,
+    borderRadius: "50%",
+    fontSize: 12,
+    color: "red"
+    border: "1px solid #868686"
+    }}
+  ><Text>AJ</Text>
+</Flex>
   
-/* Work within the system's structure */
+{/* ✓ Work within the system's structure */}
 <Box width="28px" height="28px" radius="full" border={true}>
   <Flex 
     width="100%" 
@@ -3893,9 +4195,9 @@ import { Box, Flex } from 'ui'
 
 ### CSS custom properties and Card context
 
-> **`--card-bg-color`, `--card-border-color`, `--card-muted-bg-color` and all other `--card-*` variables are only available inside a `Card` ancestor.** `Card` establishes the color context — it writes these CSS custom properties onto its DOM subtree. Using them in a `Flex` (or any element) that lives outside any `Card` ancestor produces undefined values and no visual effect.
+> **`--card-bg`, `--card-border-color`, `--card-color` and other `--card-*` variables are only available inside a `Card` ancestor.** `Card` establishes the color context — it writes these CSS custom properties onto its DOM subtree. Using them in a `Flex` (or any element) outside a `Card` ancestor produces undefined values and no visual effect.
 >
-> If you need a themed container without Card's visible surface, use `Card` with `border={false}` and `padding={0}` rather than trying to reference `--card-*` variables from a raw `Flex`.
+> If you need a themed container without Card's visible surface, use `Card` with `border={false}`. Don't reference `--card-*` variables from a raw `Flex`.
 
 ## All available props
 
@@ -4027,15 +4329,16 @@ Most inline styles are not needed for Flex. Use the alternatives below when cons
 
 | Inline style | Alternative |
 |--------------|-----------------|
-| `style={{ width: '100%' }}` | Use `<Flex width="100%" ... >` |
-| `style={{ maxWidth: '260px' }}` | Use `<Flex maxWidth="260px" ... >` |
-| `style={{ height: '100%' }}` | Use `<Flex height="100% ... >` |
-| `style={{ minHeight: '100vh' }}` | Use `<Flex minHeight="100vh" ... >` |
-| `style={{ overflow: 'hidden' }}` | Use `<Flex overflow="hidden ... >` |
-| `style={{ flex: 1 }}` | Use `<Flex flexGrow="1" flexShrink="1" flexBasis="0%"  ... >` |
-| `style={{ flex: 0 0 260px }}` | Use `<Flex flexGrow="0" flexShrink="0" flexBasis="260px"  ... >` |
-| `style={{ background: '#f5f5f5' }}>` | Use `<Flex tone="neutral" ... >` |
-| `style={{ display: 'grid' }} | Use `<Grid ... >` |
+| `<Flex style={{ width: '100%' }} ... >` | Use `<Flex width="100%" ... >` |
+| `<Flex style={{ maxWidth: '260px' }} ... >` | Use `<Flex maxWidth="260px" ... >` |
+| `<Flex style={{ height: '100%' }} ... >` | Use `<Flex height="100% ... >` |
+| `<Flex style={{ minHeight: '100vh' }} ... >` | Use `<Flex minHeight="100vh" ... >` |
+| `<Flex style={{ overflow: 'hidden' }} ... >` | Use `<Flex overflow="hidden ... >` |
+| `<Flex style={{ flexWrap: 'wrap' }} ... >` | Use `<Flex flexWrap="wrap" ... >` |
+| `<Flex style={{ flex: 1 }} ... >` | Use `<Flex flexGrow="1" flexShrink="1" flexBasis="0%"  ... >` |
+| `<Flex style={{ flex: 0 0 260px }} ... >` | Use `<Flex flexGrow="0" flexShrink="0" flexBasis="260px"  ... >` |
+| `<Flex style={{ background: '#f5f5f5' }} ... >` | Use `<Flex tone="neutral" ... >` |
+| `<Flex style={{ display: 'grid' }} ...>` | Use `<Grid ... >` |
 
 # Grid
 
@@ -4318,9 +4621,27 @@ Divider accepts no props. It renders a single `<hr>` element with no configurati
 - **Do not suppress semantics.** Do not override the `<hr>` role with `role="presentation"` or `aria-hidden="true"` unless the line is genuinely decorative. If the line is decorative, use a CSS border or Box with `borderBottom` instead of Divider.
 - **Does not create landmarks.** Unlike `<section>` or `<nav>`, `<hr>` does not create an ARIA landmark. Screen reader users navigating by landmarks will not stop at a Divider. Use it for in-flow separation only, not as a structural navigation aid.
 
+
+### Code examples
+```
+{/* Use `<Divider>` for horizontal separators between navigation groups.** It uses `var(--card-border-color)` automatically and handles spacing: /* }
+```tsx
+<Stack space={2}>
+  <Stack space={1}>
+    <Text size={1} weight="semibold" muted>Content</Text>
+    {contentItems.map(item => <NavItem key={item.id} {...item} />)}
+  </Stack>
+  <Divider />
+  <Stack space={1}>
+  <Text size={1} weight="semibold" muted>System</Text>
+    {systemItems.map(item => <NavItem key={item.id} {...item} />)}
+  </Stack>
+</Stack>
+```
+
 # Stack
 
-
+
 
 Arranges children in a single vertical column with consistent spacing between them.
 
@@ -4345,6 +4666,8 @@ _Refer to TypeDocs in Flex.tsx_
 - To flow inline items that wrap to the next line. Use **Inline** instead.
 - To wrap a single child with no spacing needs. Use **Box** instead.
 - To create overlapping layers on the z-axis. Use CSS `position` and `z-index` instead. Stack does not layer items — it lines them up in sequence.
+
+Before using `style={{...}}` on a Box wrapping Stack, check `style-overrides.md`. Most layout values have prop-based options.
 
 ### Best practices
 
@@ -4464,7 +4787,7 @@ Example:
 
 # Text
 
-
+
 
 Used for the majority of UI copy, including body paragraphs, captions, and metadata. It is distinct from other typography components, such as Code, Heading, KBD, and Label.
 
@@ -4654,6 +4977,7 @@ Headings are used to create a logical hierarchy and page structure. They guide t
 - Don't skip heading levels (e.g., jumping from H1 to H3) simply to achieve a specific visual size. Use the `size` prop to adjust visuals while keeping the `level` prop semantically correct.
 - Don't use Headings for visual differentiation. Headings are functional in nature.
 - Don't manually set overflow styling in Heading components, such as `style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}`. Use the `lines` prop instead (`lines={1}` for single-line clamp) or let the text wrap.
+- Don't customize Heading text colors. Use `color` to convey a semantic meaning when appropriate.
 
 ### Variants
 
@@ -4706,6 +5030,17 @@ Before truncating, attempt to shorten the text if possible. The ideal kind of tr
 - **Sentence case:** Use sentence case for headings (e.g., "Page settings" rather than "Page Settings") to maintain a conversational tone and improve scanability.
 - **No punctuation:** Do not use punctuation (periods) at the end of headings unless the heading is a direct question.
 - **Descriptive:** Headings should clearly describe the content of the section they introduce.
+
+
+## Inline style alternatives
+
+Most inline styles are not needed for Flex. Use the alternatives below when considering an inline style.
+
+| Inline style | Alternative |
+|--------------|-----------------|
+| `<Heading style={{ color: #670000 }} ... >` | `<Heading color='critical' ... >` |
+| `<Heading style={{ color: scheme === 'dark' ? '#e3e4e8' : '#252837' }}> ... >` | Use `<Heading ... >` (Heading manages color scheme internally) |
+| `<Heading style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} ... >` | `<Heading lines={1} ...>`
 
 # PressArea
 
@@ -4838,7 +5173,7 @@ Set `role="switch"` together with `aria-pressed` to create a toggle control. Whe
 
 # Tooltip
 
-
+
 
 **Description** The Tooltip is a floating text label that displays information when a user hovers, focuses, or taps on an element. Its purpose is to provide helpful, non-essential context to a UI element. It succinctly describes the function of an element (like an icon-only button) or enhances baseline understanding without cluttering the interface.
 
@@ -4942,6 +5277,8 @@ _Refer to TypeDocs in Button.tsx_
 - To toggle a boolean form value (on/off). Use **Switch** or **Checkbox** instead. Button `selected` is for action toggles (bold, show panel), not form state.
 - 
 
+Button does not accept `width` or flex-child props. See the "Inline style overrides" section for canonical workarounds.
+
 ### Best practices
 
 **Do**
@@ -5017,7 +5354,7 @@ Used to show brief status messages about completed actions, warnings, or errors.
 
 `ToastProvider` must be **inside** `ThemeProvider`. The nesting order matters.
 
-`// main.tsx`
+`// main.tsx`
 
 `import { StrictMode } from 'react'`
 
@@ -5047,7 +5384,7 @@ Used to show brief status messages about completed actions, warnings, or errors.
 
 `)`
 
-
+
 
 **If **`useToast()`** throws at runtime**, the most likely cause is a missing `ToastProvider`. The error message does not name the missing provider — it appears as a generic React context error like `Cannot read properties of null` or `useContext(...) is null`. When you see this pattern, check that `ToastProvider` wraps the component tree above the component calling `useToast()`. The fix is always the same: add `<ToastProvider>` inside `<ThemeProvider>` in your entry file.
 
@@ -5055,7 +5392,7 @@ Used to show brief status messages about completed actions, warnings, or errors.
 
 Call `useToast()` inside any component to get the `toast` object. Call `toast.push()` to show a toast.
 
-`import { useToast, Button } from '@sanity/ui'`
+`import { useToast, Button } from '@sanity/ui'`
 
 `function PublishButton() {`
 
@@ -5079,7 +5416,7 @@ Call `useToast()` inside any component to get the `toast` object. Call `toast.pu
 
 `}`
 
-
+
 
 ## toast.push() API
 
@@ -5104,7 +5441,7 @@ Call `useToast()` inside any component to get the `toast` object. Call `toast.pu
 
 ### Success toast
 
-`toast.push({`
+`toast.push({`
 
 `  status: 'success',`
 
@@ -5112,9 +5449,9 @@ Call `useToast()` inside any component to get the `toast` object. Call `toast.pu
 
 `})`
 
-### Error toast with description
+### Error toast with description
 
-`toast.push({`
+`toast.push({`
 
 `  status: 'error',`
 
@@ -5124,9 +5461,9 @@ Call `useToast()` inside any component to get the `toast` object. Call `toast.pu
 
 `})`
 
-### Warning toast
+### Warning toast
 
-`toast.push({`
+`toast.push({`
 
 `  status: 'warning',`
 
@@ -5136,9 +5473,9 @@ Call `useToast()` inside any component to get the `toast` object. Call `toast.pu
 
 `})`
 
-### Persistent toast (no auto-dismiss)
+### Persistent toast (no auto-dismiss)
 
-`toast.push({`
+`toast.push({`
 
 `  status: 'error',`
 
@@ -5152,11 +5489,11 @@ Call `useToast()` inside any component to get the `toast` object. Call `toast.pu
 
 `})`
 
-### Toast after a long-running action
+### Toast after a long-running action
 
 Fire a toast when an action takes over 3 seconds. The user may have moved on.
 
-`const handleExport = async () => {`
+`const handleExport = async () => {`
 
 `  setLoading(true)`
 
@@ -5192,7 +5529,7 @@ Fire a toast when an action takes over 3 seconds. The user may have moved on.
 
 `}`
 
-
+
 
 ## Usage guidelines
 
@@ -5232,7 +5569,7 @@ Fire a toast when an action takes over 3 seconds. The user may have moved on.
 
 ### Missing ToastProvider
 
-`/* ✗ useToast() throws — no ToastProvider in the tree */`
+`/* ✗ useToast() throws — no ToastProvider in the tree */`
 
 `<ThemeProvider theme={studioTheme}>`
 
@@ -5252,9 +5589,9 @@ Fire a toast when an action takes over 3 seconds. The user may have moved on.
 
 `</ThemeProvider>`
 
-### ToastProvider outside ThemeProvider
+### ToastProvider outside ThemeProvider
 
-`/* ✗ Wrong order — ToastProvider has no theme context */`
+`/* ✗ Wrong order — ToastProvider has no theme context */`
 
 `<ToastProvider>`
 
@@ -5278,9 +5615,9 @@ Fire a toast when an action takes over 3 seconds. The user may have moved on.
 
 `</ThemeProvider>`
 
-### Vague toast messages
+### Vague toast messages
 
-`/* ✗ Vague — user does not know what happened */`
+`/* ✗ Vague — user does not know what happened */`
 
 `toast.push({ status: 'success', title: 'Success!' })`
 
@@ -5292,346 +5629,138 @@ Fire a toast when an action takes over 3 seconds. The user may have moved on.
 
 `toast.push({ status: 'error', title: 'Image upload failed. File exceeds 10 MB.' })`
 
-
-
 # Card
 
-
+Container for content that requires a distinct visual surface — a background, optional border, and semantic tone color.
 
-The Card component is a foundational layout primitive that serves as a container for content. It functions similarly to a Box but includes specific properties for managing background color, foreground text color, borders, radii, and shadows. It’s used to create distinct zones or "surfaces" within the UI.
+> **Note:** This documents the `ui-poc` Card component. Import it from `ui`, **not** from `@sanity/ui`:
+>
+> ```tsx
+> import { Card } from '../ui-poc/packages/ui/src/components/Card'
+> // or with the Vite alias:
+> import { Card } from 'ui'
+> ```
+>
+> The API is significantly different from `@sanity/ui`'s Card. There is no `padding`, `radius`, `shadow`, `scheme`, `selected`, `pressed`, `muted`, or individual `borderTop/Right/Bottom/Left` prop.
 
-### API Documentation
+### API
 
-_Refer to TypeDocs in Card.tsx_
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `as` | React element type | `'div'` | HTML element to render (e.g. `as="article"`, `as="section"`) |
+| `tone` | `'default'`, `'neutral'`, `'primary'`, `'suggest'`, `'positive'`, `'caution'`, `'critical'` | `'default'` | Controls background and border color |
+| `border` | boolean | `true` | Toggles the border. On by default. |
+| `density` | `'tight'`, `'medium'`, `'loose'` | `'medium'` | Controls padding and border-radius together |
+| `inverted` | boolean | `false` | Inverts the tone to use the dark color scheme |
+| `className` | string | — | Additional CSS class names |
+| `style` | React.CSSProperties | — | Inline styles |
 
-### **When to Use / When Not to Use**
+#### Density
 
-**When to use:**
+`density` replaces the separate `padding` and `radius` props from the previous API. Choose based on the visual weight of the surrounding layout:
 
-- You need to group related content together on a distinct background surface.
-- You need to invert the color scheme of a specific section (e.g., a dark card inside a light view) using the `scheme` prop.
-- Ask: does this region represent an isolated and contained chunk of content?
- - **Yes** → use `Card`
- - **No** → use `Box` or `Flex`
- Structural landmarks (nav, main, aside, header, toolbar) almost always use `Box`/`Flex` because they are invisible containers. `Card` is for content blocks — document items, form sections, info panels.
+| Value | Padding | Radius | Use when |
+|-------|---------|--------|----------|
+| `'tight'` | space-2 | radius-2 | High-density lists, compact items, small cards |
+| `'medium'` | space-3 | radius-3 | Standard content cards — the default for most use cases |
+| `'loose'` | space-4 | radius-4 | Low-density layouts, prominent featured cards |
 
-**When not to use:**
+#### Inverted
 
-- To group elements for layout without visible boundaries or background colors. Use **Box** or **Flex** instead to avoid unnecessary DOM nesting and style calculations.
-- As a layout element that represents UI which is not explicitly a card. Examples include Toolbars, Sidebars, etc. Use Box, Flex, Grid, Inline, or Stack instead.
-**Example of incorrect Card usage**
-```
-<Card padding={3} borderBottom>
-  <Stack space={2}>
-    <Label size={0} htmlFor="nav-search">Search</Label>
-    <TextInput
-      id="nav-search"
-      icon={SearchIcon}
-      placeholder="Search by title or type"
-      aria-label="Search content"
-      value={searchQuery}
-      onChange={...}
-    />
-  </Stack>
-</Card>
-```
-
-**Proper alternative**
-```
-<Box padding={3} borderBottom>
-  <Stack space={2}>
-    <Label size={0} htmlFor="nav-search">Search</Label>
-    <TextInput
-      id="nav-search"
-      icon={SearchIcon}
-      placeholder="Search by title or type"
-      aria-label="Search content"
-      value={searchQuery}
-      onChange={...}
-    />
-  </Stack>
-</Box>
-```
-- To replicate a button or create a tappable area. While `pressed` and `selected` props exist, use the **Button** component for interactive actions to ensure full keyboard accessibility and semantic validity.
+`inverted={true}` switches Card to a dark color scheme regardless of the page theme. Each tone has a defined dark variant — for example, `tone="critical"` inverted renders a dark red background with light text. Use sparingly, for high-contrast callouts or dark panels within a light layout.
 
 ### Card does not accept layout props
 
-> **Card does not accept layout props.** `flexGrow`, `flexShrink`, `flexBasis`, `minWidth`, `overflow`, `overflowY`, and similar CSS layout properties are not available on Card. Applying them silently does nothing — no error, no warning.
+> **Card does not accept layout props.** `flexGrow`, `flexShrink`, `flexBasis`, `minWidth`, `overflow`, `overflowY`, and similar CSS layout properties are not available on Card. Applying them silently does nothing.
 >
 > To apply layout properties alongside a Card surface, wrap the Card in a `Box` or `Flex`:
 >
 > ```tsx
 > {/* ✗ — flexGrow on Card silently does nothing */}
-> <Card flexGrow={1} padding={3}>...</Card>
+> <Card flexGrow={1} density="medium">...</Card>
 >
 > {/* ✓ — Box handles the layout, Card handles the surface */}
 > <Box flexGrow={1} minWidth="0" overflowY="auto">
->   <Card padding={3}>...</Card>
+>   <Card density="medium">...</Card>
 > </Box>
 > ```
 
-### **Usage Dos and Don'ts**
+### When to use
+
+- Group related content on a distinct background surface
+- Show semantic status (error, warning, success) via `tone`
+- Invert a section to dark with `inverted={true}`
+
+### When not to use
+
+- Layout without a distinct visual surface → use Box or Flex
+- Structural UI regions (sidebars, toolbars, scroll containers) → use Box or Flex
+- Clickable/tappable areas → use Button for full keyboard accessibility
+
+### Dos and Don'ts
 
 **Do**
-- Use the `tone` prop to communicate the semantic state of the content (e.g., use `'critical'` for error messages or destructive zones).
-- Limit the scope of content within a Card to a single topic.
-- Use the `as` prop to change the semantic HTML tag (e.g., `as="article"` or `as="section"`) to improve document structure and navigation for screen readers.
+- Use `tone` to communicate semantic status (`'critical'` for errors, `'caution'` for warnings, `'positive'` for success)
+- Always pair a toned Card with an icon — do not rely on color alone
+- Use `as="article"` or `as="section"` to improve document structure where appropriate
+- Use `density` to match the surrounding layout density rather than overriding with inline style
 
-**Don’t**
+**Don't**
+- Don't use Card for structural UI regions (toolbars, sidebars, nav headers) — use Box
+- Don't nest cards; use Box/Flex/Stack for internal layout within a card
+- Don't add `onClick` to Card; use Button for interactive actions
+- Don't use inline `style` for padding or border-radius — use `density` instead
 
-- Don’t manually set text colors inside a Card unless absolutely necessary. Rely on the Card to automatically provide high-contrast text colors based on the selected `tone`.
-- Don’t rely on color alone to convey meaning (e.g., a red card background) for users with color blindness; ensure text labels or icons accompany the color change.
-- Use caution when nesting cards. Cards are intended to be an atomic composition. Use Box, Flex, Grid, Inline, or Stack instead.
-- Don’t add interactive elements to Card when paired with an onClick event.
-- **Horizontal dividers.** Sanity UI does not export a general-purpose `Divider` component (`MenuDivider` is for menus only). To create a horizontal rule between sections, use `<Divider />` from the UI POC library.
+### Tone values
 
-```
-/* Horizontal divider between sections */
-import { Divider }     from '../ui-poc/packages/ui/src/components/Divider'
+| Value | Light background | Use case |
+|-------|-----------------|----------|
+| `'default'` | gray-50 | General use, no semantic emphasis |
+| `'neutral'` | gray-100 | Visual separation, "pinned" or "highlighted" card |
+| `'primary'` | blue-50 | Branded or educational content |
+| `'suggest'` | purple-50 | AI-generated suggestions |
+| `'positive'` | green-50 | Success, completion, healthy status |
+| `'caution'` | yellow-50 | Needs attention, non-blocking warning |
+| `'critical'` | red-50 | Error, failure, blocking issue |
 
-<Stack space={4}>
-  <Text>Section one content</Text>
-  <Divider />
-  <Text>Section two content</Text>
-</Stack>`
-```
+With `inverted={true}`, each tone uses a dark variant (e.g. `critical` inverted = red-900 bg + red-100 text).
 
-### **Variants & Examples**
+### CSS custom properties and Card context
 
-#### Tone
+Card writes CSS custom properties onto its DOM subtree. Descendants can reference them for consistent styling:
 
-Sets the color of the Card. Should be set to `default` in typical use cases.
+| Variable | Description |
+|----------|-------------|
+| `--card-bg` | Background color of the card |
+| `--card-border-color` | Border color of the card |
+| `--card-color` | Text color (set in inverted mode; inherits otherwise) |
 
-| **Value** | **Description** | **Purpose** | **Use case(s)** |
-| --- | --- | --- | --- |
-| `default` | Uses the default background color. | For general use to display content with no emphasis or semantic meaning. This represents the vast majority of use cases. | A normal item in a dashboard. |
-| `transparent` | DO NOT USE. USE `neutral` INSTEAD. | DO NOT USE. USE `neutral` INSTEAD. | DO NOT USE. USE `neutral` INSTEAD. |
-| `neutral` | Uses a light gray background color. | For visual emphasis or to create greater visual separation from the background | A “docked” or “pinned” card in a dashboard. |
-| `positive` | Uses a green background color. | For indicating content associated with success or completion. | Representing a successful billing transaction.. Representing a process that is healthy. |
-| `caution` | Uses a yellow background color. | For indicating content that needs attention, but is not critical or blocking. | Representing a credit card that is no longer valid for the next billing cycle. Representing a process that is at risk. |
-| `critical` | Uses a red background color. | For indicating content that represents a critical or blocking error. | Representing a recent transaction that failed. Representing a process that is not working. |
-| `primary` | Uses a blue background color. | For indicating high-priority or branded content. | Displaying content as an upsell. Providing contextual, educational, or onboarding information. |
-| `brand` | DO NOT USE. USE `primary` INSTEAD. | DO NOT USE. USE `primary` INSTEAD. | DO NOT USE. USE `primary` INSTEAD. |
-
-**Note: **Card’s semantic tone values should be paired with an associated icon (ex: `ErrorOutlineIcon` for `critical `to visually reinforce the semantic meaning of the content.
-
-#### Muted
-
-**Use with caution.**This prop darkens Card’s background. Use in rare situations when greater emphasis is needed when using a tone of `positive`, `caution`, `critical`, or `primary`.
-
-#### Border
-
-Provides a visual border for the Card. Should be enabled in Card’s typical use cases. Border should be used instead of `shadow={0}.`
-
-Individual borders can be set with `borderLeft`, `borderRight`, `borderTop`, `bottomBottom`, `borderX`, or `borderY`. These props should be used with caution.
-
-#### Radius
-
-Sets the corner radius for Card. Should be set to `2` in typical use cases.
-
-| **Value** | **Description** | **Purpose** | **Use case(s)** |
-| --- | --- | --- | --- |
-| `0` | No border radius | To act as a container of content with a specific background. | Creating visual separation of specific content with the background. Providing a semantically toned background to content in order to provide visual meaning. |
-| `1` | Hairline border radius | USE WITH CAUTION | USE WITH CAUTION |
-| `2` | Extra-small border radius | Used in the majority of cases–typically where Card’s padding is set to `3` or below. | The majority of Card use cases–specifically in normal to high density compositions. |
-| `3` | Small border radius | To create greater visual balance in cases where Card’s padding is set to `4` or above. | In lower-density compositions. |
-| `4` | Medium border radius | USE WITH CAUTION | USE WITH CAUTION |
-| `5` | Large border radius | USE WITH CAUTION | USE WITH CAUTION |
-| `6` | Extra-large border radius | USE WITH CAUTION | USE WITH CAUTION |
-| `“full”` | A pill shaped border-radius. | USE WITH CAUTION | USE WITH CAUTION |
-
-#### Shadow
-
-Shadow is intended to denote elevation. Cards that are floating above the base UI layer should have a shadow applied. The higher the elevation, the larger the shadow. Note: Avoid using `shadow={0}` as a substitute for a border. It’s not recommended to use shadow for the purpose of visual emphasis. Use `tone={transparent}` instead.
-
-| **Value** | **Description** | **Purpose** | **Use case(s)** |
-| --- | --- | --- | --- |
-| `0` | A hairline shadow. | USE WITH CAUTION | USE WITH CAUTION |
-| `1` | A low-elevation shadow for when a card is displayed directly above the base layer. | To create visual separation between a floating Card and the immediate background. | When a Card is used as a makeshift notification or floating message. |
-| `2` | A mid-elevation shadow for when a card is displayed directly above low-elevation elements and the base layer. | USE WITH CAUTION | USE WITH CAUTION |
-| `3` | A high-elevation shadow for when a card is displayed at the highest elevation. | USE WITH CAUTION | USE WITH CAUTION |
-
-#### Scheme
-
-**Use with caution. **Used to explicitly set the color scheme to light or dark. This can be used to invert the palette for a card. Inverting the scheme can be used to create greater emphasis–when `muted` is not enough.
-
-#### Pressed
-
-**Use with caution. **Applies a pressed visual state to the card. Card’s primary use case is to contain content. Consider other options unless absolutely necessary.
-
-#### Selected
-
-**Use with caution.  **Applies a selected visual state to the card. Card’s primary use case is to contain content. Consider other options unless absolutely necessary.
-
-`selected` does not set `aria-pressed`** — this is a silent accessibility failure. The `selected` prop applies `data-selected` for visual styling only. For toggle buttons, you must add both props explicitly:
-```
-<Button selected={isActive} aria-pressed={isActive} />
-```
-
-Omitting `aria-pressed` means the button looks correct but screen readers will not announce the pressed state. For a selectable list of Cards, use `role="listbox"` on the container and `role="option"` + `aria-selected` on each Card, or use `aria-current="true"` for navigation.
-
-#### Padding
-
-Sets the internal padding for content within Card.
-
-| **Value** | **Description** | **Purpose** | **Use case(s)** |
-| --- | --- | --- | --- |
-| `0` | No padding | USE WITH CAUTION | USE WITH CAUTION |
-| `1` | Smallest padding | USE WITH CAUTION | USE WITH CAUTION |
-| `2` | Extra-extra-small padding | Displaying a chunk of content in very high density compositions. | Displaying a high-volume list of content in a sidebar |
-| `3` | Extra-small padding | Displaying a chunk of content in medium to high density compositions. | Displaying a collection of cards in a grid, such as Canvas templates |
-| `4` | Small padding | Displaying a chunk of content in low to medium density compositions. | Displaying a collection of content within a dashboard |
-| `5` | Medium padding | Displaying a chunk of content in very low density compositions. | Displaying form fields within an auth flow |
-| `6` | Large padding | USE WITH CAUTION | USE WITH CAUTION |
-| `7` | Extra-large padding | USE WITH CAUTION | USE WITH CAUTION |
-| `8` | Extra-extra large padding | USE WITH CAUTION | USE WITH CAUTION |
-| `9` | Largest padding | USE WITH CAUTION | USE WITH CAUTION |
-
-Individual padding can be set with `paddingLeft`, `paddingRight`, `paddingTop`, `paddingBottom`, `paddingX`, or `paddingY`. These props should be used with caution.
+> **These variables are only available inside a `Card` ancestor.** Using them in a `Box` or custom element with no `Card` ancestor produces undefined values and no visual effect.
+>
+> If you need the color context without Card's visible surface, use `Card` with `border={false}`:
+> ```tsx
+> <Card border={false}>
+>   {/* --card-bg, --card-border-color, --card-color are available here */}
+> </Card>
+> ```
 
 ### Accessibility
 
-- **Semantic elements via **`as`**.** Card accepts an `as` prop. Choose the value based on the content:
+- **Semantic elements.** Use `as` to choose the correct HTML element:
+  - `as="article"` — self-contained content (no accessible name required)
+  - `as="section"` — requires a heading child or `aria-label` to register as a landmark (WCAG 1.3.1 A)
+  - `as="aside"` — supplementary content; add `aria-label` when the role is not clear from context
+- **Not a button.** Card has no keyboard activation, focus management, or ARIA role. Do not use `as="button"` — use the Button component for interactive actions.
+- **Clickable cards.** If a card must be clickable, use a stretched link inside the card rather than adding `onClick` to the Card itself.
+- **Tone and color.** Always pair a semantic tone with an icon or text label — never rely on color alone (WCAG 1.4.1 A).
+- **Contrast.** Verify that any custom text inside a card maintains 4.5:1 contrast against the card's tone background (WCAG 1.4.3 AA).
+- **Heading hierarchy.** Heading levels inside a Card must follow the page hierarchy — do not skip levels (WCAG 1.3.1 A).
 
-  - `as="section"` — creates a landmark, but only if it has a heading child or `aria-label`. Without an accessible name, `<section>` is the same as `<div>` (WCAG 1.3.1 A).
-  - `as="article"` — marks self-contained content. Does not require a label to be a landmark.
-  - `as="aside"` — marks supplementary content. Add `aria-label` when the role is not clear from context.
-  - `as="form"` — requires an accessible name via `aria-label`, `aria-labelledby`, or `<legend>`.
+### Content guidelines
 
-- **Behavioral elements.** Card does not fulfil the behavioral contract of `<button>`, `<dialog>`, `<form>`, or `<fieldset>` (WCAG 4.1.2 A). Using `as="button"` on Card does not add keyboard activation, focus management, or the implicit ARIA button role. Use the Button component for interactive actions.
-
-- **Interactive cards.** If a Card is clickable:
-
-  - It must have a valid `tabindex` to be focusable.
-  - It must respond to `Enter` and `Space` key events.
-  - It must have an accessible name. A clickable card with only visual content is announced as a plain container. Add `aria-label` or include a text element that names the action (WCAG 4.1.2 A).
-  - Prefer a stretched link inside the Card over adding `onClick` to the Card itself.
-
-- **Contrast.** Card handles text color contrast for its tones. If you nest custom components, verify text maintains a **4.5:1** ratio against the Card's `tone` (WCAG 1.4.3 AA).
-
-- **Focus indication.** If Card is interactive, it must have a visible focus style. Do not suppress the outline without a high-contrast replacement.
-
-- **Heading hierarchy.** Heading levels inside a Card must follow the page hierarchy. Do not start with `<h1>` inside a Card if the page already has a main title (WCAG 1.3.1 A, 2.4.6 AA).
-
-- `selected`** does not set **`aria-selected`**.** The `selected` prop sets `data-selected` for styling only. It does NOT set `aria-selected`. Do not add `aria-selected` to a `<div>` Card — it is invalid on elements without a supporting role like `option`, `row`, or `tab` (WCAG 4.1.2 A). For a selectable list, use `role="listbox"` on the container and `role="option"` on each Card. Or avoid `aria-selected` and use `aria-current="true"` to mark the active item instead.
-
-- **Selectable list pattern.** When building a list of selectable Cards, structure it as a listbox:
-
-`/* ✗ Invalid — aria-selected on a plain <div> Card */`
-
-`<Stack space={2}>`
-
-`  <Card selected={activeId === 1} aria-selected={activeId === 1}>Doc 1</Card>`
-
-`</Stack>`
-
-`/* ✓ Valid — role="listbox" + role="option" supports aria-selected */`
-
-`<Stack space={2} role="listbox" aria-label="Documents">`
-
-`  <Card role="option" aria-selected={activeId === 1} selected={activeId === 1}`
-
-`    tabIndex={0} padding={3} border>`
-
-`    Doc 1`
-
-`  </Card>`
-
-`</Stack>`
-
-`/* ✓ Also valid — aria-current avoids the role requirement */`
-
-`<Stack space={2}>`
-
-`  <Card selected={activeId === 1}`
-
-`    aria-current={activeId === 1 ? 'true' : undefined}`
-
-`    padding={3} border>`
-
-`    Doc 1`
-
-`  </Card>`
-
-`</Stack>`
-
-
-**Do not nest interactive elements inside a **`role="option"`** Card.** A Card with `role="option"` is itself interactive. Placing a Button, MenuButton, or link inside it creates nested interactive elements — screen readers cannot announce them and keyboard focus breaks. Move action buttons outside the selectable Card, or place them in a separate column that is not inside the `role="option"` element.
-
-`/* ✗ Nested interactive — Button inside role="option" */`
-
-`<Card role="option" aria-selected={active} tabIndex={0} padding={3}>`
-
-`  <Flex align="center" justify="space-between">`
-
-`    <Text>{doc.title}</Text>`
-
-`    <Button icon={EllipsisVerticalIcon} mode="bleed" aria-label="Options" />`
-
-`  </Flex>`
-
-`</Card>`
-
-`/* ✓ Actions outside the selectable element */`
-
-`<Flex align="center" gap={2}>`
-
-`  <Card role="option" aria-selected={active} tabIndex={0} padding={3} flex={1}>`
-
-`    <Text>{doc.title}</Text>`
-
-`  </Card>`
-
-`  <Button icon={EllipsisVerticalIcon} mode="bleed" aria-label="Options" />`
-
-`</Flex>`
-
-
-
-- **Clickable card pattern.** Do not add `onClick` to Card. Use a stretched link inside the Card instead:
-
-`<Card padding={3} border radius={2} style={{ position: 'relative' }}>`
-
-`  <Stack space={2}>`
-
-`    <Heading as="h2" size={1}>`
-
-`      <a href={`/doc/${doc.id}`}`
-
-`        style={{ textDecoration: 'none', color: 'inherit',`
-
-`          position: 'absolute', inset: 0 }}>`
-
-`        {doc.title}`
-
-`      </a>`
-
-`    </Heading>`
-
-`    <Text size={1} muted>{doc.type}</Text>`
-
-`  </Stack>`
-
-`</Card>`
-
-### Card color context
-
-> **`--card-*` CSS custom properties are only valid inside a `Card` ancestor.** `Card` establishes the color context by writing `--card-bg-color`, `--card-border-color`, `--card-muted-bg-color`, `--card-fg-color`, and all other `--card-*` variables onto its DOM subtree. Using these variables in a `Box`, `Flex`, or custom element that has no `Card` ancestor produces undefined values and no visual effect.
->
-> If you need the color context without Card's visible surface (background, border, shadow), use:
->
-> ```tsx
-> <Card border={false} padding={0}>
->   {/* --card-* variables are available to all descendants here */}
-> </Card>
-> ```
->
-> Do not attempt to replicate Card's CSS variables manually on a `Box`.
-
-### **Content Guidelines**
-
-- **Hierarchy:** Cards often act as containers for grouped information. Ensure the heading levels (H2, H3, etc.) inside the card respect the page's overall outline. Do not start with an H1 inside a card if the page already has a main title.
-- **Grouping:** Content within a card should be logically related. If the content describes different distinct topics, split them into separate cards to reduce cognitive load.
+- Limit card content to a single topic
+- Heading levels inside a card must respect the overall page outline
+- Content should be logically related; split different topics into separate cards
 
 # Menu
 
@@ -5775,7 +5904,7 @@ Used exclusively for communicating what navigation action the user should expect
 
 # Popover
 
-
+
 
 **Description** The Popover is a floating container used to display content on top of other UI elements. It is positioned relative to a reference element (usually a button or an input) and serves as a foundational primitive for building complex interactive components like menus, date pickers, and dropdowns,.
 

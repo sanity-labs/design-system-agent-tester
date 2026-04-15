@@ -12,6 +12,7 @@
     "test:training:cli": "node --env-file=.env src/index.js --prompt training --runner cli",
     "test:both:cli": "node --env-file=.env src/index.js --prompt both --runner cli",
     "report": "node --env-file=.env src/report.js",
+    "summarize": "node src/summarize.js",
     "rescreenshot": "node --env-file=.env src/rescreenshot.js",
     "rescreenshot:control": "node --env-file=.env src/rescreenshot.js --prompt control",
     "rescreenshot:training": "node --env-file=.env src/rescreenshot.js --prompt training",

@@ -204,7 +204,61 @@ npm run rebuild:training      # Rebuild training iterations only
 npm run test:a11y             # Run standalone a11y tests against latest run
 npm run test:a11y:control     # A11y tests for control iterations only
 npm run test:a11y:training    # A11y tests for training iterations only
+
+npm run summarize             # Summarize all runs (print to stdout)
+npm run summarize -- --count 8                        # Last 8 runs
+npm run summarize -- --from 2026-04-14-12.43          # From a specific run onward
+npm run summarize -- --prompt training --count 5      # Training prompt only, last 5 runs
+npm run summarize -- --count 10 --save                # Save to output/summary-YYYY-MM-DD-HH.MM.md
 ```
+
+## Summarizing Multiple Runs
+
+`src/summarize.js` aggregates `report.json` files across any number of past runs into a single Markdown summary. This is useful for tracking how metrics trend across prompt iterations or model changes.
+
+```
+node src/summarize.js [options]
+```
+
+### Options
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--output` | `-o` | `./output` | Directory containing run folders to scan |
+| `--count` | `-n` | all | Number of most-recent runs to include |
+| `--from` | `-f` | — | Include runs at-or-after this folder name (e.g. `2026-04-14-13.00`) |
+| `--prompt` | `-p` | `both` | Filter to `control`, `training`, or `both` |
+| `--save` | `-s` | false | Write to `output/summary-YYYY-MM-DD-HH.MM.md` instead of stdout |
+| `--help` | `-h` | — | Print usage |
+
+### Examples
+
+```
+# Last 8 runs, both prompts, print to stdout
+node src/summarize.js --count 8
+
+# All runs since a specific date, save to file
+node src/summarize.js --from 2026-04-14-14.20 --save
+
+# Training prompt only, last 5 runs
+node src/summarize.js --prompt training --count 5
+
+# Scan a different output directory
+node src/summarize.js --output /path/to/other/output --count 10
+```
+
+### Summary output
+
+The summary includes:
+
+- **Aggregate averages table** — mean of each metric across all selected runs, with a Δ column (✅/❌) comparing training vs control
+- **Per-run inline styles** — total, per-iteration average, and `Box`-specific count for each run
+- **Per-run accessibility** — axe violation totals and per-iteration averages
+- **Per-run performance** — FCP and average render time
+- **Per-run lines of code & fixes** — LoC average, fix attempts per iteration, and how many iterations compiled clean on the first try
+- **Metric variance table** — std dev across runs for each key metric, so you can see how stable results are
+
+Runs with no `report.json`, or runs that don't contain the requested prompt, are skipped with a warning rather than causing an error.
 
 ## Output
 
