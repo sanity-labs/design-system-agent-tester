@@ -7,9 +7,10 @@ import { resolve } from "node:path";
  * @param {Record<string, Array<object>>} allResults - Keyed by prompt name, array of iteration results
  * @param {string} outputDir - Base output directory
  */
-export async function generateReport(allResults, outputDir) {
+export async function generateReport(allResults, outputDir, promptText = null) {
   const report = {
     generatedAt: new Date().toISOString(),
+    promptText: promptText ?? null,
     prompts: {},
   };
 
@@ -355,6 +356,8 @@ function analyzeAccessibility(iterations) {
     "touch-targets",
     "heading-hierarchy",
     "spacing-and-reflow",
+    "skip-navigation",
+    "dark-mode-contrast",
     "axe-core-full",
   ];
 
@@ -444,6 +447,11 @@ function analyzeAccessibility(iterations) {
 function renderMarkdown(report) {
   let md = `# Agent Test Report\n\n`;
   md += `**Generated:** ${report.generatedAt}\n\n`;
+
+  if (report.promptText) {
+    md += `## 📋 Interface Brief\n\n`;
+    md += `> ${report.promptText.split("\n").join("\n> ")}\n\n`;
+  }
 
   for (const [promptKey, data] of Object.entries(report.prompts)) {
     md += `---\n\n`;

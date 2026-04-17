@@ -1,4 +1,4 @@
-Create a simple interface that mimics Sanity Studio using Sanity UI.  
+[ADD PROMPT HERE]  
 
 # Instructions
 * DO NOT USE OLDER VERSIONS OF SANITY ICONS OR SANITY UI.
@@ -27,6 +27,7 @@ Create a simple interface that mimics Sanity Studio using Sanity UI.
 
   All other `@sanity/ui` components — `Avatar`, `Stack`, `Button`, `Badge`, `TextInput`, `Label`, `Tooltip`, `Menu`, `MenuItem`, `MenuButton`, `Toast`, `Popover`, etc. — continue to be imported from `@sanity/ui` as normal.
 
+
   **Quick import reference:**
 
   | Component | Import from |
@@ -39,6 +40,7 @@ Create a simple interface that mimics Sanity Studio using Sanity UI.
   | `Divider` | `./ui-poc/packages/ui/src/components/Divider` |
   | Everything else | `@sanity/ui` |
 
+* Work within the constraints of Sanity UI the `ui-poc` package. **Do not make custom components if one exists in either library.**
 * Rely on the guidelines below for guidance on how to use the UI library.
 * The project should be built on top of Vite
 * Use as few NPM packagess as possible 
@@ -53,6 +55,36 @@ Create a simple interface that mimics Sanity Studio using Sanity UI.
 
 This guide walks you through setting up a Sanity UI project from scratch. By the end, you will have a working Vite + React app. It includes a sidebar, toolbar, content area, and proper accessibility structure.
 
+## Import sources — the one rule to memorize
+
+Components come from **two** packages. Importing from the wrong one produces **no TypeScript error and no runtime warning** — the component silently renders with a different API.
+
+| Import from `'ui'` (ui-poc) | Import from `'@sanity/ui'` |
+|------------------------------|----------------------------|
+| `Box` | `Badge` |
+| `Card` | `Button` |
+| `Divider` | `Checkbox`, `Dialog` |
+| `Flex` | `Inline`, `Label` |
+| `Grid` | `Menu`, `MenuButton`, `MenuItem`, `MenuDivider` |
+| `Heading` | `Popover`, `Select`, `Spinner`, `Stack` |
+| `Text` | `Switch`, `Tab`, `TabList`, `TabPanel` |
+| | `TextArea`, `TextInput`, `Tooltip` |
+| | `ThemeProvider`, `studioTheme`, `buildTheme` |
+| | `ToastProvider`, `useToast` |
+
+```tsx
+// ui-poc layout primitives
+import { Box, Flex, Grid, Card, Heading, Text, Divider } from 'ui'
+
+// everything else
+import { Button, Stack, Badge, TextInput, Select, Label } from '@sanity/ui'
+import { SearchIcon, CloseIcon } from '@sanity/icons'
+```
+
+> ⛔ If a Box, Flex, Card, Heading, or Text renders with unexpected behavior and no error, **check the import source first.** This is the #1 cause of silent failures across all test runs.
+
+---
+
 ## Create the project
 
 Start with a Vite project and add the packages Sanity UI needs.
@@ -63,13 +95,34 @@ cd my-app
 npm install @sanity/ui @sanity/icons styled-components classnames
 ```
 
-> **Important:** Use the Babel React plugin, not SWC. `@sanity/ui` uses styled-components which requires Babel for correct behavior:
->
-> ```sh
-> npm install @vitejs/plugin-react
-> ```
->
-> Do NOT use `@vitejs/plugin-react-swc`. If you created the project with `--template react-swc-ts`, reinstall the Babel plugin and update `vite.config.ts`.
+⛔ **You must use `@vitejs/plugin-react` (Babel), not the SWC variant.** `@sanity/ui` uses `styled-components`, which requires Babel for correct behavior. Using the SWC plugin causes styled-components to silently produce unstyled or broken output — no error is thrown.
+
+The default Vite template now installs SWC. Always verify which plugin your project uses:
+
+```sh
+npm install @vitejs/plugin-react
+# then check vite.config.ts — it must import from '@vitejs/plugin-react', not '@vitejs/plugin-react-swc'
+```
+
+If your `vite.config.ts` imports `@vitejs/plugin-react-swc`, replace it with `@vitejs/plugin-react`. The failure is completely silent — styled-components renders without styles and no error message points to the cause.
+
+## Known pitfalls — read before writing any code
+
+The following failures have **no error message, no TypeScript warning, and no console output**. They are the most common reasons a working-looking implementation silently breaks.
+
+| Pitfall | Symptom | One-line fix |
+|---------|---------|-------------|
+| Layout props on `Card` | Layout broken, no error | Wrap in `<Box flexGrow={1}>` |
+| `Heading` without `level` | Wrong `<h2>` in heading hierarchy | `<Heading level={1}>` |
+| `tone="primary"` on Button | Fails WCAG AA contrast silently | Use `tone="default"` |
+| `Stack` with `gap` / `Flex` with `space` | Spacing ignored | `Flex`→`gap`, `Stack`→`space` |
+| Wrong package import | Different API, no error | `Box`/`Flex`/`Card`/`Heading`/`Text` → `import from 'ui'` |
+| `styles.css` not imported | All components unstyled | Import in `main.tsx` (see below) |
+| SWC plugin instead of Babel | Styled-components unstyled | Use `@vitejs/plugin-react` |
+
+See `silent-failures.md` for the full reference including `MenuButton`, `Tooltip`, `--card-border-color`, and more.
+
+---
 
 ## Project structure
 
@@ -101,10 +154,17 @@ my-app/
 
 ## Import `ui-poc` components
 
-> ⚠ **You must also import the stylesheet.** See the `main.tsx` section below. Import `ui-poc/packages/ui/src/styles.css` at the app entry point. Without it, components render without styles. The app throws no error.
+⛔ **`styles.css` must be imported or nothing will render correctly — and no error will tell you why.**
+
+Omitting this import causes all ui-poc components (Box, Flex, Grid, Heading, Text, Card, Divider) to render as bare, unstyled HTML elements. No console error is thrown. No TypeScript warning fires. No hint appears anywhere that the import is missing. This is the most commonly missed setup step.
+
+Import it in `main.tsx` — see that section below.
 
 ```tsx
 // Box, Flex, Grid, Divider, Heading, Text, and Card come from ui-poc — NOT from @sanity/ui
+// With the Vite alias configured, 'ui' is the canonical import:
+import { Box, Flex, Grid, Card, Heading, Text, Divider } from 'ui'
+// Without the alias (e.g. in a file that can't use the alias), use the full path:
 import { Box }     from '../ui-poc/packages/ui/src/components/Box'
 import { Flex }    from '../ui-poc/packages/ui/src/components/Flex'
 import { Grid }    from '../ui-poc/packages/ui/src/components/Grid'
@@ -415,6 +475,14 @@ import { Button } from '@sanity/ui'
 
 Card renders a distinct visual surface with a background, border, and optional tone. Use it to group related content that deserves its own visual container. Do not use Card for structural UI regions like sidebars, toolbars, or scroll containers — those are layout, not content surfaces.
 
+**Density quick reference** — Card uses `density` instead of separate `padding` and `radius` props:
+
+| `density` | Padding | Radius | Use when |
+|-----------|---------|--------|----------|
+| `"tight"` | 8px | 3px | High-density lists, compact items |
+| `"medium"` (default) | 12px | 7px | Standard content cards |
+| `"loose"` | 20px | 11px | Low-density layouts, featured cards |
+
 ```jsx
 {/* ✓ A content surface — grouped content on a distinct background */}
 <Card>
@@ -449,7 +517,9 @@ Stack adds even spacing between children. The prop is `space`, not `gap`. (`Flex
 
 ### Flex lays children out in a row
 
-Flex defaults to horizontal direction. Use `alignItems`, `justifyContent`, `gap`, and `flexWrap` to control the layout. Add `flexWrap="wrap"` to any row that might overflow at narrow widths.
+Flex defaults to horizontal direction. Use `alignItems`, `justifyContent`, `gap`, and `flexWrap` to control the layout.
+
+> ⚠️ **Every Flex with 2+ children must set `flexWrap="wrap"`.** This includes both the outer page layout and any inner toolbars or action rows. Missing wrap on even one Flex causes a 320px reflow failure (WCAG 1.4.10 AA). See `flex.md` → Accessibility → Reflow checklist.
 
 ```jsx
 <Flex alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={2}>
@@ -485,13 +555,295 @@ When a button has only an icon and no `text` prop, add `aria-label`. The `toolti
 <Button icon={SearchIcon} mode="bleed" aria-label="Search" />
 ```
 
+### Form inputs always need a Label
+
+Every `Select`, `TextInput`, `TextArea`, and `Switch` must be wrapped in a `Stack` with an associated `Label`. A bare input with no label is an axe `select-name` critical violation (WCAG 4.1.2 A).
+
+```tsx
+{/* ✗ — axe critical: no accessible name */}
+<Select onChange={handleChange}>...</Select>
+
+{/* ✓ — required for all form inputs */}
+<Stack space={1}>
+  <Label htmlFor="category">Category</Label>
+  <Select id="category" onChange={handleChange}>...</Select>
+</Stack>
+```
+
+The same pattern applies to `TextInput`, `TextArea`, and `Switch`. See `select.md`, `textinput.md`, `textarea.md`, and `switch.md`.
+
 ## Next steps
 
 - Add an inspector sidebar with `Box as="aside" aria-label="Inspector"`.
 - Add a `Menu` and `MenuButton` for dropdown actions. `MenuButton` requires an `id` prop for ARIA and a `popover` prop with `portal: true` inside `overflow: hidden` containers. See `menu.md`.
 - Use `tone` on Card and Button to show status (`"positive"`, `"caution"`, `"critical"`). Pair each tone with an icon. Do not use `tone="primary"` in default mode — it fails contrast.
 - Use `useToast()` for async action feedback. See `toast.md` for the full `toast.push()` API.
+- **Custom brand colors (warm backgrounds, dark sidebars, amber accents):** Override existing Sanity UI palette tokens (`--gray-*`, `--blue-*`, etc.) on `:root` in `global.css`. Use `Card inverted` for dark regions. Do not use inline `style={{ background }}` or `style={{ color }}` on Sanity UI components. See `patterns-custom-theming.md`.
 - See the component docs for Button, Card, Stack, Flex, Box, Heading, and Text for full prop references and accessibility guidelines.
+
+---
+
+## Available components
+
+All components come from one of two packages. Importing from the wrong source produces no error but silently renders the wrong component.
+
+### From `ui` (ui-poc)
+
+```tsx
+import { Box, Flex, Grid, Card, Heading, Text, Divider } from 'ui'
+```
+
+| Component | Purpose |
+|-----------|---------|
+| `Box` | Structural container — padding, margin, borders, sizing, overflow |
+| `Flex` | One-dimensional layout — row or column with alignment and gap |
+| `Grid` | Two-dimensional layout — rows and columns |
+| `Card` | Content surface — background, border, tone, density |
+| `Heading` | Semantic heading (`level` 1–6, visual `size` 0–5) |
+| `Text` | Body copy, captions, metadata (`size` 0–4, `color`, `muted`, `lines`) |
+| `Divider` | Horizontal rule — thematic break between sections |
+
+### From `@sanity/ui`
+
+```tsx
+import {
+  Avatar, Badge, Button, Checkbox,
+  Dialog, Inline, Label,
+  Menu, MenuButton, MenuDivider, MenuItem,
+  Popover, Select, Spinner, Stack, Switch,
+  Tab, TabList, TabPanel,
+  TextArea, TextInput, Tooltip,
+  ThemeProvider, studioTheme, buildTheme,
+  ToastProvider, useToast,
+} from '@sanity/ui'
+```
+
+| Component | Purpose |
+|-----------|---------|
+| `Avatar` | User profile photo or initials |
+| `Badge` | Small status or count label |
+| `Button` | Action trigger — modes: `default`, `ghost`, `bleed` |
+| `Checkbox` | Boolean form input |
+| `Dialog` | Modal overlay |
+| `Inline` | Horizontal wrapping row for variable-width items |
+| `Label` | Form field label — always pair with `htmlFor` |
+| `Menu` | Dropdown menu container |
+| `MenuButton` | Button that opens a Menu — requires `id` prop |
+| `MenuDivider` | Separator inside a Menu |
+| `MenuItem` | Clickable item inside a Menu |
+| `Popover` | Non-modal floating panel |
+| `Select` | Native dropdown — one value from a fixed list. See `select.md`. |
+| `Spinner` | Loading indicator |
+| `Stack` | Vertical column with even `space` between children |
+| `Switch` | Toggle for boolean settings |
+| `Tab` / `TabList` / `TabPanel` | Tabbed navigation |
+| `TextArea` | Multi-line text input |
+| `TextInput` | Single-line text input. See `textinput.md`. |
+| `Tooltip` | Hover/focus label for icon-only elements |
+| `ThemeProvider` | Root theme context — required at app root |
+| `studioTheme` | Pre-built theme object |
+| `buildTheme()` | Customisable theme builder |
+| `ToastProvider` | Required for `useToast()` — must be inside `ThemeProvider` |
+| `useToast()` | Hook to push toast notifications |
+
+### Not available — use native HTML
+
+| Need | Use instead |
+|------|-------------|
+| Multi-line text | `TextArea` from `@sanity/ui` |
+| Date / time picker | Native `<input type="date">` / `<input type="time">` |
+| Multi-select | Composed `Checkbox` list |
+| Data table | Native `<table>` — see `table.md` |
+| Navigation item | `Menu` + `MenuItem` or `Button mode="bleed"` — see `patterns-navigation.md` |
+
+# Code style guide
+
+Conventions for writing reliable, consistent code with the Sanity UI system. These rules address the most common sources of silent failures and build errors observed across iterative development.
+
+---
+
+## String literals
+
+### Use template literals or double quotes for strings containing apostrophes
+
+Single-quoted strings break at apostrophes. This causes a Vite build error (`Expected "}" but found "s"`) that is not always clearly reported — especially inside large hardcoded data objects.
+
+```tsx
+// ✗ — apostrophe inside single-quoted string causes a build error
+const abstract = 'Fatima\'s approach to roadmapping cut the team\'s delivery time.'
+
+// ✓ — template literal
+const abstract = `Fatima's approach to roadmapping cut the team's delivery time.`
+
+// ✓ — double quotes
+const abstract = "Fatima's approach to roadmapping cut the team's delivery time."
+```
+
+**Rule:** Use template literals for all multi-word string values in hardcoded data. Reserve single quotes for short identifiers and prop values that contain no natural language.
+
+---
+
+## Imports
+
+### Always import from the correct package
+
+Box, Flex, Grid, Card, Heading, Text, and Divider come from `ui` (ui-poc). Everything else comes from `@sanity/ui`. Importing from the wrong source produces no TypeScript error and no runtime warning — the component silently renders with the wrong API.
+
+```tsx
+// ✗ — Box from @sanity/ui has a completely different API
+import { Box, Flex, Card } from '@sanity/ui'
+
+// ✓ — layout primitives from ui-poc
+import { Box }  from '../ui-poc/packages/ui/src/components/Box'
+import { Flex } from '../ui-poc/packages/ui/src/components/Flex'
+import { Card } from '../ui-poc/packages/ui/src/components/Card'
+
+// ✓ — everything else from @sanity/ui
+import { Button, Stack, Badge, TextInput, TextArea } from '@sanity/ui'
+```
+
+See `quick-start.md` — "Available components" — for the full import source reference.
+
+### Use named imports only
+
+```tsx
+// ✗ — imports the entire library
+import * as SanityUI from '@sanity/ui'
+
+// ✓ — tree-shakeable named imports
+import { Button, Stack } from '@sanity/ui'
+import { SearchIcon } from '@sanity/icons'
+```
+
+---
+
+## Props vs inline styles
+
+### Always prefer props over `style={{}}`
+
+Every visual attribute that has a prop equivalent must use the prop. Inline styles bypass the spacing scale, break dark mode, and are not responsive-array aware.
+
+```tsx
+// ✗
+<Box style={{ padding: '12px', width: '260px', overflow: 'hidden' }} />
+
+// ✓
+<Box padding={3} width="260px" overflow="hidden" />
+```
+
+**Inline styles are only acceptable for:**
+- Values with no prop equivalent (e.g. `transform`, `gridTemplateAreas`)
+- CSS custom property overrides for a specific instance
+- Raw `<table>`, `<textarea>`, and other native elements with no Sanity UI equivalent
+
+See `box.md` → "Inline style alternatives" for the full lookup table.
+
+---
+
+## TypeScript
+
+### Event handlers: use `currentTarget`, not `target`
+
+> **This is the canonical reference for input event handling in Sanity UI.** The `select.md`, `textinput.md`, and `textarea.md` docs all follow this same pattern. When in doubt, refer here.
+
+Sanity UI input components (`TextInput`, `Select`, `TextArea`) wrap native browser events. Use `event.currentTarget` to read values and cast the event type explicitly.
+
+```tsx
+// ✗ — event.target may be the wrong type
+<TextInput onChange={(e) => setValue(e.target.value)} />
+
+// ✓
+<TextInput
+  onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+    setValue(e.currentTarget.value)
+  }}
+/>
+
+// ✓ — same pattern for Select
+<Select
+  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
+    setFilter(e.currentTarget.value)
+  }}
+/>
+
+// ✓ — Switch uses checked, not value
+<Switch
+  checked={isEnabled}
+  onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+    setIsEnabled(e.currentTarget.checked)  // boolean, not string
+  }}
+/>
+```
+
+### Responsive arrays: use `null` to inherit, not `undefined`
+
+`null` is the documented skip value for responsive arrays. `undefined` is accepted by TypeScript but does not reliably inherit the previous breakpoint's value.
+
+```tsx
+// ✗
+<Flex flexDirection={['column', undefined, 'row']} />
+
+// ✓
+<Flex flexDirection={['column', null, 'row']} />
+```
+
+---
+
+## Component patterns
+
+### Wrap layout props around Card, not on it
+
+Card silently ignores all flex-child and layout props with no TypeScript error.
+
+```tsx
+// ✗ — silently broken
+<Card flexGrow={1} minWidth="0" overflowY="auto">...</Card>
+
+// ✓
+<Box flexGrow={1} minWidth="0" overflowY="auto">
+  <Card>...</Card>
+</Box>
+```
+
+### Wrap Stack in Box when it needs to be a flex child
+
+Stack does not accept `flexGrow`, `flexShrink`, or `flexBasis`.
+
+```tsx
+// ✗ — flexGrow on Stack silently does nothing
+<Stack space={3} flexGrow={1}>...</Stack>
+
+// ✓
+<Box flexGrow={1} overflowY="auto">
+  <Stack space={3}>...</Stack>
+</Box>
+```
+
+### Use `space` on Stack and `gap` on Flex — never the other way round
+
+Using `gap` on Stack or `space` on Flex silently does nothing.
+
+```tsx
+// ✗
+<Flex space={3}>...</Flex>
+<Stack gap={3}>...</Stack>
+
+// ✓
+<Flex gap={3}>...</Flex>
+<Stack space={3}>...</Stack>
+```
+
+### Never use `Box as="button"`
+
+`Box as="button"` inherits browser button defaults (border, background, padding, cursor) with no prop-based way to reset them. Use `Button` instead.
+
+```tsx
+// ✗
+<Box as="button" onClick={handleClick}>Label</Box>
+
+// ✓
+<Button mode="bleed" text="Label" onClick={handleClick} />
+```
 
 # Inline style overrides
 
@@ -500,6 +852,26 @@ When a button has only an icon and no `text` prop, add `aria-label`. The `toolti
 ## Rule
 
 Use `style` only when this guide lists it as acceptable. If this guide shows a prop, use the prop. If a pattern is not listed here, check whether a prop covers it before reaching for `style`.
+
+## Most common mistakes
+
+These six inline styles appear most often in test runs. Every one has a prop equivalent that agents miss.
+
+| Inline style agents write | Prop to use instead |
+|---|---|
+| `<Flex style={{ flexWrap: 'wrap' }}>` | `<Flex flexWrap="wrap">` |
+| `<Flex style={{ minHeight: '100vh' }}>` | `<Flex minHeight="100vh">` |
+| `<Box style={{ minWidth: 0 }}>` | `<Box minWidth="0">` |
+| `<Box style={{ overflow: 'hidden' }}>` | `<Box overflow="hidden">` |
+| `<Box style={{ width: '260px' }}>` | `<Box width="260px">` |
+| `<Box style={{ display: 'flex', flexDirection: 'column' }}>` | Use `<Flex flexDirection="column">` instead of `<Box>` |
+
+> ⛔ **If you are writing `style={{...}}` on a Box or Flex and the property is in the table above, stop.** Use the prop. Box and Flex accept `width`, `minWidth`, `maxWidth`, `height`, `minHeight`, `maxHeight`, `overflow`, `overflowX`, and `overflowY` as **string props that take any CSS value** — not just token-scale numbers.
+
+Two other frequent mistakes are not Box/Flex prop issues but component-choice issues:
+
+- **Native `<button style={{...}}>` for nav items** — use `Menu` + `MenuItem` or `Button mode="bleed"` instead. See `patterns-navigation.md`.
+- **Inline `style={{...}}` on `<th>` and `<td>`** — put table styles in `global.css` using palette tokens. See `table.md`.
 
 ## Quick lookup: CSS property → prop
 
@@ -537,6 +909,9 @@ Use this table when you know the CSS property you want to set.
 | `border` (themed) | `style={{ borderColor: 'var(--card-border-color)' }}` | `border` prop on Box or Flex |
 | `color` (themed) | `style={{ color: 'var(--card-fg-color)' }}` | `<Text color="default">` wrapping content |
 | `font-size` (for icons) | `style={{ fontSize: '1.25rem' }}` | Wrap in `<Text as="span" size={N}>` |
+| `color` (text muted) | `style={{ color: '#666' }}` | `<Text color="muted">` or `<Text muted>` |
+| `color` (text semantic) | `style={{ color: 'green' }}` | `<Text color="positive">`, `color="critical"`, etc. |
+| `font-weight` (text) | `style={{ fontWeight: 600 }}` | `<Text weight="semibold">` |
 
 **Width, height, minWidth, maxWidth, minHeight, and maxHeight accept any CSS string value.** They are not limited to the token scale. Pixel values, viewport units, percentages, and `calc()` all work as prop values.
 
@@ -723,6 +1098,45 @@ Keep inline styles to the fewest properties needed. Setting more than two style 
 - **Full prop reference:** `core-component-props.md` lists every shared prop for Box, Flex, and Grid.
 - **Layout patterns:** `layouts.md` and `stretch-layouts.md` show full app shell compositions using props.
 - **Component choice:** The "Choosing between Box, Flex, Grid, Stack, Inline, and Container" table in `box.md` and `flex.md` helps pick the right component.
+- **Custom brand colors without inline styles:** `patterns-custom-theming.md` shows how to override existing Sanity UI palette tokens (`--gray-*`, `--blue-*`, etc.) on `:root` and use `Card inverted` for dark regions — instead of inline `style={{ background }}` or `style={{ color }}`.
+
+# Silent failures quick reference
+
+These are the most commonly encountered patterns that **fail without any error, warning, or TypeScript feedback**. When a layout breaks, a style is missing, or behavior is wrong with zero console output, check here first.
+
+---
+
+| # | Trigger | Symptom | Fix |
+|---|---------|---------|-----|
+| 1 | Placing `flexGrow`, `minWidth`, `overflow`, or any layout prop directly on `Card` | Layout silently broken — card doesn't grow, overflow is ignored | Wrap Card in `Box` or `Flex`: `<Box flexGrow={1}><Card>` |
+| 2 | Omitting `level` on `Heading` | `<h2>` rendered regardless of context, breaking heading hierarchy | Always set `level` explicitly: `<Heading level={1}>` |
+| 3 | Using `tone="primary"` on `Button` or `Badge` | Button renders but fails WCAG AA contrast (4.29:1) — looks correct, ships broken | Use `mode="default" tone="default"` for primary actions |
+| 4 | Passing `flexGrow`, `flexShrink`, or `flexBasis` to `Stack` | Stack doesn't grow or shrink — layout broken silently | Use `<Flex flexDirection="column" gap={3}>` or wrap in `<Box flexGrow={1}>` |
+| 5 | Importing `Box`, `Flex`, `Card`, `Heading`, or `Text` from `@sanity/ui` | Different prop API, no error — e.g. `padding` on Box silently does nothing | Import these from `'ui'`: `import { Box } from 'ui'` |
+| 6 | Omitting `import '../ui-poc/packages/ui/src/styles.css'` from `main.tsx` | All ui-poc components render as unstyled HTML — no error thrown | Add the import to `main.tsx`; see quick-start.md |
+| 7 | Using `@vitejs/plugin-react-swc` instead of `@vitejs/plugin-react` | All styled-components styles missing — completely unstyled output, no error | Replace the plugin; see quick-start.md setup |
+| 8 | Using `space` prop on `Flex` (or `gap` on `Stack`) | Spacing has no effect — silently wrong prop on wrong component | `Flex` uses `gap`; `Stack` uses `space` — they are not interchangeable |
+| 9 | Using `var(--card-border-color)` outside a `Card` ancestor | Border is invisible — CSS variable resolves to `undefined` silently | Use `var(--gray-200)` — it resolves everywhere |
+| 10 | Omitting `id` on `MenuButton` | ARIA relationship broken — screen readers can't associate trigger with menu | Always set `id`: `<MenuButton id="my-menu" ...>` |
+| 11 | `MenuButton` inside `overflow: hidden` without `popover={{ portal: true }}` | Menu is invisible or clipped — no error, no warning | Add `popover={{ portal: true }}` to the MenuButton |
+| 12 | Wrapping a non-ref-forwarding component in `Tooltip` | Tooltip never appears — no error | Use a native element or Sanity UI component as the child, or wrap with `React.forwardRef` |
+| 13 | `Text` inside `Stack` without `as="p"` | Text renders as inline `<span>`, items crowd together | Set `as="p"` on Text components used as block-level content |
+| 14 | Using `Card inverted` or dark inline styles on structural regions (sidebar, header) | Visual inconsistency — dark structural regions are not a supported pattern | Keep all structural regions light-themed; see `layouts.md` |
+
+---
+
+## Diagnostic checklist
+
+When something doesn't look right and there's no error:
+
+- [ ] Is `Card` receiving layout props? → Wrap in `Box`
+- [ ] Is `Heading` missing a `level`? → Add `level={N}`
+- [ ] Is a `Flex` or `Stack` using the wrong spacing prop? → `Flex` = `gap`, `Stack` = `space`
+- [ ] Are ui-poc components imported from `@sanity/ui`? → Switch to `import { Box } from 'ui'`
+- [ ] Is `styles.css` imported in `main.tsx`? → Add it
+- [ ] Is `var(--card-border-color)` used outside a Card? → Replace with `var(--gray-200)`
+- [ ] Is a MenuButton clipping? → Add `popover={{ portal: true }}`
+- [ ] Is a Tooltip invisible? → Check that its child forwards refs
 
 # Accessibility standards
 
@@ -1812,7 +2226,7 @@ When choosing how to apply color, follow this order:
 - **Direct color** — As a last resort, for elements outside the `@sanity/ui` component system (such as charts or data visualizations), reference `@sanity/color` values.
 
 ### What not to do
-
+- **Avoid using custom colors** without creating a full theme. Sanity UI's components are built to work with specific color patterns. 
 - **Don't use hardcoded hex values** for colors that `@sanity/ui` components manage. Every `color`, `background-color`, and `border-color` in the system flows through CSS custom properties. Hardcoded values break in dark mode, ignore tone contexts, and diverge from the palette.
 - **Don't reference **`--card-*`** variables** in component styles unless building a custom component that takes part in the Card color context. Prefer `@sanity/ui` components with `tone` and `muted` props.
 - **Don't use **`ThemeColorProvider`** directly** unless you are building infrastructure-level components. Use Card's `tone` and `scheme` props, which wrap `ThemeColorProvider` with the correct semantics.
@@ -2146,6 +2560,30 @@ For the full list of 200+ icons, see the icon guidelines reference
 1. **Don't use a "close enough" icon.** If no icon in the library clearly represents the concept, it's better to use no icon at all than one that could be misinterpreted. Consider requesting a new icon for the specific use case.
 1. **Be consistent across the product.** Once an icon is chosen for a concept, use that same icon everywhere the concept appears. Don't use `CogIcon` for settings in one place and `ControlsIcon` in another.
 1. **Match established conventions.** Users bring expectations from other software. A magnifying glass means search. A trash can means delete. A pencil means edit. Don't repurpose universally understood icons for novel meanings.
+
+
+### Common semantic concepts — icon lookup
+
+Some concepts don't map obviously to an icon name. Use this table before guessing:
+
+| Concept | Use this icon | Notes |
+|---------|---------------|-------|
+| Location / venue / place | `PinIcon` or `EarthGlobeIcon` | `LocationIcon` does not exist |
+| More options (vertical dots) | `EllipsisVerticalIcon` | Three dots stacked vertically |
+| More options (horizontal dots) | `EllipsisHorizontalIcon` | Three dots in a row |
+| Phone / contact number | `MobileDeviceIcon` or `EnvelopeIcon` | `PhoneIcon` does not exist |
+| Change status / sync | `SyncIcon` | `RefreshIcon` does not exist |
+| Film / video / media | `DocumentVideoIcon` or `PlayIcon` | `FilmIcon` does not exist |
+| Article / document | `DocumentTextIcon` | |
+| Person / user profile | `UserIcon` | Plural: `UsersIcon` |
+| Tag / label / category | `TagIcon` | Plural: `TagsIcon` |
+| Settings / configuration | `CogIcon` | Also `ControlsIcon` for filter panels |
+| Notification / alert | `BellIcon` | |
+| Calendar / date | `CalendarIcon` | |
+| Collapse sidebar / hide panel | `PanelLeftIcon` | Not `ChevronLeftIcon` — use `PanelLeftIcon` for panel controls |
+| Expand sidebar / show panel | `PanelRightIcon` | Paired with `PanelLeftIcon` |
+
+> **If an icon name doesn't resolve, it probably doesn't exist.** Browse the full set at [sanity.io/icons](https://icons.sanity.io) rather than guessing adjacent names.
 
 ### Naming conventions
 
@@ -3303,6 +3741,935 @@ pnpm add --save-exact styled-components@npm:@sanity/css-in-js
 | Avoid contrast failures | Do not use `tone="primary"` in default mode — 4.29:1 fails AA |
 | CSS reset | Add `box-sizing: border-box` and `body { margin: 0 }` — theme does not inject global styles |
 
+---
+
+## Global vs Card-scoped CSS custom properties
+
+Not all CSS custom properties work everywhere. Understanding the scope prevents silent failures where a variable resolves to `undefined` and its rule has no effect.
+
+### Globally available (work anywhere in the DOM)
+
+The raw palette tokens are defined on `:root` and resolve everywhere:
+
+```css
+var(--gray-50)  … var(--gray-950)
+var(--blue-50)  … var(--blue-950)
+var(--green-50) … var(--green-950)
+var(--red-50)   … var(--red-950)
+var(--yellow-50) … var(--yellow-950)
+var(--purple-50) … var(--purple-950)
+/* … and all other palette hues */
+```
+
+Use these freely on native elements, tables, and any element that doesn't live inside a Card:
+
+```tsx
+<td style={{ borderBottom: '1px solid var(--gray-200)' }}>
+<tr style={{ background: 'var(--blue-50)' }}>
+```
+
+### Card-scoped only (undefined outside a Card ancestor)
+
+These variables are written onto `.sui-Card` elements and cascade to descendants:
+
+| Variable | Description |
+|----------|-------------|
+| `var(--card-bg)` | Card background colour |
+| `var(--card-border-color)` | Card border colour |
+| `var(--card-color)` | Card text colour (set in inverted mode) |
+
+> ⛔ **Do not use `--card-*` variables outside a Card ancestor.** They silently resolve to `undefined` — no error, no visible output. Use the equivalent palette token (`var(--gray-200)` instead of `var(--card-border-color)`) for elements outside Card.
+
+### Quick reference
+
+| Need | Outside Card | Inside Card |
+|------|-------------|-------------|
+| Border colour | `var(--gray-200)` | `var(--card-border-color)` or `var(--gray-200)` |
+| Background tint | `var(--blue-50)`, `var(--gray-50)`, etc. | `var(--card-bg)` or palette token |
+| Text colour | `var(--gray-900)`, `var(--gray-500)`, etc. | `var(--card-color)` or palette token |
+
+# Custom theming without inline styles
+
+When an interface brief calls for custom brand colors, warm backgrounds, dark sidebars, or accent hues outside the default palette, the correct approach is to override the existing Sanity UI CSS custom properties — not to scatter `style={{ background: '...' }}` across components.
+
+This guide shows every technique available, in priority order. Use the first technique that solves your problem.
+
+---
+
+## Why inline color styles are wrong
+
+Inline `style={{ background: '#fdf8f4' }}` or `style={{ color: '#d97706' }}` on Sanity UI components:
+
+- **Breaks dark mode.** Hardcoded values ignore scheme changes.
+- **Ignores tone context.** Children inside a toned Card inherit `--card-*` variables. Inline colors bypass that inheritance.
+- **Cannot be overridden by the theme.** A future palette change has no effect on inline values.
+- **Fails the style-overrides rule.** See `style-overrides.md` — use `style` only for properties with no prop and no CSS variable equivalent.
+
+Every color that appears on screen should flow from the theme, through CSS custom properties, to the component. The techniques below show how.
+
+---
+
+## How the variable system works
+
+All Sanity UI color flows through two layers of CSS custom properties. Understanding these layers is essential before overriding anything.
+
+### Layer 1: Global palette tokens (`:root`)
+
+Defined in `color.css` on `:root`. Available everywhere in the DOM.
+
+```css
+:root {
+  --black: #0b0b0b;
+  --white: #ffffff;
+  --gray-50: #f1f1f1;
+  --gray-100: #e3e3e3;
+  --gray-200: #c7c7c7;
+  /* … --gray-300 through --gray-950 */
+  --blue-50: #e5f2ff;
+  --blue-100: #cbe5ff;
+  /* … --blue-200 through --blue-950 */
+  --green-50: #e7f6e3;
+  /* … all hues: green, red, yellow, orange, purple, magenta, cyan */
+}
+```
+
+Nine hues (gray, blue, green, red, yellow, orange, purple, magenta, cyan), each with 11 tint steps (50–950), plus `--black` and `--white`.
+
+### Layer 2: Card-scoped tokens
+
+Defined on `.sui-Card` elements. Cascade to all descendants. **Undefined outside a Card ancestor.**
+
+```css
+.sui-Card {
+  --card-bg: var(--white);
+  --card-border-color: var(--gray-100);
+  --card-color: inherit;
+}
+```
+
+Card tone and inverted variants override these by referencing the palette tokens:
+
+```css
+.sui-Card[data-tone='neutral'] {
+  --card-bg: var(--gray-50);
+  --card-border-color: var(--gray-200);
+}
+.sui-Card[data-inverted='true'][data-tone='default'] {
+  --card-bg: var(--gray-900);
+  --card-border-color: var(--gray-800);
+  --card-color: var(--gray-50);
+}
+```
+
+### Layer 3: Tone classes on Box and Flex
+
+Applied by the `tone` prop. Reference the same palette tokens:
+
+```css
+.sui-tone-neutral  { background: var(--gray-50);   border-color: var(--gray-100); }
+.sui-tone-primary  { background: var(--blue-50);    border-color: var(--blue-100); }
+.sui-tone-positive { background: var(--green-50);   border-color: var(--green-100); }
+.sui-tone-caution  { background: var(--yellow-50);  border-color: var(--yellow-100); }
+.sui-tone-critical { background: var(--red-50);     border-color: var(--red-100); }
+```
+
+### The key insight
+
+Everything references the palette tokens on `:root`. Override those tokens, and every component, tone class, and Card variant that references them updates with zero inline styles.
+
+---
+
+## Technique 1: Override palette tokens on `:root`
+
+**Use when:** You need the entire UI to shift to a different color palette — warm grays, amber accents, deeper blacks, etc.
+
+Create a `global.css` file and override the specific palette variables you need to change. Import it in `main.tsx` **before** the ui-poc `styles.css` so your values take precedence, or **after** it to override (both work since specificity is equal and later declarations win):
+
+```css
+/* global.css */
+
+/* Warm the gray scale */
+:root {
+  --gray-50:  #f8f5f0;
+  --gray-100: #ede9e1;
+  --gray-200: #d8d1c6;
+  --gray-300: #b5ac9e;
+  --gray-500: #8a7e6f;
+  --gray-700: #5a5044;
+  --gray-800: #3d352b;
+  --gray-900: #2c2520;
+  --gray-950: #1a1714;
+}
+
+body {
+  margin: 0;
+  /* body background uses an existing token — not a hardcoded value */
+  background: var(--gray-50);
+  color: var(--gray-900);
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+```
+
+```tsx
+// main.tsx
+import './global.css'
+import '../ui-poc/packages/ui/src/styles.css'
+```
+
+Now every component that uses `--gray-*` tokens — borders, muted text, card backgrounds, tones, dividers — uses the warm palette. `<Box tone="neutral">` renders with `var(--gray-50)` which is now `#f8f5f0`. No component code changes needed.
+
+### Shifting the accent hue
+
+The default primary/accent hue is blue. Tone classes, Card `tone="primary"`, and Badge `tone="primary"` all reference `--blue-*` tokens. To change the accent to amber, override the `--blue-*` variables:
+
+```css
+/* global.css — amber accent replaces blue */
+:root {
+  --blue-50:  #fffbeb;
+  --blue-100: #fef3c7;
+  --blue-200: #fde68a;
+  --blue-300: #fcd34d;
+  --blue-400: #fbbf24;
+  --blue-500: #d97706;
+  --blue-600: #b45309;
+  --blue-700: #92400e;
+  --blue-800: #78350f;
+  --blue-900: #5c2d0e;
+  --blue-950: #3b1c08;
+}
+```
+
+After this, `<Button tone="primary">` uses the amber hue. `<Badge tone="primary">` uses the amber hue. `<Card tone="primary">` has an amber tinted background. Every reference is through `--blue-*`, so every reference updates.
+
+> ⚠️ **Override tokens sparingly.** Changing a palette hue globally affects every component that references it. Only override tokens when you want the change to be truly global. For region-scoped changes, use Technique 2.
+
+---
+
+## Technique 2: Override palette tokens on a scoped container
+
+**Use when:** One region of the interface needs different colors (a sidebar, a header, an inspector panel) but the rest should stay default.
+
+CSS custom properties cascade. A class on a parent overrides `:root` values for that entire subtree. Define a CSS class that overrides specific tokens, then apply the class to a container:
+
+```css
+/* global.css */
+.warm-sidebar {
+  --gray-50:  #f0ebe3;
+  --gray-100: #e3ddd4;
+  --gray-200: #c8c1b6;
+  --gray-900: #3d3529;
+  --gray-950: #2a231c;
+}
+```
+
+```tsx
+<Box
+  as="nav"
+  aria-label="Main navigation"
+  className="warm-sidebar"
+  width="260px"
+  padding={3}
+  borderRight
+>
+  <Heading level={2}>Hearthstone Goods</Heading>
+  <Text size={1} color="muted">Product catalogue</Text>
+</Box>
+```
+
+Every Text, Heading, Badge, and Divider inside `.warm-sidebar` uses the overridden values. The border from `borderRight` uses the overridden `--gray-200`. No inline styles on any child.
+
+---
+
+## Technique 3: Card with `inverted` for dark regions
+
+**Use when:** You need a dark sidebar, dark header, or dark panel inside a light interface.
+
+`Card` with `inverted` is the mechanism for creating a dark region. It overrides `--card-bg`, `--card-border-color`, and `--card-color` to dark variants of the current tone. All children — Text, Heading, Badge, Divider, Button — automatically receive correct contrast colors.
+
+```tsx
+<ThemeProvider theme={buildTheme()} scheme="light">
+  <Flex minHeight="100vh">
+    {/* Dark sidebar — all children inherit dark tokens */}
+    <Card inverted padding={3} style={{ width: '260px' }}>
+      <Stack space={4}>
+        <Heading level={2}>Navigation</Heading>
+        <Text size={1} color="muted">All text auto-contrasts</Text>
+        <Menu>
+          <MenuItem icon={DashboardIcon} text="Dashboard" />
+          <MenuItem icon={TagIcon} text="Products" />
+        </Menu>
+      </Stack>
+    </Card>
+
+    {/* Light content area */}
+    <Flex as="main" flexDirection="column" flexGrow={1}>
+      {/* ... */}
+    </Flex>
+  </Flex>
+</ThemeProvider>
+```
+
+The one inline `style` here — `width` — is acceptable because width is a layout value with no color impact.
+
+> **Note:** `Card` is the only component that creates a full color context inversion. `Box` and `Flex` with `tone` set a background tint but do NOT set `--card-bg`, `--card-border-color`, or `--card-color` — children inside a toned Box/Flex do not inherit contrasting text colors. Always use Card when you need the full dark/light context switch.
+
+### Combining scoped token overrides with inverted Card
+
+For a dark sidebar with a warm brand feel, combine Technique 2 with an inverted Card:
+
+```css
+/* global.css */
+.warm-dark-sidebar {
+  --gray-900: #2c2520;
+  --gray-950: #1a1714;
+  --gray-800: #3d352b;
+  --gray-100: #ede8e0;
+  --gray-200: #d4cec4;
+}
+```
+
+```tsx
+<Card inverted className="warm-dark-sidebar" padding={3} style={{ width: '260px' }}>
+  {/* Inverted provides the dark inversion; the CSS class tunes the exact hue */}
+</Card>
+```
+
+The inverted Card reads `--gray-900` for its `--card-bg`. The CSS class shifts that value to a warm dark brown. Every child inherits the adjusted palette.
+
+---
+
+## Technique 4: Tone on Box and Flex for semantic backgrounds
+
+**Use when:** A section needs a tinted background that maps to a semantic meaning.
+
+`Box` and `Flex` accept a `tone` prop. Tone classes set `background` and `border-color` by referencing palette tokens:
+
+```tsx
+{/* Light positive tint for a success region — no inline style */}
+<Box tone="positive" padding={4} radius={3}>
+  <Text>Inventory is healthy across all categories.</Text>
+</Box>
+
+{/* Light caution tint for a warning banner */}
+<Flex tone="caution" padding={3} gap={2} alignItems="center">
+  <Text as="span" size={1}><WarningOutlineIcon /></Text>
+  <Text size={1}>3 products are low on stock.</Text>
+</Flex>
+
+{/* Neutral tint for a header or toolbar region */}
+<Box tone="neutral" padding={3} borderBottom>
+  <Heading level={1}>Products</Heading>
+</Box>
+```
+
+Available tones: `default`, `neutral`, `primary`, `positive`, `caution`, `critical`.
+
+Since tone classes reference palette tokens (`var(--gray-50)`, `var(--green-50)`, etc.), they pick up any overrides from Technique 1 or 2 automatically.
+
+> ⚠️ **Tone on Box/Flex sets the background tint only.** It does NOT set `--card-*` foreground variables. If you need children to inherit contrasting text colors (especially on dark backgrounds), use `Card` with `tone` and/or `inverted` instead.
+
+---
+
+## Technique 5: Global CSS for native elements using existing palette tokens
+
+**Use when:** You are styling `<table>`, `<tr>`, `<td>`, `<hr>`, or other native HTML elements that have no Sanity UI prop equivalents.
+
+Reference the existing globally available palette tokens — not hardcoded hex values:
+
+```css
+/* global.css */
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th {
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 2px solid var(--gray-200);
+  color: var(--gray-700);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--gray-200);
+  color: var(--gray-900);
+}
+
+tr:hover td {
+  background: var(--gray-50);
+}
+```
+
+These styles adapt to palette overrides from Technique 1 or 2. If you warm the grays, every table border and hover state warms with them.
+
+> ⛔ **Do NOT use `var(--card-border-color)` or any `--card-*` variable for native elements outside a Card ancestor.** They resolve to `undefined` with no error. Use palette tokens like `var(--gray-200)` instead. See `silent-failures.md` #9.
+
+---
+
+## Decision table
+
+| Need | Technique | What to override |
+|------|-----------|-----------------|
+| Custom page background | 1 — `body { background: var(--gray-50) }` after overriding `--gray-50` on `:root` | `--gray-50` |
+| Warm/cool gray shift across entire UI | 1 — Override `--gray-*` on `:root` | `--gray-50` through `--gray-950` |
+| Custom brand accent color | 1 — Override `--blue-*` on `:root` | `--blue-50` through `--blue-950` |
+| Dark sidebar or header | 3 — `Card inverted` | No variable override needed |
+| Dark sidebar with custom hues | 2 + 3 — CSS class overriding `--gray-*` on `Card inverted` | `--gray-*` scoped to a class |
+| Tinted region (success/warning) | 4 — `tone` prop on Box/Flex/Card | No variable override needed |
+| Table/native element borders | 5 — Global CSS with `var(--gray-200)` | No variable override needed |
+| Table row hover | 5 — Global CSS with `var(--gray-50)` | No variable override needed |
+
+---
+
+## Complete example: artisan brand theme
+
+This example implements "warm off-white background, slate sidebar, and amber accent" — all without a single inline color style on any Sanity UI component.
+
+### global.css
+
+```css
+/* Override existing palette tokens on :root */
+:root {
+  /* Warm grays */
+  --gray-50:  #f8f5f0;
+  --gray-100: #ede9e1;
+  --gray-200: #d8d1c6;
+  --gray-300: #b5ac9e;
+  --gray-500: #8a7e6f;
+  --gray-700: #5a5044;
+  --gray-800: #3d352b;
+  --gray-900: #2c2520;
+  --gray-950: #1a1714;
+
+  /* Amber replaces blue for all primary/accent uses */
+  --blue-50:  #fffbeb;
+  --blue-100: #fef3c7;
+  --blue-200: #fde68a;
+  --blue-300: #fcd34d;
+  --blue-400: #fbbf24;
+  --blue-500: #d97706;
+  --blue-600: #b45309;
+  --blue-700: #92400e;
+  --blue-800: #78350f;
+  --blue-900: #5c2d0e;
+  --blue-950: #3b1c08;
+}
+
+body {
+  margin: 0;
+  background: var(--gray-50);
+  color: var(--gray-900);
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+/* Table styles using existing palette tokens */
+table { width: 100%; border-collapse: collapse; }
+th {
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 2px solid var(--gray-200);
+  color: var(--gray-700);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--gray-200);
+}
+tr:hover td {
+  background: var(--gray-100);
+  cursor: pointer;
+}
+```
+
+### App.tsx (no inline color styles)
+
+```tsx
+import { buildTheme } from '@sanity/ui/theme'
+import {
+  ThemeProvider, ToastProvider, Stack, Button, Badge,
+  Menu, MenuItem, Label, TextInput,
+} from '@sanity/ui'
+import { Box, Flex, Card, Heading, Text } from 'ui'
+import { DashboardIcon, TagIcon, SearchIcon, AddIcon } from '@sanity/icons'
+
+const theme = buildTheme()
+
+function App() {
+  return (
+    <ThemeProvider theme={theme}>
+      <ToastProvider>
+        <Flex minHeight="100vh">
+          {/* Dark sidebar — Card inverted handles all color inversion.
+              --gray-900 is now warm brown, so the sidebar is warm-dark. */}
+          <Card inverted padding={0} style={{ width: '260px' }}>
+            <Box padding={3} borderBottom>
+              <Heading level={1} size={1}>Hearthstone Goods</Heading>
+            </Box>
+            <Box padding={3}>
+              <Menu>
+                <MenuItem icon={DashboardIcon} text="Dashboard" />
+                <MenuItem icon={TagIcon} text="Products" selected />
+              </Menu>
+            </Box>
+          </Card>
+
+          {/* Main content — inherits warm palette from :root overrides */}
+          <Flex as="main" flexDirection="column" flexGrow={1} minWidth="0">
+            {/* Toolbar */}
+            <Box padding={3} borderBottom>
+              <Flex alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={2}>
+                <Heading level={1} size={1}>Products</Heading>
+                <Flex alignItems="center" gap={2}>
+                  <TextInput icon={SearchIcon} placeholder="Search products..." aria-label="Search products" />
+                  <Button icon={AddIcon} text="Add product" />
+                </Flex>
+              </Flex>
+            </Box>
+
+            {/* Content area */}
+            <Box padding={4} flexGrow={1} overflowY="auto">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th>Category</th>
+                    <th>Price</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><Text size={1} weight="medium">Hand-thrown mug</Text></td>
+                    <td><Text size={1} color="muted">Ceramics</Text></td>
+                    <td><Text size={1}>$34.00</Text></td>
+                    <td><Badge tone="positive">In Stock</Badge></td>
+                  </tr>
+                  <tr>
+                    <td><Text size={1} weight="medium">Woven throw blanket</Text></td>
+                    <td><Text size={1} color="muted">Textiles</Text></td>
+                    <td><Text size={1}>$89.00</Text></td>
+                    <td><Badge tone="caution">Low Stock</Badge></td>
+                  </tr>
+                </tbody>
+              </table>
+            </Box>
+          </Flex>
+        </Flex>
+      </ToastProvider>
+    </ThemeProvider>
+  )
+}
+```
+
+The only `style` prop in this example is `width: '260px'` on the sidebar Card — a layout value, acceptable per `style-overrides.md`. Every color flows from overridden CSS custom properties.
+
+---
+
+## Full design token reference
+
+Every CSS custom property defined by Sanity UI, with its default value. All are on `:root` unless noted otherwise. Override any of them in `global.css` to change the entire system.
+
+### Color — Gray
+
+Role: borders, muted text, neutral backgrounds, UI chrome. Used by `tone="neutral"`, `color="muted"`, Card default borders, and inverted Card backgrounds.
+
+| Variable | Default | Used for |
+|----------|---------|----------|
+| `--gray-50` | `#f1f1f1` | Neutral tone background, hover backgrounds |
+| `--gray-100` | `#e3e3e3` | Default Card border, skeleton states |
+| `--gray-200` | `#c7c7c7` | Neutral Card border, table borders, Divider |
+| `--gray-300` | `#acacac` | Muted text lighter tint (`color="muted" muted`) |
+| `--gray-400` | `#929292` | — |
+| `--gray-500` | `#757575` | Muted text color (`color="muted"`), muted icons |
+| `--gray-600` | `#606060` | — |
+| `--gray-700` | `#494949` | — |
+| `--gray-800` | `#333333` | Inverted Card border |
+| `--gray-900` | `#1e1e1e` | Inverted Card background, default foreground text |
+| `--gray-950` | `#141414` | — |
+
+### Color — Blue
+
+Role: primary/accent tone, focus rings, links. Used by `tone="primary"`, Text `color="primary"`, and focus states.
+
+| Variable | Default | Used for |
+|----------|---------|----------|
+| `--blue-50` | `#e5f2ff` | Primary tone background (Card and Box) |
+| `--blue-100` | `#cbe5ff` | Default tone border, primary tone border (Box) |
+| `--blue-200` | `#9cc9ff` | Primary Card border |
+| `--blue-300` | `#6cadff` | — |
+| `--blue-400` | `#338eff` | Primary text muted tint |
+| `--blue-500` | `#006bff` | — |
+| `--blue-600` | `#0050e3` | Primary text color (`color="primary"`) |
+| `--blue-700` | `#0040a7` | — |
+| `--blue-800` | `#002f6e` | Inverted primary Card border |
+| `--blue-900` | `#0a1e3a` | Inverted primary Card background |
+| `--blue-950` | `#0c1522` | — |
+
+### Color — Green
+
+Role: positive tone — success, healthy states. Used by `tone="positive"` and Text `color="positive"`.
+
+| Variable | Default | Used for |
+|----------|---------|----------|
+| `--green-50` | `#e7f6e3` | Positive tone background |
+| `--green-100` | `#d0edc6` | Positive tone border (Box) |
+| `--green-200` | `#a0da8d` | Positive Card border |
+| `--green-300` | `#6ec64c` | — |
+| `--green-400` | `#34b000` | Positive text muted tint |
+| `--green-500` | `#269200` | — |
+| `--green-600` | `#197500` | Positive text color (`color="positive"`) |
+| `--green-700` | `#0c5a00` | — |
+| `--green-800` | `#073f00` | Inverted positive Card border |
+| `--green-900` | `#0e2406` | Inverted positive Card background |
+| `--green-950` | `#0d180a` | — |
+
+### Color — Red
+
+Role: critical tone — errors, destructive actions. Used by `tone="critical"` and Text `color="critical"`.
+
+| Variable | Default | Used for |
+|----------|---------|----------|
+| `--red-50` | `#ffebe9` | Critical tone background |
+| `--red-100` | `#ffd7d3` | Critical tone border (Box) |
+| `--red-200` | `#ffafa8` | Critical Card border |
+| `--red-300` | `#fa857d` | — |
+| `--red-400` | `#f15552` | Critical text muted tint |
+| `--red-500` | `#e50021` | — |
+| `--red-600` | `#b40f1f` | Critical text color (`color="critical"`) |
+| `--red-700` | `#86191c` | — |
+| `--red-800` | `#5a1918` | Inverted critical Card border |
+| `--red-900` | `#311412` | Inverted critical Card background |
+| `--red-950` | `#1e100f` | — |
+
+### Color — Yellow
+
+Role: caution tone — warnings. Used by `tone="caution"` and Text `color="caution"`.
+
+| Variable | Default | Used for |
+|----------|---------|----------|
+| `--yellow-50` | `#f8f2d4` | Caution tone background |
+| `--yellow-100` | `#f1e4a7` | Caution tone border (Box) |
+| `--yellow-200` | `#e3c72f` | Caution Card border |
+| `--yellow-300` | `#caab00` | — |
+| `--yellow-400` | `#ac9100` | Caution text muted tint |
+| `--yellow-500` | `#8f7800` | — |
+| `--yellow-600` | `#736000` | Caution text color (`color="caution"`) |
+| `--yellow-700` | `#584800` | — |
+| `--yellow-800` | `#3f3200` | Inverted caution Card border |
+| `--yellow-900` | `#271d00` | Inverted caution Card background |
+| `--yellow-950` | `#191400` | — |
+
+### Color — Purple
+
+Role: suggest tone. Used by `tone="suggest"`.
+
+| Variable | Default | Used for |
+|----------|---------|----------|
+| `--purple-50` | `#efeeff` | Suggest tone background |
+| `--purple-100` | `#e0ddff` | Suggest tone border (Box) |
+| `--purple-200` | `#c3bcff` | Suggest Card border |
+| `--purple-300` | `#a999ff` | — |
+| `--purple-400` | `#9172ff` | — |
+| `--purple-500` | `#7c40ff` | — |
+| `--purple-600` | `#642edc` | — |
+| `--purple-700` | `#4a2aa2` | — |
+| `--purple-800` | `#33226b` | Inverted suggest Card border |
+| `--purple-900` | `#1d1838` | Inverted suggest Card background |
+| `--purple-950` | `#141221` | — |
+
+### Color — Orange
+
+Role: syntax highlighting, avatar colors.
+
+| Variable | Default | Used for |
+|----------|---------|----------|
+| `--orange-50` | `#ffecda` | — |
+| `--orange-100` | `#ffd9b5` | — |
+| `--orange-200` | `#ffb063` | — |
+| `--orange-300` | `#ff8700` | — |
+| `--orange-400` | `#dd7100` | — |
+| `--orange-500` | `#b95c00` | — |
+| `--orange-600` | `#964800` | — |
+| `--orange-700` | `#743500` | — |
+| `--orange-800` | `#542300` | — |
+| `--orange-900` | `#351300` | — |
+| `--orange-950` | `#201004` | — |
+
+### Color — Magenta
+
+Role: avatar colors, syntax highlighting.
+
+| Variable | Default | Used for |
+|----------|---------|----------|
+| `--magenta-50` | `#fdeafb` | — |
+| `--magenta-100` | `#fad5f8` | — |
+| `--magenta-200` | `#f2abef` | — |
+| `--magenta-300` | `#e77ee5` | — |
+| `--magenta-400` | `#db49da` | — |
+| `--magenta-500` | `#c800cb` | — |
+| `--magenta-600` | `#a100a2` | — |
+| `--magenta-700` | `#780978` | — |
+| `--magenta-800` | `#511351` | — |
+| `--magenta-900` | `#2d122c` | — |
+| `--magenta-950` | `#1c0f1b` | — |
+
+### Color — Cyan
+
+Role: avatar colors, syntax highlighting.
+
+| Variable | Default | Used for |
+|----------|---------|----------|
+| `--cyan-50` | `#dcf8f3` | — |
+| `--cyan-100` | `#b7f1e7` | — |
+| `--cyan-200` | `#59e1d0` | — |
+| `--cyan-300` | `#00cab7` | — |
+| `--cyan-400` | `#00ac9c` | — |
+| `--cyan-500` | `#008f81` | — |
+| `--cyan-600` | `#007367` | — |
+| `--cyan-700` | `#00584f` | — |
+| `--cyan-800` | `#003f37` | — |
+| `--cyan-900` | `#002721` | — |
+| `--cyan-950` | `#031916` | — |
+
+### Color — Black and White
+
+| Variable | Default | Used for |
+|----------|---------|----------|
+| `--black` | `#0b0b0b` | Darkest value in the palette (not pure `#000`) |
+| `--white` | `#ffffff` | Default Card background, default tone background |
+
+### Spacing
+
+Used by `padding`, `margin`, `gap`, `space`, and `inset` props (scale 0–9).
+
+| Variable | Default | Prop value | Common use |
+|----------|---------|------------|------------|
+| `--space-0` | `0px` | `0` | No space |
+| `--space-1` | `4px` | `1` | Label + input pairing |
+| `--space-2` | `8px` | `2` | Tight grouping, icon + text |
+| `--space-3` | `12px` | `3` | Standard form field spacing, Card `density="medium"` padding |
+| `--space-4` | `20px` | `4` | Card `density="loose"` padding, content area padding |
+| `--space-5` | `32px` | `5` | Section-level breaks |
+| `--space-6` | `52px` | `6` | Major content blocks |
+| `--space-7` | `84px` | `7` | Page-level sections |
+| `--space-8` | `136px` | `8` | Reserved |
+| `--space-9` | `220px` | `9` | Reserved |
+
+### Border radius
+
+Used by the `radius` prop on Box, Flex, and Card `density`.
+
+| Variable | Default | Prop value | Used by Card density |
+|----------|---------|------------|----------------------|
+| `--radius-0` | `0px` | `0` | — |
+| `--radius-1` | `1px` | `1` | — |
+| `--radius-2` | `3px` | `2` | `density="tight"` |
+| `--radius-3` | `7px` | `3` | `density="medium"` |
+| `--radius-4` | `11px` | `4` | `density="loose"` |
+| `--radius-5` | `15px` | `5` | — |
+| `--radius-6` | `19px` | `6` | — |
+| `--radius-round` | `9999px` | `"full"` | Pill shapes |
+
+### Shadows
+
+Used by the `shadow` prop on Card and Box.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `--shadow0` | `0px 0px 0px 0px …` | No shadow |
+| `--shadow1` | `0px 0px 0px 0.5px … (outline only)` | Subtle outline — hairline border effect |
+| `--shadow2` | `… 2px 3px -1px … 4px 6px …` | Low elevation — raised card, dropdown hint |
+| `--shadow3` | `… 7px 8px -4px … 12px 17px …` | Medium elevation — popover, floating panel |
+| `--shadow4` | `… 9px 11px -5px … 18px 28px …` | High elevation — modal, dialog |
+| `--shadow5` | `… 11px 15px -7px … 24px 38px …` | Highest elevation — dragging surface |
+
+### Typography — Font families
+
+| Variable | Default |
+|----------|---------|
+| `--sans` | `Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', 'Liberation Sans', sans-serif` |
+| `--mono` | `ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace` |
+
+### Typography — Font weights
+
+| Variable | Default | Text `weight` prop |
+|----------|---------|-------------------|
+| `--regular` | `400` | `"regular"` |
+| `--medium` | `600` | `"medium"` |
+| `--semibold` | `600` | `"semibold"` |
+| `--bold` | `700` | `"bold"` |
+
+### Typography — Body (Text component)
+
+Shorthand `font` tokens: weight, size/line-height, family. Used by Text `size` prop.
+
+| Variable | Weight | Size | Line height | Text `size` prop |
+|----------|--------|------|-------------|------------------|
+| `--body-0` | 400 | 10px | 1.5 | `0` |
+| `--body-1` | 400 | 13px | 1.5 | `1` |
+| `--body-2` | 400 | 16px | 1.5 | `2` (default) |
+| `--body-3` | 400 | 18.75px | 1.5 | `3` |
+| `--body-4` | 400 | 21.5px | 1.5 | `4` |
+
+### Typography — Heading
+
+Shorthand `font` tokens. Used by Heading `size` prop.
+
+| Variable | Weight | Size | Line height | Heading `size` prop |
+|----------|--------|------|-------------|---------------------|
+| `--heading-0` | 600 | 13px | 1.25 | `0` |
+| `--heading-1` | 600 | 16px | 1.25 | `1` |
+| `--heading-2` | 600 | 21px | 1.25 | `2` |
+| `--heading-3` | 400 | 27px | 1.25 | `3` |
+| `--heading-4` | 400 | 33px | 1.25 | `4` |
+| `--heading-5` | 400 | 38px | 1.25 | `5` |
+| `--heading-6` | 400 | 48px | 1.25 | — (not exposed as prop) |
+| `--heading-7` | 400 | 63px | 1.25 | — |
+| `--heading-8` | 400 | 84px | 1.25 | — |
+| `--heading-9` | 400 | 112px | 1.25 | — |
+
+### Typography — Label
+
+Shorthand `font` tokens. Used by Label `size` prop.
+
+| Variable | Weight | Size | Line height | Label `size` prop |
+|----------|--------|------|-------------|-------------------|
+| `--label-0` | 400 | 8.1px | 1.25 | `0` |
+| `--label-1` | 400 | 9.5px | 1.25 | `1` |
+| `--label-2` | 400 | 10.8px | 1.25 | `2` (default) |
+| `--label-3` | 400 | 12.25px | 1.25 | `3` |
+| `--label-4` | 400 | 13.6px | 1.25 | `4` |
+| `--label-5` | 400 | 15px | 1.25 | `5` |
+
+### Typography — Code
+
+Shorthand `font` tokens. Used by Code `size` prop.
+
+| Variable | Weight | Size | Line height |
+|----------|--------|------|-------------|
+| `--code-0` | 400 | 10px | 1.5 |
+| `--code-1` | 400 | 13px | 1.5 |
+| `--code-2` | 400 | 16px | 1.5 |
+| `--code-3` | 400 | 18.75px | 1.5 |
+| `--code-4` | 400 | 21.5px | 1.5 |
+
+### Container widths
+
+Used by the Container component's `width` prop.
+
+| Variable | Default | Container `width` prop |
+|----------|---------|------------------------|
+| `--container-0` | `320px` | `0` |
+| `--container-1` | `640px` | `1` |
+| `--container-2` | `960px` | `2` |
+| `--container-3` | `1280px` | `3` |
+| `--container-4` | `1600px` | `4` |
+| `--container-5` | `1920px` | `5` |
+
+### Card-scoped tokens (set on `.sui-Card`, cascade to descendants)
+
+These are NOT on `:root`. They exist only inside a Card ancestor. Override them on a Card CSS class if needed.
+
+| Variable | Default (light) | Set by |
+|----------|-----------------|--------|
+| `--card-bg` | `var(--white)` | Card `tone` and `inverted` |
+| `--card-border-color` | `var(--gray-100)` | Card `tone` and `inverted` |
+| `--card-color` | `inherit` | Card `inverted` (set to e.g. `var(--gray-50)` when inverted) |
+| `--card-padding` | `var(--space-3)` | Card `density` |
+| `--card-radius` | `var(--radius-3)` | Card `density` |
+
+Card tone and inverted variants override these by referencing palette tokens:
+
+| Card state | `--card-bg` | `--card-border-color` | `--card-color` |
+|------------|-------------|----------------------|----------------|
+| `tone="default"` | `var(--white)` | `var(--gray-100)` | `inherit` |
+| `tone="neutral"` | `var(--gray-50)` | `var(--gray-200)` | `inherit` |
+| `tone="primary"` | `var(--blue-50)` | `var(--blue-200)` | `inherit` |
+| `tone="suggest"` | `var(--purple-50)` | `var(--purple-200)` | `inherit` |
+| `tone="positive"` | `var(--green-50)` | `var(--green-200)` | `inherit` |
+| `tone="caution"` | `var(--yellow-50)` | `var(--yellow-200)` | `inherit` |
+| `tone="critical"` | `var(--red-50)` | `var(--red-200)` | `inherit` |
+| `inverted` + `tone="default"` | `var(--gray-900)` | `var(--gray-800)` | `var(--gray-50)` |
+| `inverted` + `tone="neutral"` | `var(--gray-800)` | `var(--gray-700)` | `var(--gray-50)` |
+| `inverted` + `tone="primary"` | `var(--blue-900)` | `var(--blue-800)` | `var(--blue-100)` |
+| `inverted` + `tone="suggest"` | `var(--purple-900)` | `var(--purple-800)` | `var(--purple-100)` |
+| `inverted` + `tone="positive"` | `var(--green-900)` | `var(--green-800)` | `var(--green-100)` |
+| `inverted` + `tone="caution"` | `var(--yellow-900)` | `var(--yellow-800)` | `var(--yellow-100)` |
+| `inverted` + `tone="critical"` | `var(--red-900)` | `var(--red-800)` | `var(--red-100)` |
+
+Card density variants:
+
+| `density` | `--card-padding` | `--card-radius` |
+|-----------|------------------|-----------------|
+| `"tight"` | `var(--space-2)` = 8px | `var(--radius-2)` = 3px |
+| `"medium"` (default) | `var(--space-3)` = 12px | `var(--radius-3)` = 7px |
+| `"loose"` | `var(--space-4)` = 20px | `var(--radius-4)` = 11px |
+
+### Tone classes on Box and Flex
+
+Applied by the `tone` prop. These reference palette tokens — overriding the palette token on `:root` changes the tone.
+
+| Tone | Background | Border color |
+|------|------------|-------------|
+| `default` | `var(--white)` | `var(--blue-100)` |
+| `neutral` | `var(--gray-50)` | `var(--gray-100)` |
+| `primary` | `var(--blue-50)` | `var(--blue-100)` |
+| `suggest` | `var(--purple-50)` | `var(--purple-100)` |
+| `positive` | `var(--green-50)` | `var(--green-100)` |
+| `caution` | `var(--yellow-50)` | `var(--yellow-100)` |
+| `critical` | `var(--red-50)` | `var(--red-100)` |
+
+### Text color classes
+
+Applied by the Text `color` prop. Normal and muted tint are both shown. The `muted` boolean activates the lighter tint.
+
+| Text `color` | Normal color | Muted tint (with `muted` boolean) |
+|-------------|-------------|-----------------------------------|
+| `"default"` | `var(--gray-900)` | `var(--gray-500)` |
+| `"muted"` | `var(--gray-500)` | `var(--gray-300)` |
+| `"primary"` | `var(--blue-600)` | `var(--blue-400)` |
+| `"positive"` | `var(--green-600)` | `var(--green-400)` |
+| `"caution"` | `var(--yellow-600)` | `var(--yellow-400)` |
+| `"critical"` | `var(--red-600)` | `var(--red-400)` |
+
+> ⛔ Card-scoped variables (`--card-bg`, `--card-border-color`, `--card-color`) are undefined outside a Card ancestor. Use palette tokens (`var(--gray-200)`, etc.) for elements outside Card. See `silent-failures.md` #9.
+
+---
+
+## Rules for agents
+
+1. **Never set `background`, `color`, `borderColor`, or `backgroundColor` as inline styles on Sanity UI components.** Override the palette tokens in `global.css` instead.
+2. **For dark regions, use `Card inverted`.** Do not use `style={{ background: '#334155' }}` on Box or Flex.
+3. **For brand palette shifts, override existing `--gray-*` and/or `--blue-*` tokens on `:root` in CSS.** This changes every component globally with zero inline styles.
+4. **For scoped color regions, override palette tokens on a CSS class** and apply that class to the container element.
+5. **For table and native element styling, write CSS rules that reference existing palette tokens** like `var(--gray-200)` and `var(--space-3)`. Do not inline `style={{ borderBottom: '1px solid #e5e5e5' }}` on every `<td>`.
+6. **`tone` on Box/Flex is for semantic background tints only.** If children need contrasting text, use Card instead — Card sets `--card-bg`, `--card-border-color`, and `--card-color`.
+7. **The only acceptable inline style colors are on elements completely outside the design system** — such as a third-party chart library or an SVG illustration.
+
+---
+
+## Cross-references
+
+- `theming-guidelines.md` — Full theme architecture, `buildTheme`, schemes, tones, dark mode
+- `foundations-color.md` — Color principles and the hierarchy of color decisions
+- `style-overrides.md` — When inline styles are and aren't acceptable
+- `silent-failures.md` #9 — `--card-border-color` outside Card
+- `card.md` — Card as a color context provider, tone, inverted
+
 # Layout guidelines
 
 ## General structure
@@ -3314,6 +4681,9 @@ Layouts consist of three main sections:
 1. Inspection sidebar (optional): An inline-end aligned column used to view and edit metadata for content presented in the Content window.
 
 Layouts follow these rules:
+
+> **Color scheme.** All structural layout regions — Navigation sidebar, Content area, Content toolbar, and Inspection sidebar — use the default light color scheme. Sanity UI does not support dark or inverted structural regions. Do not use `Card inverted`, dark background inline styles (`style={{ background: '#1a1d23' }}`), or `scheme="dark"` wrappers on any structural layout element. If your design calls for a dark sidebar or dark header, this falls outside the supported Sanity UI interface pattern and will require a fully custom implementation outside the component system.
+
 
 - Layouts take up the full width and height of the viewport. Each section (Navigation, Content, and Inspection) manages its own scroll independently.
 - The three sections sit side by side along the inline axis. Navigation is always inline-start, Content is always in the center, and Inspection is always inline-end. This order never changes.
@@ -3475,7 +4845,7 @@ The Navigation header is comprised of two sub-components
 
 #### Navigation Content
 
-Navigation content displays all navigation options or filters for content. Navigation/filters should ONLY use Sanity UI's `' component. The content section should be able to scroll independently to accommodate for overflow.
+Navigation content displays all navigation options or filters for content. Navigation/filters should ONLY use Sanity UI's `<MenuItem />`' component. The content section should be able to scroll independently to accommodate for overflow.
 
 #### Navigation Footer
 
@@ -3490,7 +4860,7 @@ The Navigation footer is for ancillary actions, such as:
 The main Content window is comprised of two sub-components
 
 1. Content Toolbar: A block-start bar that orients the user to provide actions for editing/managing the presented content.
-1. Content Display: The main content area to present information.
+2. Content Display: The main content area to present information.
 
 #### Content Toolbar
 
@@ -3500,7 +4870,7 @@ The main Content window is comprised of two sub-components
 The Content Controls block-start bar is comprised of two sub-components
 
 1. Content Toolbar Title: Content title is an inline-start aligned slot that contains the title of what's being presented. When the Navigation sidebar does not exist, the title should display the name of the application. Otherwise, the title should display the name of the current page or view being presented to the user.
-1. Content Toolbar Actions: An inline-end aligned slot containing horizontally-stacked buttons that allow the user to perform actions on the content.
+2. Content Toolbar Actions: An inline-end aligned slot containing horizontally-stacked buttons that allow the user to perform actions on the content.
 
 ##### Content Toolbar Title
 
@@ -3526,7 +4896,7 @@ Content Toolbar Actions contains all actions related to editing/managing/manipul
 The Content display section is the main section of the application. It's where pertinent content is presented and how users interact with it. There are two variants of Content display based on the type of content being presented. The section should be able to scroll independently to accommodate for overflow.
 
 1. **Document width:** Document width is used for content such as forms or content with long-form text. The width should optimize for ~50-70 characters per line.
-1. **Full width: **Full width is used to display grids of content, tabular data or any other content that requires as much horizontal space as possible.
+2. **Full width: **Full width is used to display grids of content, tabular data or any other content that requires as much horizontal space as possible.
 
 ###### Best practices
 
@@ -3559,8 +4929,8 @@ The inspection column should display context-specific information based on a sel
 ##### Inspection sidebar sub-components:
 
 1. Content inspector header
-1. Content inspector properties
-1. Content inspector footer (optional)
+2. Content inspector properties
+3. Content inspector footer (optional)
 
 ###### Content inspector header
 
@@ -3591,8 +4961,8 @@ The content inspector footer provides information related to an item’s (or mul
 All application navigation lives in the Navigation sidebar. There are no secondary navigation bars, no in-content navigation panels, and no additional sidebars dedicated to navigation. The Navigation sidebar is the single, persistent location where users move between views. This constraint exists for three reasons:
 
 1. **Predictability**: Users always know where to go to navigate. There is no ambiguity about which part of the interface controls where they are.
-1. **Simplicity**: A single navigation surface eliminates the cognitive overhead of understanding multiple navigation models on the same screen.
-1. **Scalability**: One well-structured sidebar can accommodate simple and complex information architectures without introducing new layout patterns.
+2. **Simplicity**: A single navigation surface eliminates the cognitive overhead of understanding multiple navigation models on the same screen.
+3. **Scalability**: One well-structured sidebar can accommodate simple and complex information architectures without introducing new layout patterns.
 
 Each pattern is designed for a specific purpose. Navigational patterns should not be mixed. When an application has hierarchical content—such as categories containing subcategories containing items—that hierarchy is represented _within_ the sidebar. It is not split across multiple panels or surfaces. The sidebar adapts to show depth. The layout does not grow new navigation regions.
 
@@ -3954,6 +5324,217 @@ Key details:
 - `minWidth="0"` on the main Flex prevents flex children from overflowing.
 - No inline styles are needed. Every value is a prop.
 
+# Sidebar navigation pattern
+
+Sanity UI has no built-in `NavItem` or `SidebarLink` component. This page shows the canonical pattern for building keyboard-accessible sidebar navigation.
+
+## When to use this pattern
+
+- Persistent sidebar links (not inside a `MenuButton` dropdown)
+- Navigation items with icon + label + trailing badge/count
+- Items that show an active/selected state
+
+---
+
+## Do not build nav items from scratch
+
+> ⛔ **Never use a native `<button>` or `<Box as="button">` with inline styles for navigation items.** This is the single most common source of unnecessary inline styles in test runs — agents create 10–12 CSS properties per nav item to replicate what Sanity UI components already provide.
+
+```tsx
+{/* ✗ — 12 inline CSS properties to build something that already exists */}
+<button
+  onClick={() => setActive('recipes')}
+  style={{
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    padding: '8px 10px',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    background: active ? 'var(--blue-50)' : 'transparent',
+    color: active ? 'var(--blue-600)' : 'inherit',
+    fontFamily: 'inherit',
+    textAlign: 'left',
+  }}
+>
+  <span>Recipes</span>
+</button>
+
+{/* ✗ — Same problem with Box as="button" — 8 inline CSS properties */}
+<Box
+  as="button"
+  onClick={() => setActive('recipes')}
+  style={{
+    display: 'flex', alignItems: 'center', gap: '8px',
+    width: '100%', cursor: 'pointer', border: 'none',
+    background: active ? 'var(--blue-50)' : 'transparent',
+    textAlign: 'left',
+  }}
+>
+  <Text size={1}>Recipes</Text>
+</Box>
+
+{/* ✗ — Hand-rolled <span> badge instead of Badge component */}
+<span style={{
+  background: 'var(--gray-200)', borderRadius: '10px',
+  padding: '1px 7px', fontSize: '11px', fontWeight: 600,
+}}>
+  {count}
+</span>
+```
+
+Use `Menu` + `MenuItem` (Option 1) or `Button mode="bleed"` (Option 2) instead. Both handle keyboard interaction, focus, ARIA roles, and visual states with zero inline styles.
+
+---
+
+## Option 1: Menu + MenuItem (recommended)
+
+`Menu` rendered directly in the sidebar (not inside a `MenuButton` popover) gives you arrow-key navigation, focus management, and correct ARIA roles for free. Use `MenuItem` for each navigation entry.
+
+```tsx
+import { Menu, MenuItem, Badge, Stack, Label } from '@sanity/ui'
+import { Box, Flex, Text } from 'ui'
+import { DocumentTextIcon, CodeIcon, ClockIcon } from '@sanity/icons'
+
+function Sidebar({
+  activeSection,
+  setActiveSection,
+}: {
+  activeSection: string
+  setActiveSection: (section: string) => void
+}) {
+  return (
+    <Box as="nav" aria-label="Main navigation" padding={3}>
+      <Stack space={4}>
+        <Label size={0} muted>Content</Label>
+        <Menu>
+          <MenuItem
+            icon={DocumentTextIcon}
+            text="Guides"
+            selected={activeSection === 'guides'}
+            onClick={() => setActiveSection('guides')}
+          />
+          <MenuItem
+            icon={CodeIcon}
+            text="API References"
+            selected={activeSection === 'api'}
+            onClick={() => setActiveSection('api')}
+          />
+          <MenuItem
+            icon={ClockIcon}
+            text="Changelogs"
+            selected={activeSection === 'changelogs'}
+            onClick={() => setActiveSection('changelogs')}
+          />
+        </Menu>
+      </Stack>
+    </Box>
+  )
+}
+```
+
+**What Menu provides automatically:**
+- `role="menu"` on the container, `role="menuitem"` on each item
+- Arrow Up / Arrow Down to move between items
+- Enter / Space to activate the focused item
+- Focus trapping within the menu while navigating
+
+### Adding trailing badges or counts
+
+`MenuItem` does not support trailing content out of the box. To add a count badge, compose the item manually:
+
+```tsx
+<Menu>
+  <MenuItem
+    icon={DocumentTextIcon}
+    selected={activeSection === 'guides'}
+    onClick={() => setActiveSection('guides')}
+  >
+    <Flex alignItems="center" justifyContent="space-between" gap={2}>
+      <Text size={1}>Guides</Text>
+      <Badge tone="default" fontSize={0}>12</Badge>
+    </Flex>
+  </MenuItem>
+</Menu>
+```
+
+### Selected state contrast warning
+
+> ⚠️ **The default `selected` style uses `tone="primary"` (4.29:1 contrast) — below WCAG AA.** For navigation menus where one item stays selected, the `menu.md` docs recommend marking the active item with a bold label or left border accent instead of relying on the default selected background. If you do use `selected`, verify contrast in your theme.
+
+## Option 2: Button mode="bleed" (simpler, less keyboard refinement)
+
+For simple nav items without arrow-key navigation between siblings, use `Button` with `mode="bleed"` inside a `Stack`:
+
+```tsx
+import { Button, Stack } from '@sanity/ui'
+import { Box } from 'ui'
+import { DocumentTextIcon, CodeIcon } from '@sanity/icons'
+
+<Box as="nav" aria-label="Main navigation" padding={3}>
+  <Stack space={1}>
+    <Button
+      mode="bleed"
+      icon={DocumentTextIcon}
+      text="Guides"
+      selected={activeSection === 'guides'}
+      aria-pressed={activeSection === 'guides'}
+      onClick={() => setActiveSection('guides')}
+    />
+    <Button
+      mode="bleed"
+      icon={CodeIcon}
+      text="API References"
+      selected={activeSection === 'api'}
+      aria-pressed={activeSection === 'api'}
+      onClick={() => setActiveSection('api')}
+    />
+  </Stack>
+</Box>
+```
+
+**Limitations of the Button approach:**
+- No arrow-key navigation between items — each button is a separate Tab stop
+- No trailing badge/count without custom children (Button clips complex children)
+- No `fullWidth` prop — wrap in `<Box display="flex">` for full-width items
+- `selected` sets `data-selected` only — you must add `aria-pressed` yourself
+
+## Choosing between the two
+
+| Need | Use Menu + MenuItem | Use Button |
+|------|---------------------|------------|
+| Icon + label only | Either works | ✓ Simpler |
+| Icon + label + trailing badge | ✓ Via children composition | ✗ Clips children |
+| Arrow-key navigation between items | ✓ Built in | ✗ Tab only |
+| ARIA menu roles | ✓ Automatic | ✗ Manual |
+| Keyboard accessible | ✓ | ✓ |
+| Toggle state | `selected` prop | `aria-pressed` (manual) |
+
+## Do not use
+
+- **`Box as="button"`** — inherits browser button defaults (border, background, cursor). No prop-based reset exists. See `style-overrides.md`.
+- **`<a>` without `href`** — an anchor without `href` is not keyboard-focusable.
+- **`tone` on navigation MenuItems** — navigation items should not use tone. Reserve tone for action menus (`tone="critical"` for destructive actions).
+- **`hotkeys` on navigation MenuItems** — hotkeys are for action shortcuts, not navigation.
+
+## Accessibility checklist
+
+- [ ] Navigation container uses `<Box as="nav" aria-label="...">`
+- [ ] Each item is keyboard-reachable and activatable (`Enter`/`Space`)
+- [ ] Active item has `selected={true}` (MenuItem) or `aria-pressed="true"` (Button)
+- [ ] Icon-only items have `aria-label` (not needed if text label is present)
+- [ ] Navigation group uses `Stack space={1}` or `space={2}` for touch target spacing
+- [ ] Selected state meets WCAG AA contrast (4.5:1) — test in your theme
+
+## Cross-references
+
+- `menu.md` — Full Menu/MenuItem API, keyboard behavior, and accessibility docs
+- `button.md` — Button modes, tones, and states
+- `style-overrides.md` — Full-width button pattern
+- `silent-failures.md` — Common pitfalls
+
 # Core component props
 
 Under review
@@ -4094,7 +5675,6 @@ See `style-overrides.md` for full examples and canonical workarounds.
 
 # Box
 
-Under review  
 Used as the lowest-level building block for containing UI elements.
 
 ### API
@@ -4104,7 +5684,7 @@ Box's own props are `as` and `display`. Everything else it accepts comes from sh
 | Prop | Type | Default | Description |
 |------|------|---------|-------------|
 | `as` | React element type | `'div'` | HTML element to render (e.g. `as="nav"`, `as="section"`, `as="main"`) |
-| `display` | `'block'`, `'inline-block'`, `'none'` | — | CSS `display` property |
+| `display` | `'block'`, `'inline-block'`, `'none'` | — | CSS `display` property. **Does not include `'flex'` or `'grid'`** — use the `Flex` or `Grid` components for those. |
 
 Box also inherits shared layout props (padding, margin, sizing, border, overflow, position, tone, flex-child, grid-child). See "All available props" at the bottom of this document for the complete reference.
 
@@ -4144,6 +5724,7 @@ Box also inherits shared layout props (padding, margin, sizing, border, overflow
 - Use padding over margin when possible to avoid spacing issues related to margin collapse
 
 #### **Don't**
+- **Never use `as="button"`.** `Box as="button"` does not reset browser defaults — the result has a visible border, background color, padding, and an inappropriate cursor. Correcting these requires inline style overrides that directly contradict the library's anti-inline-style guidance. There is no prop-based reset escape hatch. **Use the `Button` component instead.**
 - Don't use `style` to adjust visual attributes of `Box` when a style prop exists. Avoid inline styles for `width`, `height`, `borderRadius`, `background`, `color`, `fontSize`, `fontWeight`, and `cursor` on `Flex` or `Box`. Use the matching style prop instead. Check whether `Avatar`, `Badge`, `Button`, or `Card` with appropriate props covers your use case before writing a custom element. See "All available props" at the bottom of this document for the complete reference.
 - Don't give Box inline styles to display as flex. Sanity UI components are meant to be modular, single purpose and composable. If you need a container with a background and flex display, use wrap Flex with Box that uses `tone`: `<Box tone="neutral" ... ><Flex ... > ... </Flex></Box>`
 - Avoid adding margin/padding to individual elements like Buttons or Text to set placement.  Instead, wrap elements in Box with margin/padding.  
@@ -4168,18 +5749,28 @@ Box also inherits shared layout props (padding, margin, sizing, border, overflow
 
 - **Box does not set text styles.** Box provides spacing and structure. It does not set font size, line height, weight, or color. Use Text, Heading, or Label for text styling.
 
-### CSS custom properties and Card context
+### CSS custom properties — do not use them
 
-- **`--card-bg`, `--card-border-color`, `--card-color` and other `--card-*` variables are only available inside a `Card` ancestor.** `Card` establishes the color context. It writes these CSS custom properties onto its DOM subtree. Any `Box` or custom element outside a `Card` ancestor gets undefined values and no visual effect.
-- For a themed container without Card's visible surface, use `Card` with `border={false}`. Do not reference `--card-*` variables from a raw `Box`.
+⛔ **Never reference `--card-*` CSS custom properties directly. These are internal implementation details of the Card component, not a public API.**
+Outside a `Card` ancestor they silently resolve to `undefined`. The browser swallows undefined CSS custom properties with no warning.
+**Use `tone` instead.** The `tone` prop on `Box`, `Flex`, `Grid`, and `Card` is the public API for semantic background color:
+```tsx
+{/* ✗ — silently does nothing outside a Card ancestor */}
+<Box style={{ background: 'var(--card-bg)' }} />
+{/* ✓ */}
+<Box tone="neutral" />
+{/* ✗ — silently fails outside Card */}
+<Box style={{ borderTop: '1px solid var(--card-border-color)' }} />
+{/* ✓ */}
+<Divider />
+```
 
-> Before using `style={{...}}` on Box, check the "Inline style overrides" section for prop-based options.
 
 ### Code examples 
 
 #### Anti-patterns
 ```jsx
-{/* ✗ Don't use inline styles for attributes that exist as props */}
+{/* ✗ Don't use inline styles or reference --card-* CSS variables */}
 <Box
   padding={2}
   radius={2}
@@ -4195,7 +5786,7 @@ Box also inherits shared layout props (padding, margin, sizing, border, overflow
 <Box
   padding={2}
   radius={2}
-  tone="muted"
+  tone="neutral"
   flexShrink={0}
   width="260px"
 >
@@ -4290,6 +5881,18 @@ Every prop available on Box. All props are optional and support responsive array
 |------|------|----------------|
 | `tone` | `'default'`, `'neutral'`, `'primary'`, `'suggest'`, `'positive'`, `'caution'`, `'critical'` | background tint |
 
+**Tone background tokens (light mode):**
+
+| Value | Background token | Approx. colour |
+|-------|-----------------|----------------|
+| `'default'` | `var(--gray-50)` | Near-white |
+| `'neutral'` | `var(--gray-100)` | Light gray |
+| `'primary'` | `var(--blue-50)` | Light blue |
+| `'suggest'` | `var(--purple-50)` | Light purple |
+| `'positive'` | `var(--green-50)` | Light green |
+| `'caution'` | `var(--yellow-50)` | Light yellow |
+| `'critical'` | `var(--red-50)` | Light red |
+
 ### Padding
 
 | Prop | Type | CSS equivalent |
@@ -4335,6 +5938,8 @@ Every prop available on Box. All props are optional and support responsive array
 | `borderBottom` | boolean | `border-bottom` |
 | `borderLeft` | boolean | `border-left` |
 | `radius` | `0`–`6` or `'full'` | `border-radius` |
+
+> **Border color.** The `border` prop uses `1px solid var(--border-color, var(--gray-200))`. Inside a Card ancestor, `--border-color` is set by the Card's tone context. Outside any Card, it falls back to `var(--gray-200)` — this is the expected global default and will match table cell borders and Divider color.
 
 ### Position
 
@@ -4470,8 +6075,9 @@ All props support responsive arrays (e.g. `flexDirection={['column', null, 'row'
 
 **Do**
 
-- Bias towards horiztonally start-aligned content over center alignment. Most interface elements with Sanity are start aligned–most notably menus and navigational elements. Only use center alignment to create visual distinction/emphasis–such as an empty state.
-- Consider responsive breakpoints when stacking items horizontally. If the number of items can vary, use `flexWrap="wrap"` to prevent clipping.
+- **Set `flexWrap="wrap"` on every Flex with two or more children.** This is required for WCAG 1.4.10 AA (Reflow at 320px). A single non-wrapping Flex causes the page to overflow on narrow viewports. This includes outer layout containers, toolbar rows, and action rows inside cards.
+- Bias towards horizontally start-aligned content over center alignment. Most interface elements with Sanity are start aligned–most notably menus and navigational elements. Only use center alignment to create visual distinction/emphasis–such as an empty state.
+- Consider responsive breakpoints when stacking items horizontally. If the number of items can vary, pair `flexWrap="wrap"` with `gap={2}` to prevent clipping and maintain spacing.
 
 **Don't**
 - Don't use inline styles to create specific UI elements. If you find yourself setting `width`, `height`, `borderRadius`, `background`, `color`, `fontSize`, `fontWeight`, or `cursor` as inline styles on a `Flex` or `Box`, stop. You're likely reinventing a component that already exists. Check whether `Avatar`, `Badge`, `Button`, or `Card` with appropriate props covers your use case. See "All available props" at the bottom for the complete reference.
@@ -4668,6 +6274,8 @@ Every prop available on Flex. All props are optional and support responsive arra
 | Prop | Type | CSS equivalent |
 |------|------|----------------|
 | `tone` | `'default'`, `'neutral'`, `'primary'`, `'suggest'`, `'positive'`, `'caution'`, `'critical'` | background tint |
+
+**Tone background tokens (light mode):** `default` → `var(--gray-50)` · `neutral` → `var(--gray-100)` · `primary` → `var(--blue-50)` · `suggest` → `var(--purple-50)` · `positive` → `var(--green-50)` · `caution` → `var(--yellow-50)` · `critical` → `var(--red-50)`
 
 ### Padding
 
@@ -5105,6 +6713,8 @@ _Refer to TypeDocs in Flex.tsx_
 
 Before using `style={{...}}` on a Box wrapping Stack, check `style-overrides.md`. Most layout values have prop-based options.
 
+> ⚠️ **Text inside Stack must use `as="p"`.** The Text component defaults to `as="span"` (inline). Multiple inline spans inside a Stack crowd together instead of stacking vertically. Set `as="p"` on each Text element used as block-level content inside a Stack. See `text.md` → Common patterns.
+
 ### Best practices
 
 **Do**
@@ -5173,6 +6783,33 @@ Example: `<Stack space={3} padding={3} border>` — a bordered vertical group.
 
 `overflow` controls how content behaves when it exceeds the Stack's bounds. Set `overflow="auto"` on a Stack with a fixed `height` to create a scrollable vertical region.
 
+
+### When to use `Flex flexDirection="column"` instead of Stack
+
+When a vertical layout also needs to be a **flex child** (requiring `flexGrow`, `flexShrink`, or `flexBasis`), use `Flex` with `flexDirection="column"` and `gap` instead of wrapping Stack in an extra Box:
+
+```tsx
+{/* ✗ — Stack doesn't accept flexGrow; requires an extra Box wrapper */}
+<Box flexGrow={1} overflowY="auto">
+  <Stack space={3}>...</Stack>
+</Box>
+
+{/* ✓ — Flex column avoids the wrapper entirely */}
+<Flex flexDirection="column" gap={3} flexGrow={1} overflowY="auto">
+  ...
+</Flex>
+```
+
+**When to use each:**
+
+| Use Stack | Use Flex column instead |
+|-----------|------------------------|
+| Simple vertical sequence — no layout context needed | The container needs `flexGrow`, `flexShrink`, or `flexBasis` |
+| Children should span full parent width | You need `overflow`, `height`, or `minHeight` on the container |
+| `space` token semantics feel natural | You prefer `gap` — same 0–9 scale, same spacing tokens |
+
+> Both `Stack space={3}` and `Flex flexDirection="column" gap={3}` use the same spacing scale and produce the same vertical rhythm. The difference is purely about whether the container needs to participate in a flex layout.
+
 ### Accessibility
 
 **Semantic elements and landmarks.** Stack renders a `<div>` by default. This is correct for most cases. When the content has a semantic role, change the element with `as`. Each semantic element has rules:
@@ -5221,6 +6858,22 @@ Example:
 
 **No text styling.** Stack is a layout primitive. It does not set font size, line height, or color. Use **Text**, **Heading**, or **Label** inside the Stack to style text content.
 
+**Text inside Stack needs `as="p"`.** The `Text` component defaults to `as="span"`, which renders inline. When placing multiple Text elements in a Stack, set `as="p"` on each to get block-level rendering and correct vertical spacing:
+
+```tsx
+{/* ✗ — Text defaults to <span>; items crowd together */}
+<Stack space={2}>
+  <Text size={1}>First line</Text>
+  <Text size={1} color="muted">Second line</Text>
+</Stack>
+
+{/* ✓ — as="p" ensures block rendering */}
+<Stack space={2}>
+  <Text as="p" size={1}>First line</Text>
+  <Text as="p" size={1} color="muted">Second line</Text>
+</Stack>
+```
+
 # Text
 
 
@@ -5243,6 +6896,75 @@ Used for the majority of UI copy, including body paragraphs, captions, and metad
 | `className` | string | — | Additional CSS class names |
 | `style` | React.CSSProperties | — | Inline styles |
 
+### Common patterns
+
+These are the most frequent Text use cases. Each has a prop-based solution — no inline style needed.
+
+**Secondary / helper text (timestamps, metadata, descriptions):**
+```tsx
+{/* ✓ — use color="muted" for secondary text */}
+<Text size={1} color="muted">Last edited 2 hours ago</Text>
+
+{/* ✗ — inline style bypasses theming and dark mode */}
+<Text size={1} style={{ color: '#666' }}>Last edited 2 hours ago</Text>
+```
+
+**Status metadata:**
+```tsx
+{/* ✓ — semantic color via prop */}
+<Text size={1} color="positive">Published</Text>
+<Text size={1} color="critical">Failed</Text>
+
+{/* ✗ — hardcoded color breaks in dark mode */}
+<Text size={1} style={{ color: 'green' }}>Published</Text>
+```
+
+**Block-level text in a Stack:**
+```tsx
+{/* ✓ — as="p" renders block-level, Stack space works correctly */}
+<Stack space={2}>
+  <Text as="p" size={1}>First paragraph</Text>
+  <Text as="p" size={1} color="muted">Second paragraph</Text>
+</Stack>
+
+{/* ✗ — default <span> is inline; items crowd together in Stack */}
+<Stack space={2}>
+  <Text size={1}>First paragraph</Text>
+  <Text size={1} color="muted">Second paragraph</Text>
+</Stack>
+```
+
+**Emphasized text (without inline font-weight):**
+```tsx
+{/* ✓ — weight prop */}
+<Text size={1} weight="semibold">Important note</Text>
+
+{/* ✗ — inline style */}
+<Text size={1} style={{ fontWeight: 600 }}>Important note</Text>
+```
+
+**Text inside native HTML elements (`<td>`, `<th>`, `<li>`):**
+
+> ⚠️ **Always wrap text content inside native HTML elements in a Text, Label, or Badge component.** Bare strings inside `<td>`, `<th>`, `<li>`, `<span>`, or `<div>` inherit the browser's default font and size — they do not match the Sanity UI type scale. This also applies to table headers.
+
+```tsx
+{/* ✗ — bare string in <td>; browser default font, no type scale */}
+<td>{row.title}</td>
+
+{/* ✓ — Text controls font, size, weight, color */}
+<td><Text size={1} weight="medium">{row.title}</Text></td>
+```
+
+```tsx
+{/* ✗ — bare string in <th>; agents then add inline fontSize/fontWeight/color to compensate */}
+<th style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280' }}>Title</th>
+
+{/* ✓ — Text handles all typography; <th> styling comes from global.css */}
+<th><Text size={0} weight="semibold" color="muted">Title</Text></th>
+```
+
+See `table.md` for the full table pattern with CSS-based styling.
+
 ### **Usage guidelines**
 
 **When to use:**
@@ -5262,7 +6984,7 @@ Used for the majority of UI copy, including body paragraphs, captions, and metad
 **Do**
 
 - Use `align="start"` in the majority of cases. Sanity's typographic system prefers start-aligned text. (`'start'` maps to `text-align: start` — left in LTR languages, right in RTL.)
-- Use `muted` or `color="muted"` for helper text and metadata. `color="muted"` sets a fixed gray-500; `muted` shifts whatever `color` is set to its lighter tint — use it to de-emphasize semantically coloured text (e.g. a dimmed critical label).
+- Use `muted` or `color="muted"` for secondary/helper text and metadata. `color="muted"` sets a fixed gray-500; `muted` shifts whatever `color` is set to its lighter tint — use it to de-emphasize semantically coloured text (e.g. a dimmed critical label).
 - Use responsive arrays (e.g., `size={[1,2,3]}`) to ensure text is readable across mobile and desktop viewports.
 - Aim for 55-70 characters per line in a multiline block of text for optimal legibility.
 
@@ -5271,29 +6993,30 @@ Used for the majority of UI copy, including body paragraphs, captions, and metad
 - Don’t center-align long blocks of paragraph text; this disrupts the reading flow and is difficult for users with dyslexia.
 - Don’t rely on color or the `accent` prop to capture attention or convey importance. People with certain visual impairments may not distinguish the change. Pair the text with an icon or badge instead.
 - Don’t italicize or underline to emphasize text. Use Text’s weight prop instead.
+- **In a `Stack`, set `as="p"` for block-level body text.** Text defaults to `as="span"`, which renders inline. Multiple Text components inside a Stack may crowd together or behave unexpectedly without `as="p"` or another block element.
 - Don’t truncate text unless it is completely necessary. Text truncation makes information less available to people which can become a point of friction or confusion.
 
 ### Variants
 
 #### Muted
 
-> **`muted` vs `color="muted"` — these are different:**
->
-> - `muted` (boolean) — a modifier that shifts the active `color` to its lighter tint. Alone it gives gray-500; combined with `color` it lightens that color's value:
->   ```tsx
->   <Text color="critical" muted>Non-critical error note</Text>  {/* red-400 */}
->   <Text color="positive" muted>Subtle success note</Text>      {/* green-400 */}
->   <Text muted>Secondary label</Text>                           {/* gray-500 */}
->   ```
-> - `color="muted"` — explicitly sets the muted gray value (gray-500). The standard choice for secondary/helper text with no semantic color.
->   ```tsx
->   <Text color="muted">helper text</Text>  {/* gray-500 */}
->   ```
-> - They can be stacked: `color="muted" muted` gives gray-300 (an even lighter gray).
+**Which one to use:**
 
-Used to visually deemphasize a text element. It’s specifically helpful in situations where the text is objectively less important than other text in a composition. Examples include captions or subheadings. Muting text can be an effective method to increase focus on the most important textual information on the screen.
+- **For ordinary secondary or helper text** (timestamps, captions, metadata): use `color="muted"`.
+```tsx
+   <Text color="muted">Last edited 2 hours ago</Text>
+```
+- **For de-emphasising text that already has semantic color**: use `muted` boolean.
+```tsx
+   <Text color="critical" muted>Non-critical error note</Text>
+   <Text color="positive" muted>Subtle success note</Text>
+```
+- **Stacking both** (`color="muted" muted`) gives gray-300. Use sparingly.
 
-Deemphasizing secondary information is the preferred method for increasing focus compared to over-reliance on bolding text using `weight`. It’s recommended to begin with muting text to aid in emphasis before attempting treatments such as using `accent` or `weight`.
+When `muted={true}` is used alone it resolves to gray-500 — same as `color="muted"`. For plain secondary text, `color="muted"` is clearer and preferred.
+
+> ⚠️ **Muted text at small sizes may fail WCAG AA contrast.** `color="muted"` resolves to gray-500 (#797979), which produces a 4.35:1 contrast ratio against white — below the 4.5:1 AA threshold for text under 18px. This affects `size={0}` (10px) and `size={1}` (13px). For small muted text, use `size={2}` or higher, or add `weight="medium"` to improve legibility.
+
 
 #### Weight
 
@@ -5373,7 +7096,20 @@ Headings are used to create a logical hierarchy and page structure. They guide t
 
 ### API
 
-> **Note:** This documents the `ui-poc` Heading component (`../ui-poc/packages/ui/src/components/Heading`). It uses a `level` prop (not `as`) to set the semantic heading tag. There is no `as`, `weight`, `muted`, `accent`, or `textOverflow` prop.
+**Note:** This documents the `ui-poc` Heading component (`../ui-poc/packages/ui/src/components/Heading`). It uses a `level` prop (not `as`) to set the semantic heading tag. There is no `as`, `weight`, `muted`, `accent`, or `textOverflow` prop.
+
+⛔ **Always set `level` explicitly. Omitting it silently renders `<h2>` regardless of context.**
+
+`level` defaults to `2`. There is no runtime warning when it is omitted. TypeScript does not require it. A `<Heading>` without a `level` silently produces an `<h2>` even when the page needs an `<h1>`. This is an invisible accessibility violation — incorrect heading hierarchy — with zero feedback at authoring time.
+
+```tsx
+{/* ✗ — silently renders <h2> */}
+<Heading>Page Title</Heading>
+
+{/* ✓ */}
+<Heading level={1}>Page Title</Heading>
+```
+
 
 | Prop | Type | Default | Description |
 |------|------|---------|-------------|
@@ -5455,7 +7191,7 @@ Before truncating, attempt to shorten the text if possible. The ideal kind of tr
 
 - **Navigation and orientation. **Use Heading to create explicit waypoints within an interface. Screen reader users rely on headings to navigate complex interfaces. Headings address common orientation issues in Sanity Studio.
 - **Semantic structure.** Always set the `level` prop to render `<h1>`–`<h6>`. The default `level={2}` renders `<h2>`. Use `level={1}` for the page title, `level={2}` for section headings, etc. Unlike `@sanity/ui`'s Heading, there is no `as` prop — `level` is the only way to control the rendered element.
-- **`level` has a default but should always be set explicitly.** The default `level={2}` renders `<h2>` — this is a real semantic element, not a `<div>`. However, silently defaulting to `<h2>` is dangerous when the correct level is `<h1>` or `<h3>`. Always set `level` explicitly. There is no runtime warning when it is omitted.
+- **`level` must always be set explicitly — no exceptions.** The default `level={2}` renders `<h2>`. Omitting `level` is a silent accessibility violation: the page may have duplicate `<h2>` elements, a missing `<h1>`, or a broken heading outline. TypeScript does not warn. No console error fires. A screen reader user navigating by headings will encounter a broken structure with zero indication.
 - **Logical order.** Heading levels must descend in sequence (H1 → H2 → H3). Do not skip levels (e.g. H1 to H4). Screen reader users navigate by heading level — a gap breaks their mental model.
 - **Color contrast.** `muted` headings must maintain **3:1** contrast against the background for large text (24px+ regular or 19px+ bold) and **4.5:1** for smaller text (WCAG 1.4.3 AA).
 - **Zoom and reflow.** Heading sizes must remain legible at 400% zoom / 320px viewport width (WCAG 1.4.10 AA). Long headings should wrap, not clip. When using `lines={1}`, verify clipped headings still make sense in context. Spacing tokens use `rem` and scale with user font-size settings (WCAG 1.4.12 AA).
@@ -5613,6 +7349,8 @@ Set `role="switch"` together with `aria-pressed` to create a toggle control. Whe
 
 **Description** The Tooltip is a floating text label that displays information when a user hovers, focuses, or taps on an element. Its purpose is to provide helpful, non-essential context to a UI element. It succinctly describes the function of an element (like an icon-only button) or enhances baseline understanding without cluttering the interface.
 
+> ⛔ **Tooltip requires its child to forward refs.** If the child component does not use `React.forwardRef`, the tooltip will not appear — **no error is thrown and no warning is logged.** This is the #1 cause of "tooltip doesn't show up" issues. Use a native HTML element or a Sanity UI component as the direct child. If wrapping a custom component, it must use `React.forwardRef`. See `silent-failures.md` #12.
+
 ### **API Documentation**
 
 _Refer to TypeDocs in Tooltip.tsx_
@@ -5695,6 +7433,8 @@ _Refer to TypeDocs in Tooltip.tsx_
 
 Used to trigger an action–like submitting a form, opening a dialog, or performing a command.
 
+> ⛔ **`tone="primary"` fails WCAG AA contrast — do not use it.** The primary tone produces white text on `#556bfc` at a 4.29:1 contrast ratio. WCAG AA requires 4.5:1 for text under 18px. This applies to Button, Badge, and any component using `tone="primary"`. For primary actions, use `mode="default" tone="default"` instead. No runtime warning or TypeScript error prevents this — the button renders and looks intentional, but ships an accessibility violation every time.
+
 ### API documentation
 
 _Refer to TypeDocs in Button.tsx_
@@ -5714,6 +7454,22 @@ _Refer to TypeDocs in Button.tsx_
 - 
 
 Button does not accept `width` or flex-child props. See the "Inline style overrides" section for canonical workarounds.
+
+### Full-width button
+
+Button has no `fullWidth` or `width` prop. To make a button span full width (common in sidebar navigation), wrap it in a Box:
+
+```tsx
+{/* ✗ — width prop on Button silently does nothing */}
+<Button text="Save document" style={{ width: '100%' }} />
+
+{/* ✓ — Box controls width, Button fills it */}
+<Box display="flex">
+  <Button text="Save document" style={{ flex: 1 }} />
+</Box>
+```
+
+For custom interactive surfaces like navigation items (icon + label + trailing badge), see `patterns-navigation.md` and `menu.md`.
 
 ### Best practices
 
@@ -6069,15 +7825,15 @@ Fire a toast when an action takes over 3 seconds. The user may have moved on.
 
 Container for content that requires a distinct visual surface — a background, optional border, and semantic tone color.
 
-> **Note:** This documents the `ui-poc` Card component. Import it from `ui`, **not** from `@sanity/ui`:
->
-> ```tsx
-> import { Card } from '../ui-poc/packages/ui/src/components/Card'
-> // or with the Vite alias:
-> import { Card } from 'ui'
-> ```
->
-> The API is significantly different from `@sanity/ui`'s Card. There is no `padding`, `radius`, `shadow`, `scheme`, `selected`, `pressed`, `muted`, or individual `borderTop/Right/Bottom/Left` prop.
+**Note:** This documents the `ui-poc` Card component. Import it from `ui`, **not** from `@sanity/ui`:
+
+```tsx
+import { Card } from '../ui-poc/packages/ui/src/components/Card'
+// or with the Vite alias:
+import { Card } from 'ui'
+```
+
+The API is significantly different from `@sanity/ui`'s Card. There is no `padding`, `radius`, `shadow`, `scheme`, `selected`, `pressed`, `muted`, or individual `borderTop/Right/Bottom/Left` prop.
 
 ### API
 
@@ -6095,31 +7851,51 @@ Container for content that requires a distinct visual surface — a background, 
 
 `density` replaces the separate `padding` and `radius` props from the previous API. Choose based on the visual weight of the surrounding layout:
 
-| Value | Padding | Radius | Use when |
-|-------|---------|--------|----------|
-| `'tight'` | space-2 | radius-2 | High-density lists, compact items, small cards |
-| `'medium'` | space-3 | radius-3 | Standard content cards — the default for most use cases |
-| `'loose'` | space-4 | radius-4 | Low-density layouts, prominent featured cards |
+| Value | Padding | Radius | Pixels | Use when |
+|-------|---------|--------|--------|----------|
+| `'tight'` | space-2 | radius-2 | **8px padding, 3px radius** | High-density lists, compact items, small cards |
+| `'medium'` | space-3 | radius-3 | **12px padding, 7px radius** | Standard content cards — the default for most use cases |
+| `'loose'` | space-4 | radius-4 | **20px padding, 11px radius** | Low-density layouts, prominent featured cards |
+
+#### Why density couples padding and radius
+
+`density` reflects the visual *weight* of a card at a given information density. At high density (tight spacing), a smaller radius matches the proportions. At low density, a larger radius fits the more spacious layout. Decoupling them frequently produces visual imbalance. If you need precise independent control, apply padding to a `Box` inside the Card and use `density="tight"` with `border={false}` on the Card itself.
 
 #### Inverted
 
-`inverted={true}` switches Card to a dark color scheme regardless of the page theme. Each tone has a defined dark variant — for example, `tone="critical"` inverted renders a dark red background with light text. Use sparingly, for high-contrast callouts or dark panels within a light layout.
+> ⛔ **`inverted` is for content cards only — never for structural layout regions.**
+>
+> Sanity UI interfaces maintain a consistent light theme for all structural elements. Do not use `inverted` on navigation sidebars, headers, toolbars, inspector panels, or any persistent UI shell region. Dark structural regions are not part of the design system and are not supported.
+>
+> `inverted` is intended exclusively for **content-level emphasis** within a light-themed layout — for example, an inline error callout, a feature highlight card, or a high-contrast status block embedded inside a content area.
+
+`inverted={true}` switches a Card to a dark color scheme for the current `tone`. Each tone has a defined dark variant (e.g. `tone="critical"` inverted renders a dark red background with light text). Use sparingly and only within content, not structure.
 
 ### Card does not accept layout props
 
-> **Card does not accept layout props.** `flexGrow`, `flexShrink`, `flexBasis`, `minWidth`, `overflow`, `overflowY`, and similar CSS layout properties are not available on Card. Applying them silently does nothing.
->
-> To apply layout properties alongside a Card surface, wrap the Card in a `Box` or `Flex`:
->
-> ```tsx
-> {/* ✗ — flexGrow on Card silently does nothing */}
-> <Card flexGrow={1} density="medium">...</Card>
->
-> {/* ✓ — Box handles the layout, Card handles the surface */}
-> <Box flexGrow={1} minWidth="0" overflowY="auto">
->   <Card density="medium">...</Card>
-> </Box>
-> ```
+ ⛔ **Card silently ignores all flex-child and layout props. TypeScript does not error. No console warning fires. The props have zero effect.**
+
+ The following props are all silently ignored when placed on Card:
+ `flexGrow`, `flexShrink`, `flexBasis`, `minWidth`, `maxWidth`, `width`, `height`, `minHeight`, `overflow`, `overflowX`, `overflowY`, `position`, `inset`, `top`, `right`, `bottom`, `left`
+
+ This is the most commonly broken Card pattern — reported in 30/30 iterations of agent testing.
+
+ To apply layout properties alongside a Card surface, wrap the Card in a `Box` or `Flex`:
+
+ ```tsx
+ {/* ✗ — flexGrow={1} on Card silently does nothing. Layout breaks. No warning. */}
+ <Card flexGrow={1}>...</Card>
+
+ {/* ✗ — minWidth="0" on Card silently does nothing. Text overflows. No warning. */}
+ <Card minWidth="0">...</Card>
+
+ {/* ✓ — Box handles all layout; Card handles only the visual surface */}
+ <Box flexGrow={1} minWidth="0" overflowY="auto">
+   <Card>...</Card>
+ </Box>
+ ```
+
+**Rule of thumb:** Card owns its appearance (`tone`, `border`, `density`, `inverted`). Box or Flex owns its position and size in the layout.
 
 ### When to use
 
@@ -6149,15 +7925,15 @@ Container for content that requires a distinct visual surface — a background, 
 
 ### Tone values
 
-| Value | Light background | Use case |
-|-------|-----------------|----------|
-| `'default'` | gray-50 | General use, no semantic emphasis |
-| `'neutral'` | gray-100 | Visual separation, "pinned" or "highlighted" card |
-| `'primary'` | blue-50 | Branded or educational content |
-| `'suggest'` | purple-50 | AI-generated suggestions |
-| `'positive'` | green-50 | Success, completion, healthy status |
-| `'caution'` | yellow-50 | Needs attention, non-blocking warning |
-| `'critical'` | red-50 | Error, failure, blocking issue |
+| Value | Light background | Background token | Use case |
+|-------|-----------------|-----------------|----------|
+| `'default'` | gray-50 | `var(--gray-50)` | General use, no semantic emphasis |
+| `'neutral'` | gray-100 | `var(--gray-100)` | Visual separation, "pinned" or "highlighted" card |
+| `'primary'` | blue-50 | `var(--blue-50)` | Branded or educational content |
+| `'suggest'` | purple-50 | `var(--purple-50)` | AI-generated suggestions |
+| `'positive'` | green-50 | `var(--green-50)` | Success, completion, healthy status |
+| `'caution'` | yellow-50 | `var(--yellow-50)` | Needs attention, non-blocking warning |
+| `'critical'` | red-50 | `var(--red-50)` | Error, failure, blocking issue |
 
 With `inverted={true}`, each tone uses a dark variant (e.g. `critical` inverted = red-900 bg + red-100 text).
 
@@ -6243,6 +8019,7 @@ _Refer to TypeDocs in MenuDivider.tsx_
 
 - You have a set of secondary actions (like "Edit", "Delete", "Duplicate") that would clutter the UI if displayed individually .
 - You need to display a list of settings or preferences triggered by a single button.
+- MenuItem can be used within a navigational sidebar to display navigation items.
 
 **When not to use:**
 
@@ -6432,3 +8209,528 @@ Used exclusively for communicating what navigation action the user should expect
 - **Concise:** Keep content brief. Popovers are for quick interactions, not long-form reading.
 - **Action-Oriented:** If the popover contains a menu, use verbs for labels (e.g., "Edit," "Delete").
 - **Sentence Case:** Use sentence case for any text headers or descriptions inside the popover (e.g., "Sort by date" not "Sort By Date").
+
+# Select
+
+Allows the user to choose one option from a dropdown list. Renders a native `<select>` element with Sanity UI visual styling.
+
+**Source:** `@sanity/ui`
+```tsx
+import { Select } from '@sanity/ui'
+```
+
+### API documentation
+
+_Refer to TypeDocs in Select.tsx_
+
+> ⛔ **Always wrap `Select` in `Stack space={1}` with a `Label`. A bare Select has no accessible name — this is an axe `select-name` critical violation (WCAG 4.1.2 A). There are no exceptions.**
+
+### Usage guidelines
+
+**When to use:**
+- Choosing exactly one value from a fixed, enumerable list (status, category, filter).
+- Lists with more than 4–5 options where radio buttons would be too heavy.
+
+**When not to use:**
+- Binary choices (on/off, yes/no) — use **Switch** or **Checkbox**.
+- Short lists of 2–3 options shown inline — use a **Button** group or radio buttons.
+- Multi-select — `Select` does not support multiple selections. Compose a `Checkbox` list instead.
+- Free-text input — use **TextInput**.
+
+### `onChange` event handling
+
+`Select` wraps the native `change` event. Always read the value from `event.currentTarget` and cast explicitly:
+
+```tsx
+<Select
+  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
+    setCategory(e.currentTarget.value)
+  }}
+>
+  <option value="">All categories</option>
+  <option value="politics">Local Politics</option>
+  <option value="sports">Sports</option>
+</Select>
+```
+
+> This pattern applies to all Sanity UI form inputs. See also: `textinput.md`.
+
+### Children
+
+`Select` renders native `<option>` elements as children. The dropdown panel appearance is controlled by the browser.
+
+```tsx
+<Stack space={2}>
+  <Label htmlFor="status-filter">Status</Label>
+  <Select
+    id="status-filter"
+    value={status}
+    onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
+      setStatus(e.currentTarget.value)
+    }
+  >
+    <option value="">All statuses</option>
+    <option value="draft">Draft</option>
+    <option value="review">In Review</option>
+    <option value="published">Published</option>
+  </Select>
+</Stack>
+```
+
+### Accessibility
+
+> ⛔ **Always wrap Select in `Stack space={1}` with a `Label`. A bare Select without an accessible name is an axe `select-name` critical violation (WCAG 4.1.2 A). There are no exceptions.**
+
+- **Label association.** Every `Select` must have a `<Label>` via `htmlFor`/`id` or an `aria-label`. A select without an accessible name produces an axe `select-name` critical violation (WCAG 4.1.2 A).
+- **Keyboard.** Natively keyboard-accessible — `Tab` to focus, arrow keys to navigate, `Enter`/`Space` to confirm.
+
+```tsx
+// ✗ — axe critical: select-name
+<Select onChange={handleChange}>
+  <option value="draft">Draft</option>
+</Select>
+
+// ✓
+<Stack space={1}>
+  <Label htmlFor="category-select">Category</Label>
+  <Select
+    id="category-select"
+    value={category}
+    onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
+      setCategory(e.currentTarget.value)
+    }
+  >
+    <option value="">All</option>
+    <option value="politics">Local Politics</option>
+  </Select>
+</Stack>
+```
+
+### Known limitations
+
+- **No multi-select variant.** Use a composed `Checkbox` list for multiple selections.
+- **No custom styled dropdown.** The panel appearance is controlled by the OS. For a fully custom dropdown, use `MenuButton` with `MenuItem` options.
+- **Visual alignment with TextInput.** Subtle height and padding differences may appear across browsers. Wrap both in a `Stack space={2}` for consistent rhythm.
+
+# Table
+
+Sanity UI does not include a `Table` or `DataGrid` component. Tabular data is built with native HTML `<table>` elements styled to match the Sanity UI visual language.
+
+> ⛔ **Do not use `var(--card-border-color)` for table cell borders.** This variable is only defined inside a `Card` ancestor — outside one it is `undefined` and borders are invisible with no error. Use `var(--gray-200)` instead. It resolves to the same visual value and works everywhere.
+
+### When to use a table
+
+- Structured data with multiple aligned columns (asset lists, article queues, session schedules)
+- When the user needs to scan and compare values across rows
+- When data density is high and a card grid would be too heavy
+
+### When not to use a table
+
+- Simple vertical lists with one or two data points per item — use `Stack` with `Card`
+- For layout — use `Box`, `Flex`, or `Grid`
+
+---
+
+### Table styles belong in CSS, not inline
+
+> ⛔ **Do not put `style={{...}}` on `<table>`, `<th>`, `<td>`, or `<tr>`.** Table styling is repetitive — the same padding, border, and font rules apply to every cell. Inline styles on each element produce dozens of `style={{...}}` per table. Put table styles in `global.css` using existing Sanity UI palette and spacing tokens.
+
+### global.css — table styles
+
+Add these rules to your `global.css` file (the same file imported in `main.tsx`). Every table in the app inherits them with zero inline styles.
+
+```css
+/* global.css — table styles using Sanity UI tokens */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th {
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 2px solid var(--gray-200);
+  font: var(--label-2);
+  color: var(--gray-600);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--gray-200);
+  vertical-align: middle;
+}
+
+tr:hover td {
+  background: var(--gray-50);
+}
+
+/* Optional: selected row */
+tr[data-selected='true'] td {
+  background: var(--blue-50);
+}
+
+/* Optional: clickable rows */
+tbody tr {
+  cursor: pointer;
+}
+
+/* Scrollable wrapper — use <Box overflow="auto"> around the table */
+table {
+  min-width: 600px;
+}
+```
+
+### Basic pattern
+
+With the CSS above in `global.css`, the JSX is clean — no `style` prop on any table element:
+
+```tsx
+<Box overflow="auto">
+  <table>
+    <thead>
+      <tr>
+        <th><Text size={0} weight="semibold" color="muted">Title</Text></th>
+        <th><Text size={0} weight="semibold" color="muted">Status</Text></th>
+        <th><Text size={0} weight="semibold" color="muted">Last updated</Text></th>
+      </tr>
+    </thead>
+    <tbody>
+      {rows.map(row => (
+        <tr key={row.id} onClick={() => setSelected(row.id)} data-selected={selected === row.id}>
+          <td><Text size={1} weight="medium">{row.title}</Text></td>
+          <td><Badge tone={row.tone}>{row.status}</Badge></td>
+          <td><Text size={1} color="muted">{row.date}</Text></td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+</Box>
+```
+
+### Always wrap text in table cells
+
+> ⚠️ **Every `<th>` and `<td>` must wrap its text content in a Sanity UI `Text`, `Label`, or `Badge` component.** Do not render bare strings as direct children of table cells. Bare text inherits the browser's default font and size, which does not match the Sanity UI type scale.
+
+```tsx
+{/* ✗ — bare string in <th>, no Sanity UI typography */}
+<th>Title</th>
+
+{/* ✓ — Text component controls font, size, weight, color */}
+<th><Text size={0} weight="semibold" color="muted">Title</Text></th>
+```
+
+```tsx
+{/* ✗ — bare string in <td> */}
+<td>{row.title}</td>
+
+{/* ✓ — Text controls all typography */}
+<td><Text size={1}>{row.title}</Text></td>
+```
+
+For cells that contain a Badge, the Badge itself handles typography — no extra Text wrapper needed:
+
+```tsx
+<td><Badge tone="positive">Published</Badge></td>
+```
+
+### Color tokens
+
+These are the existing Sanity UI palette tokens to use for table styling in CSS. All are globally available on `:root` — they work outside a Card ancestor.
+
+| Element | Token | Notes |
+|---------|-------|-------|
+| Cell border | `var(--gray-200)` | Use this, not `--card-border-color` |
+| Header text | `var(--gray-600)` | Muted label color |
+| Row hover | `var(--gray-50)` | Subtle tint |
+| Selected row | `var(--blue-50)` | Light blue selection |
+| Cell padding | `var(--space-2) var(--space-3)` | 8px 12px from the spacing scale |
+| Header font | `var(--label-2)` | 10.8px/1.25, matches Label `size={2}` |
+
+> **Do not use `var(--card-border-color)` on table cells.** Outside a `Card` ancestor it is undefined — borders become invisible. `var(--gray-200)` is the same value and resolves everywhere.
+
+### Scrollable tables
+
+Wrap the table in `<Box overflow="auto">` and set a `min-width` on the table in CSS (see global.css above). No inline style needed:
+
+```tsx
+<Box overflow="auto">
+  <table>
+    {/* table content — min-width comes from global.css */}
+  </table>
+</Box>
+```
+
+### Accessibility
+
+- **Table headers must have text.** Empty `<th>` elements produce an axe `empty-table-header` violation. Wrap header text in `<Text>` — do not leave `<th>` elements empty.
+- **Use `<thead>` and `<tbody>`.** Screen readers use these to distinguish headers from data rows.
+- **Sort controls.** Sortable `<th>` elements need `aria-sort="ascending"` or `"descending"` when active and a `<button>` child to trigger sorting.
+- **Row selection.** Selectable rows need `role="checkbox"` on the selection cell and `aria-checked` on each checkbox.
+- **Captions.** Add `<caption>` as the first child of `<table>` for complex tables.
+
+### Cross-references
+
+- `patterns-custom-theming.md` — How to override palette tokens for branded table styles
+- `style-overrides.md` — Full list of CSS properties that have prop equivalents
+- `silent-failures.md` #9 — `--card-border-color` outside Card
+
+# Switch
+
+A toggle control for binary on/off settings. Renders a styled checkbox input with accessible labelling.
+
+**Source:** `@sanity/ui`
+```tsx
+import { Switch } from '@sanity/ui'
+```
+
+### API documentation
+
+_Refer to TypeDocs in Switch.tsx_
+
+### Usage guidelines
+
+**When to use:**
+- Toggling a boolean setting that takes effect immediately (e.g. "Enable notifications", "Show deprecated items").
+
+**When not to use:**
+- Choosing between more than two options — use **Select** or **Radio** instead.
+- A form field that requires explicit submission — use **Checkbox** instead, so the user controls when the change is applied.
+
+### `onChange` event handling
+
+`Switch` fires a `React.ChangeEvent<HTMLInputElement>`. Read the new boolean state from `event.currentTarget.checked`:
+
+```tsx
+<Switch
+  checked={isEnabled}
+  onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+    setIsEnabled(e.currentTarget.checked)
+  }}
+/>
+```
+
+`currentTarget.checked` is `true` when the switch is on and `false` when off — it reflects the *new* state after the toggle, not the previous state.
+
+> **Do not** use a functional updater like `() => setVal(v => !v)` unless you specifically want to ignore the event value. Reading `checked` directly from the event is cleaner and more explicit.
+
+### Full example with label
+
+```tsx
+<Flex alignItems="center" gap={3}>
+  <Switch
+    id="show-deprecated"
+    checked={showDeprecated}
+    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+      setShowDeprecated(e.currentTarget.checked)
+    }
+  />
+  <Label htmlFor="show-deprecated">Show deprecated entries</Label>
+</Flex>
+```
+
+### Accessibility
+
+- **Label association.** Always pair Switch with a visible `<Label>` linked via `htmlFor`/`id`, or provide an `aria-label`.
+- **Role.** Switch renders as `<input type="checkbox">` with `role="switch"` implied by its visual affordance. Screen readers announce it as a toggle.
+- **Keyboard.** `Tab` to focus, `Space` to toggle.
+
+### Content guidelines
+
+- Use present-tense verb phrases: "Enable feature flags", "Show archived items".
+- Avoid negations: prefer "Show muted" over "Hide unmuted".
+- The label should describe the *on* state.
+
+# Badge
+
+A small label used to communicate status, category, count, or other metadata inline.
+
+**Source:** `@sanity/ui`
+```tsx
+import { Badge } from '@sanity/ui'
+```
+
+### API documentation
+
+_Refer to TypeDocs in Badge.tsx_
+
+### Usage guidelines
+
+**When to use:**
+- Communicating status (Published, Draft, Deprecated, In Review).
+- Labelling categories, tag or types inline within a list or table.
+- Showing counts or numeric indicators.
+
+**When not to use:**
+- For actions — use **Button**.
+- For long text — keep badge labels to 1–3 words.
+
+### Tone
+
+Badge accepts the same tone values as Card and Button:
+
+| Tone | Visual | Use for |
+|------|--------|---------|
+| `'default'` | Gray | Neutral / no semantic meaning |
+| `'positive'` | Green | Success, published, healthy |
+| `'caution'` | Yellow/amber | Needs attention, in review |
+| `'critical'` | Red | Error, failed, rejected, deprecated |
+| `'primary'` | Blue | Informational, branded |
+
+```tsx
+<Badge tone="positive">Published</Badge>
+<Badge tone="caution">In Review</Badge>
+<Badge tone="critical">Deprecated</Badge>
+<Badge tone="default">Draft</Badge>
+```
+
+> ⚠️ **`tone="primary"` may fail WCAG AA contrast at small sizes.** The primary blue (`#556bfc`) with white text produces a 4.29:1 contrast ratio — below the 4.5:1 AA threshold for text under 18px. For small badges (`fontSize` below default), prefer `tone="default"` with a text label. See `button.md` for the same constraint on Button.
+
+### `icon` prop
+
+Badge accepts an optional `icon` prop for a leading icon. Pass the **component reference** — not a JSX element:
+
+```tsx
+{/* ✗ — JSX element, not a component reference */}
+<Badge tone="positive" icon={<CheckmarkCircleIcon />}>Published</Badge>
+
+{/* ✓ — pass the component itself (no angle brackets, no JSX) */}
+<Badge tone="positive" icon={CheckmarkCircleIcon}>Published</Badge>
+```
+
+The `icon` prop accepts an icon component directly:
+
+The TypeScript type for `icon` is `React.ComponentType<{}>` — a component reference, not a rendered JSX element.
+
+```tsx
+import { CheckmarkCircleIcon, WarningOutlineIcon, ErrorOutlineIcon, ClockIcon } from '@sanity/icons'
+
+<Badge tone="positive" icon={CheckmarkCircleIcon}>Published</Badge>
+<Badge tone="caution" icon={ClockIcon}>In Review</Badge>
+<Badge tone="critical" icon={ErrorOutlineIcon}>Rejected</Badge>
+<Badge tone="critical" icon={WarningOutlineIcon}>Deprecated</Badge>
+```
+
+> **Always pair a toned Badge with a matching icon.** Color alone is not sufficient to communicate meaning (WCAG 1.4.1 A).
+
+### HTTP method badges
+
+A common pattern in API documentation interfaces:
+
+```tsx
+const METHOD_TONES = {
+  GET:    'positive',
+  POST:   'primary',
+  PUT:    'caution',
+  DELETE: 'critical',
+  PATCH:  'caution',
+} as const
+
+<Badge tone={METHOD_TONES[method]}>{method}</Badge>
+```
+
+### Accessibility
+
+- **Color alone is insufficient.** Always pair a toned Badge with a text label that communicates the same meaning. Do not use tone color as the only signal.
+- **`fontSize` prop.** Badge accepts a `fontSize` prop for size adjustment. Use with care — badge text below 12px may fail contrast requirements.
+
+# TextArea
+
+Multi-line text input. An alternative to the native `<textarea>` that integrates with the Sanity UI visual system.
+
+**Source:** `@sanity/ui`
+```tsx
+import { TextArea } from '@sanity/ui'
+```
+
+### API documentation
+
+_Refer to TypeDocs in TextArea.tsx_
+
+### Usage guidelines
+
+**When to use:**
+- Multi-line free text: abstracts, body content, descriptions, comments.
+- Technical content where the user expects a multi-line editing surface.
+
+**When not to use:**
+- Single-line input — use **TextInput**.
+- Selecting from a list — use **Select**.
+- Rich text editing — use a dedicated editor component.
+
+### `rows` prop
+
+`rows` sets the visible height of the textarea in lines of text. Use it to suggest the expected content length:
+
+```tsx
+<TextArea rows={3} placeholder="Short description..." />   {/* ~3 lines */}
+<TextArea rows={8} placeholder="Full body content..." />   {/* ~8 lines */}
+<TextArea rows={12} placeholder="Response schema..." />    {/* ~12 lines */}
+```
+
+The textarea remains resizable by default. Users can drag to expand beyond the `rows` height.
+
+### Disabling resize
+
+`TextArea` does not have a `resize` prop. To prevent users from resizing the textarea, use an inline style — this is one of the documented acceptable cases for inline styles since no prop equivalent exists:
+
+```tsx
+<TextArea rows={4} style={{ resize: 'none' }} />
+```
+
+When disabling resize, set `rows` generously enough to accommodate typical content — a hidden resize handle removes the user's escape hatch for longer content.
+
+### Monospace font for code or schema fields
+
+For technical content (response schemas, code templates, configuration), apply a monospace font via an inline style override:
+
+```tsx
+<TextArea
+  rows={8}
+  style={{ fontFamily: 'monospace', fontSize: '13px' }}
+  placeholder={'{
+  "id": "string",
+  "name": "string"
+}'}
+/>
+```
+
+### `onChange` event handling
+
+Same pattern as `TextInput` — use `event.currentTarget.value` and cast explicitly:
+
+```tsx
+<TextArea
+  rows={6}
+  value={body}
+  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setBody(e.currentTarget.value)
+  }}
+/>
+```
+
+### Full example with label
+
+```tsx
+<Stack space={2}>
+  <Label htmlFor="guide-body">Body</Label>
+  <TextArea
+    id="guide-body"
+    rows={8}
+    value={body}
+    onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+      setBody(e.currentTarget.value)
+    }
+    placeholder="Write guide content here..."
+  />
+</Stack>
+```
+
+### Accessibility
+
+- **Label association.** Every TextArea must have a `<Label>` via `htmlFor`/`id` or an `aria-label`.
+- **Keyboard.** Natively keyboard-accessible — `Tab` to focus, standard text editing keys apply.
+- **Resize.** The default resize handle is accessible via pointer. If you disable resize, ensure the default `rows` is generous enough for expected content.

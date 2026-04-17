@@ -248,6 +248,10 @@ export async function runAgent({
   useMcp,
   copyAssets = true,
 }) {
+  // Save the fully-resolved prompt for this iteration so it can be inspected
+  // later to confirm every iteration received the same brief.
+  await writeFile(resolve(iterDir, "_prompt.txt"), promptContent, "utf-8");
+
   // useMcp flag from CLI: true = auto-detect, false = force off
   const needsMcp = useMcp === false ? false : /mcp/i.test(promptContent);
   const mcpTools = needsMcp ? ["mcp__sanity-ui"] : null;

@@ -420,6 +420,10 @@ export async function runAgent({
   // useMcp flag from CLI: true = auto-detect, false = force off
   const needsMcp = useMcp === false ? false : /mcp/i.test(promptContent);
 
+  // Save the fully-resolved prompt for this iteration so it can be inspected
+  // later to confirm every iteration received the same brief.
+  await writeFile(resolve(iterDir, "_prompt.txt"), promptContent, "utf-8");
+
   // --- Step 1: Initial generation (with retries if no files are produced) ---
   let fullText = "";
   let files = [];
