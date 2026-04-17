@@ -1,5 +1,5 @@
-import { resolve } from "node:path";
-import { writeFile } from "node:fs/promises";
+import { resolve, dirname } from "node:path";
+import { writeFile, appendFile } from "node:fs/promises";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -35,16 +35,41 @@ export async function validateProject(projectDir, iterLabel) {
   try {
     // Install dependencies
     console.log(`[${iterLabel}] Installing dependencies...`);
+    const iterDir = dirname(projectDir);
     try {
-      await execFileAsync("npm", ["install", "--no-audit", "--no-fund", "--legacy-peer-deps"], {
-        cwd: projectDir,
-        timeout: 120_000,
-      });
+      const { stdout, stderr } = await execFileAsync(
+        "npm",
+        ["install", "--no-audit", "--no-fund", "--legacy-peer-deps"],
+        { cwd: projectDir, timeout: 120_000 },
+      );
+
+      // Log all npm output for debugging, even on success
+      const ts = new Date().toISOString();
+      const log = [
+        `\n--- npm install [${ts}] OK ---`,
+        stderr ? `[stderr]\n${stderr.trim()}` : null,
+        stdout ? `[stdout]\n${stdout.trim()}` : null,
+      ]
+        .filter(Boolean)
+        .join("\n\n") + "\n";
+      await appendFile(resolve(iterDir, "_npm_install.txt"), log, "utf-8");
     } catch (npmErr) {
       // execFileAsync attaches stdout/stderr to the error object — surface them
       const stderr = (npmErr.stderr || "").trim();
       const stdout = (npmErr.stdout || "").trim();
       const detail = stderr || stdout || npmErr.message;
+
+      const ts = new Date().toISOString();
+      const log = [
+        `\n--- npm install [${ts}] FAILED (exit code ${npmErr.code ?? "unknown"}) ---`,
+        stderr ? `[stderr]\n${stderr}` : null,
+        stdout ? `[stdout]\n${stdout}` : null,
+        `[error]\n${npmErr.message}`,
+      ]
+        .filter(Boolean)
+        .join("\n\n") + "\n";
+      await appendFile(resolve(iterDir, "_npm_install.txt"), log, "utf-8");
+
       console.error(`[${iterLabel}] npm install failed:\n${detail}`);
       throw new Error(`npm install failed:\n${detail}`);
     }

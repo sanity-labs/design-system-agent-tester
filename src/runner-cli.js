@@ -1,8 +1,8 @@
-import { writeFile, mkdir, rm, readFile, mkdtemp } from "node:fs/promises";
+import { writeFile, mkdir, rm, readFile, mkdtemp, appendFile } from "node:fs/promises";
 import { resolve, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -25,68 +25,8 @@ import {
 } from "./analyze.js";
 import { runAccessibilityTests } from "./a11y.js";
 
-const SYSTEM_PROMPT = `You are an expert frontend developer. You will be given instructions to build a web application.
-
-CRITICAL — Package imports you MUST follow:
-- Box, Flex, Grid, Text, Heading, Card, and Divider come from "@sanity-labs/ui-poc", NOT from "@sanity/ui".
-- You MUST add "@sanity-labs/ui-poc" to package.json dependencies.
-- You MUST import "@sanity-labs/ui-poc/dist/styles.css" in main.tsx.
-- "@sanity-labs/ui-poc" requires React 19. You MUST use "react": "^19.2" and "react-dom": "^19.2" in package.json. Do NOT use React 18.
-- All other components (Button, Stack, Badge, TextInput, Label, Select, Menu, MenuItem, Tooltip, etc.) come from "@sanity/ui" as normal.
-- If the user prompt does not mention @sanity-labs/ui-poc, ignore this rule and use @sanity/ui for everything.
-
-Your task is to produce ALL the files needed for a complete, working project. Output each file using the following format:
-
----FILE: path/to/file---
-(file contents here)
----END FILE---
-
-After ALL file blocks, you MUST provide feedback on areas of friction you encountered when using Sanity UI. Output your feedback in this exact format:
-
----FEEDBACK---
-- [category] Your feedback item here
-- [category] Another feedback item here
----END FEEDBACK---
-
-Categories must be one of: [documentation], [api], [components], [theming], [icons], [dx], [other]
-
-Each line must start with a dash and a category tag. Be specific and actionable. Cover things like:
-- Missing or unclear documentation
-- Components that were hard to use or understand
-- Unexpected API behavior
-- Missing components or features you expected to exist
-- Theming or styling difficulties
-- Icon naming inconsistencies
-- General developer experience friction
-
-Rules:
-- Output ALL files needed (package.json, index.html, vite.config.js, source files, etc.)
-- Use relative paths from the project root
-- Do not include explanations outside of file blocks (except the FEEDBACK block at the end)
-- Do not include unit tests
-- Make sure the project works with "npm install && npm run dev"
-- The FEEDBACK block must appear after all FILE blocks`;
-
-const FIX_SYSTEM_PROMPT = `You are an expert frontend developer debugging a web application that fails to render.
-
-You will be given:
-1. The current project files
-2. The errors that occurred when the app was loaded in a browser
-
-Your task is to fix ALL the errors so the page renders correctly. Output ONLY the files that need to change, using this format:
-
----FILE: path/to/file---
-(complete file contents here)
----END FILE---
-
-Rules:
-- Feedback is required. This step cannot be skipped.
-- Output the COMPLETE contents of each file you change (not just the diff)
-- Only output files that need to change
-- Do not add explanations outside of file blocks
-- Fix the root cause, not the symptoms
-- If an import does not exist in a library, remove it or replace it with one that does exist
-- Make sure the project works with "npm install && npm run dev"`;
+const SYSTEM_PROMPT = readFileSync(resolve(PROJECT_ROOT, "prompts", "system.md"), "utf-8").trim();
+const FIX_SYSTEM_PROMPT = readFileSync(resolve(PROJECT_ROOT, "prompts", "system-fix.md"), "utf-8").trim();
 
 /**
  * Invoke the `claude` CLI in --print mode and return the text output.
@@ -262,6 +202,8 @@ export async function runAgent({
   let files = [];
   let generationAttempt = 0;
 
+  const agentLogPath = resolve(iterDir, "_agent_log.txt");
+
   while (generationAttempt < maxGenerationRetries) {
     generationAttempt++;
 
@@ -282,6 +224,18 @@ export async function runAgent({
 
     // Save raw response
     await writeFile(resolve(iterDir, "_raw_response.txt"), fullText, "utf-8");
+
+    // Start cumulative agent log
+    await writeFile(
+      agentLogPath,
+      `=== INITIAL GENERATION [${new Date().toISOString()}] ===\n` +
+        `Model: ${model}\n` +
+        `Response length: ${fullText.length} bytes\n` +
+        `Files parsed: ${parseFiles(fullText).length}\n\n` +
+        fullText +
+        "\n\n",
+      "utf-8",
+    );
 
     // Parse files from the response
     files = parseFiles(fullText);
@@ -431,6 +385,17 @@ export async function runAgent({
           validation.fatalError,
         );
 
+        // Log the fix prompt to the cumulative agent log
+        await appendFile(
+          agentLogPath,
+          `=== FIX ATTEMPT ${fixAttempts}/${maxFixes} — PROMPT [${new Date().toISOString()}] ===\n` +
+            `Fatal error: ${(validation.fatalError || "none").split("\n")[0]}\n` +
+            `Console errors: ${validation.consoleErrors.length}\n\n` +
+            fixPrompt +
+            "\n\n",
+          "utf-8",
+        );
+
         // Ask Claude to fix the errors
         console.log(`[${iterLabel}] Asking Claude CLI to fix errors...`);
         const fixText = await invokeClaudeCli({
@@ -447,8 +412,20 @@ export async function runAgent({
           "utf-8",
         );
 
+        // Log the fix response to the cumulative agent log
+        const fixedFilesParsed = parseFiles(fixText);
+        await appendFile(
+          agentLogPath,
+          `=== FIX ATTEMPT ${fixAttempts}/${maxFixes} — RESPONSE [${new Date().toISOString()}] ===\n` +
+            `Response length: ${fixText.length} bytes\n` +
+            `Files in response: ${fixedFilesParsed.map((f) => f.path).join(", ") || "(none)"}\n\n` +
+            fixText +
+            "\n\n",
+          "utf-8",
+        );
+
         // Parse the fixed files and merge them into the project
-        const fixedFiles = parseFiles(fixText);
+        const fixedFiles = fixedFilesParsed;
         if (fixedFiles.length === 0) {
           console.warn(
             `[${iterLabel}] Claude returned no file blocks in fix response — retrying`,
@@ -467,6 +444,20 @@ export async function runAgent({
             files[existing] = fixed;
           } else {
             files.push(fixed);
+          }
+        }
+
+        // Re-enforce @sanity-labs/ui-poc after every fix cycle — the model
+        // frequently "fixes" errors by removing ui-poc and reverting to @sanity/ui
+        if (promptContent.includes("@sanity-labs/ui-poc")) {
+          const rePatched = enforceUiPocImports(files, iterLabel);
+          if (rePatched) {
+            await appendFile(
+              agentLogPath,
+              `=== POST-FIX ENFORCEMENT [${new Date().toISOString()}] ===\n` +
+                `Re-applied @sanity-labs/ui-poc imports after fix attempt ${fixAttempts}\n\n`,
+              "utf-8",
+            );
           }
         }
 
@@ -650,13 +641,13 @@ function enforceUiPocImports(files, iterLabel) {
 
     // --- 3. Ensure styles.css import in main.tsx / main.jsx ---
     if (/main\.(tsx?|jsx?)$/.test(file.path)) {
-      if (!content.includes("@sanity-labs/ui-poc/dist/styles.css")) {
+      if (!content.includes("@sanity-labs/ui-poc/styles.css")) {
         const lastImportIdx = content.lastIndexOf("\nimport ");
         if (lastImportIdx !== -1) {
           const eol = content.indexOf("\n", lastImportIdx + 1);
           content =
             content.slice(0, eol + 1) +
-            "import '@sanity-labs/ui-poc/dist/styles.css'\n" +
+            "import '@sanity-labs/ui-poc/styles.css'\n" +
             content.slice(eol + 1);
           fileChanged = true;
         }

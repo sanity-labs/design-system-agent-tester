@@ -72,6 +72,9 @@ export async function generateReport(allResults, outputDir, promptText = null) {
     // 12. Component usage count analysis
     const componentUsageAnalysis = analyzeComponentUsage(validIterations);
 
+    // 13. Lint analysis
+    const lintAnalysis = analyzeLint(validIterations);
+
     const avgFixes = mean(fixCounts);
     const stdDevFixes = stdDev(fixCounts);
     const iterationsNeedingFixes = fixCounts.filter((n) => n > 0).length;
@@ -130,6 +133,7 @@ export async function generateReport(allResults, outputDir, promptText = null) {
       performance: perfAnalysis,
       inlineStyles: inlineStyleAnalysis,
       componentUsageCounts: componentUsageAnalysis,
+      lint: lintAnalysis,
       tokenUsage: {
         avgInputTokens: inputTokens.length ? round(mean(inputTokens)) : null,
         avgOutputTokens: outputTokens.length ? round(mean(outputTokens)) : null,
@@ -799,6 +803,64 @@ function renderMarkdown(report) {
 
     // Visual Diff
     md += `### 🖼️ Visual Diff\n\n`;
+    // --- Lint ---
+    if (data.lint && (data.lint.totalErrors > 0 || data.lint.totalWarnings > 0)) {
+      const lint = data.lint;
+      md += `### 🔍 Lint (Sanity UI Rules)\n\n`;
+      md += `| Metric | Value |\n|--------|-------|\n`;
+      md += `| Iterations linted | ${lint.iterationsWithResults}/${lint.totalIterations} |\n`;
+      md += `| Total errors | ${lint.totalErrors} |\n`;
+      md += `| Total warnings | ${lint.totalWarnings} |\n`;
+      md += `| Avg errors/iteration | ${lint.averageErrors} |\n`;
+      md += `| Avg warnings/iteration | ${lint.averageWarnings} |\n`;
+      md += `\n`;
+
+      // Errors by rule
+      const allRules = { ...lint.errorsByRule };
+      for (const [rule, count] of Object.entries(lint.warningsByRule || {})) {
+        if (!allRules[rule]) allRules[rule] = 0;
+      }
+
+      const sortedRules = Object.entries({
+        ...lint.errorsByRule,
+        ...lint.warningsByRule,
+      }).sort((a, b) => b[1] - a[1]);
+
+      if (sortedRules.length > 0) {
+        md += `**Violations by rule:**\n\n`;
+        md += `| Rule | Errors | Warnings |\n|------|--------|----------|\n`;
+        // Collect all rule names from both maps
+        const ruleNames = new Set([
+          ...Object.keys(lint.errorsByRule || {}),
+          ...Object.keys(lint.warningsByRule || {}),
+        ]);
+        const ruleRows = [...ruleNames]
+          .map((rule) => ({
+            rule,
+            errors: (lint.errorsByRule || {})[rule] || 0,
+            warnings: (lint.warningsByRule || {})[rule] || 0,
+            total: ((lint.errorsByRule || {})[rule] || 0) + ((lint.warningsByRule || {})[rule] || 0),
+          }))
+          .sort((a, b) => b.total - a.total);
+        for (const row of ruleRows) {
+          md += `| \`${row.rule}\` | ${row.errors} | ${row.warnings} |\n`;
+        }
+        md += `\n`;
+      }
+
+      // Per iteration
+      if (lint.perIteration && lint.perIteration.length > 0) {
+        md += `**Per iteration:**\n\n`;
+        for (const iter of lint.perIteration) {
+          const icon = iter.errors === 0 ? "✓" : "✗";
+          md += `- **Iteration ${iter.iteration}:** ${icon} ${iter.errors} error(s), ${iter.warnings} warning(s)\n`;
+        }
+        md += `\n`;
+      }
+    } else if (data.lint) {
+      md += `### 🔍 Lint (Sanity UI Rules)\n\nAll rules pass ✓\n\n`;
+    }
+
     const vd = data.visualDiff;
     if (vd && vd.averageDiffPercent !== null) {
       md += `| Metric | Value |\n|--------|-------|\n`;
@@ -1008,6 +1070,65 @@ function analyzeInlineStyles(iterations) {
     totalAcrossIterations,
     averagePerIteration: round(totalAcrossIterations / withData.length),
     byComponent: globalByComponent,
+    perIteration,
+  };
+}
+
+/**
+ * Aggregate lint results across iterations.
+ */
+function analyzeLint(iterations) {
+  const withData = iterations.filter((r) => r.lintResults && r.lintResults.messages);
+
+  if (withData.length === 0) {
+    return {
+      iterationsWithResults: 0,
+      totalIterations: iterations.length,
+      totalErrors: 0,
+      totalWarnings: 0,
+      averageErrors: 0,
+      averageWarnings: 0,
+      errorsByRule: {},
+      warningsByRule: {},
+      perIteration: [],
+    };
+  }
+
+  const globalErrorsByRule = {};
+  const globalWarningsByRule = {};
+  let totalErrors = 0;
+  let totalWarnings = 0;
+
+  const perIteration = withData.map((r) => {
+    const lint = r.lintResults;
+    totalErrors += lint.totalErrors || 0;
+    totalWarnings += lint.totalWarnings || 0;
+
+    for (const [rule, count] of Object.entries(lint.errorsByRule || {})) {
+      globalErrorsByRule[rule] = (globalErrorsByRule[rule] || 0) + count;
+    }
+    for (const [rule, count] of Object.entries(lint.warningsByRule || {})) {
+      globalWarningsByRule[rule] = (globalWarningsByRule[rule] || 0) + count;
+    }
+
+    return {
+      iteration: r.iteration,
+      errors: lint.totalErrors || 0,
+      warnings: lint.totalWarnings || 0,
+      errorsByRule: lint.errorsByRule || {},
+      warningsByRule: lint.warningsByRule || {},
+    };
+  });
+
+  return {
+    iterationsWithResults: withData.length,
+    totalIterations: iterations.length,
+    totalErrors,
+    totalWarnings,
+    averageErrors: round(totalErrors / withData.length),
+    averageWarnings: round(totalWarnings / withData.length),
+    errorsByRule: globalErrorsByRule,
+    warningsByRule: globalWarningsByRule,
     perIteration,
   };
 }
