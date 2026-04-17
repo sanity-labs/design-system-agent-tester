@@ -1,7 +1,7 @@
 import { parseArgs } from "node:util";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readFile, mkdir, cp } from "node:fs/promises";
+import { readFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { generateReport } from "./report.js";
 import { computeVisualDiff } from "./visual-diff.js";
@@ -83,10 +83,7 @@ const { values } = parseArgs({
       type: "boolean",
       default: false,
     },
-    "no-copy-assets": {
-      type: "boolean",
-      default: false,
-    },
+
     "agent-prompt": {
       type: "boolean",
       default: false,
@@ -134,14 +131,14 @@ function injectBrief(fileContent, brief) {
 }
 
 /**
- * Build a timestamped directory name in the format YYYY-MM-DD-HH.MM
+ * Build a timestamped run path in the format YYYY-MM-DD/HH.MM
  */
-function buildTimestampedDirName() {
+function buildTimestampedRunPath() {
   const now = new Date();
   const pad = (n) => String(n).padStart(2, "0");
   const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
   const time = `${pad(now.getHours())}.${pad(now.getMinutes())}`;
-  return `${date}-${time}`;
+  return `${date}/${time}`;
 }
 
 async function main() {
@@ -154,7 +151,7 @@ async function main() {
   const takeScreenshots = values.screenshot;
   const maxFixes = parseInt(values["max-fixes"], 10);
   const useMcp = !values["no-mcp"];
-  const copyAssets = !values["no-copy-assets"];
+
   const useAgentPrompt = values["agent-prompt"];
 
   if (isNaN(maxFixes) || maxFixes < 0) {
@@ -193,9 +190,9 @@ async function main() {
     process.exit(1);
   }
 
-  // Create a timestamped run directory: output/2025-03-18-14.30/
-  const runDirName = buildTimestampedDirName();
-  const runDir = resolve(ROOT, "output", runDirName);
+  // Create a timestamped run directory: output/2025-03-18/14.30/
+  const runDirPath = buildTimestampedRunPath();
+  const runDir = resolve(ROOT, "output", runDirPath);
   await mkdir(runDir, { recursive: true });
 
   // Resolve the interface brief once — both prompt variants receive the same text.
@@ -211,7 +208,7 @@ async function main() {
   console.log(`Concurrency:  ${maxConcurrency}`);
   console.log(`Screenshots:  ${takeScreenshots}`);
   console.log(`MCP:          ${useMcp}`);
-  console.log(`Copy assets:  ${copyAssets}`);
+
   console.log(`Agent prompt: ${useAgentPrompt}`);
   console.log(`Prompts:      ${promptKeys.join(", ")}`);
   console.log(`Output:       ${runDir}`);
@@ -260,7 +257,6 @@ async function main() {
             takeScreenshots,
             maxFixes,
             useMcp,
-            copyAssets,
           });
 
           const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);

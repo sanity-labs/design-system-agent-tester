@@ -5,25 +5,10 @@
 * Use the latest version of Sanity Icons and Sanity UI for the interface. YOU ARE NOT ALLOWED INSTALL A SPECIFIC VERSION. YOU HAVE TO EXPLICITLY INSTALL THE LATEST VERSION OF EACH PACKAGE WITH THE FOLLOWING COMMANDS:
   * Sanity icons: `npm i @sanity/icons@latest`
   * Sanity UI: `npm i @sanity/ui@latest`
-* DO NOT import `Box`, `Flex`, `Grid`, `Text`, `Heading`, `Divider`, or `Card` from `@sanity/ui`. These four components are **superseded** by the `ui-poc` package, which will be present in your project at `./ui-poc/packages/ui/src/`. Import them like this:
+  * Sanity UI POC: `npm i @sanity-labs/ui-poc`
+* DO NOT import `Box`, `Flex`, `Grid`, or `Text` from `@sanity/ui`. These four components are **superseded** by the `UI POC` package.
 
-  ```tsx
-  import { Box }     from './ui-poc/packages/ui/src/components/Box'
-  import { Flex }    from './ui-poc/packages/ui/src/components/Flex'
-  import { Grid }    from './ui-poc/packages/ui/src/components/Grid'
-  import { Text }    from './ui-poc/packages/ui/src/components/Text'
-  import { Heading } from './ui-poc/packages/ui/src/components/Heading'
-  import { Divider } from './ui-poc/packages/ui/src/components/Divider'
-  import { Card }    from './ui-poc/packages/ui/src/components/Card'
-  ```
-
-  Add `classnames` to your `package.json` dependencies — the `ui-poc` components require it:
-
-  ```json
-  "classnames": "^2.5.1"
-  ```
-
-  **Do NOT write your own versions of Box, Flex, Grid, or Divider.** They already exist in `./ui-poc/packages/ui/src/components/`. Use them directly.
+  **Do NOT write your own versions of Box, Flex, Grid, or Divider.** They already exist in `UI POC`. Use them directly.
 
   All other `@sanity/ui` components — `Avatar`, `Stack`, `Button`, `Badge`, `TextInput`, `Label`, `Tooltip`, `Menu`, `MenuItem`, `MenuButton`, `Toast`, `Popover`, etc. — continue to be imported from `@sanity/ui` as normal.
 
@@ -32,12 +17,10 @@
 
   | Component | Import from |
   |-----------|-------------|
-  | `Box` | `./ui-poc/packages/ui/src/components/Box` |
-  | `Flex` | `./ui-poc/packages/ui/src/components/Flex` |
-  | `Grid` | `./ui-poc/packages/ui/src/components/Grid` |
-  | `Text` | `./ui-poc/packages/ui/src/components/Text` |
-  | `Heading` | `./ui-poc/packages/ui/src/components/Heading` |
-  | `Divider` | `./ui-poc/packages/ui/src/components/Divider` |
+  | `Box` | `@sanity-labs/ui-poc` |
+  | `Flex` | `@sanity-labs/ui-poc` |
+  | `Grid` | `@sanity-labs/ui-poc` |
+  | `Text` | `@sanity-labs/ui-poc` |
   | Everything else | `@sanity/ui` |
 
 * Work within the constraints of Sanity UI the `ui-poc` package. **Do not make custom components if one exists in either library.**
@@ -59,7 +42,7 @@ This guide walks you through setting up a Sanity UI project from scratch. By the
 
 Components come from **two** packages. Importing from the wrong one produces **no TypeScript error and no runtime warning** — the component silently renders with a different API.
 
-| Import from `'ui'` (ui-poc) | Import from `'@sanity/ui'` |
+| Import from `'@sanity-labs/ui-poc'` | Import from `'@sanity/ui'` |
 |------------------------------|----------------------------|
 | `Box` | `Badge` |
 | `Card` | `Button` |
@@ -73,8 +56,8 @@ Components come from **two** packages. Importing from the wrong one produces **n
 | | `ToastProvider`, `useToast` |
 
 ```tsx
-// ui-poc layout primitives
-import { Box, Flex, Grid, Card, Heading, Text, Divider } from 'ui'
+// Layout primitives from @sanity-labs/ui-poc
+import { Box, Flex, Grid, Card, Heading, Text, Divider } from '@sanity-labs/ui-poc'
 
 // everything else
 import { Button, Stack, Badge, TextInput, Select, Label } from '@sanity/ui'
@@ -92,7 +75,7 @@ Start with a Vite project and add the packages Sanity UI needs.
 ```sh
 npm create vite@latest my-app -- --template react-ts
 cd my-app
-npm install @sanity/ui @sanity/icons styled-components classnames
+npm install @sanity/ui @sanity/icons @sanity-labs/ui-poc styled-components classnames
 ```
 
 ⛔ **You must use `@vitejs/plugin-react` (Babel), not the SWC variant.** `@sanity/ui` uses `styled-components`, which requires Babel for correct behavior. Using the SWC plugin causes styled-components to silently produce unstyled or broken output — no error is thrown.
@@ -116,7 +99,7 @@ The following failures have **no error message, no TypeScript warning, and no co
 | `Heading` without `level` | Wrong `<h2>` in heading hierarchy | `<Heading level={1}>` |
 | `tone="primary"` on Button | Fails WCAG AA contrast silently | Use `tone="default"` |
 | `Stack` with `gap` / `Flex` with `space` | Spacing ignored | `Flex`→`gap`, `Stack`→`space` |
-| Wrong package import | Different API, no error | `Box`/`Flex`/`Card`/`Heading`/`Text` → `import from 'ui'` |
+| Wrong package import | Different API, no error | `Box`/`Flex`/`Card`/`Heading`/`Text` → `import from '@sanity-labs/ui-poc'` |
 | `styles.css` not imported | All components unstyled | Import in `main.tsx` (see below) |
 | SWC plugin instead of Babel | Styled-components unstyled | Use `@vitejs/plugin-react` |
 
@@ -133,45 +116,23 @@ my-app/
 ├── index.html
 ├── package.json
 ├── vite.config.ts
-├── ui-poc/                  ← already present in your project root
-│   └── packages/
-│       └── ui/
-│           └── src/
-│               ├── index.ts
-│               ├── styles.css
-│               └── components/
-│                   ├── Box.tsx
-│                   ├── Flex.tsx
-│                   ├── Grid.tsx
-│                   ├── Heading.tsx
-│                   ├── Text.tsx
-│                   └── Card.tsx
 └── src/
     ├── main.tsx
     ├── App.tsx
     └── reduced-motion.css
 ```
 
-## Import `ui-poc` components
+## Import @sanity-labs/ui-poc components
 
-⛔ **`styles.css` must be imported or nothing will render correctly — and no error will tell you why.**
+⛔ **`@sanity-labs/ui-poc/dist/styles.css` must be imported or nothing will render correctly — and no error will tell you why.**
 
-Omitting this import causes all ui-poc components (Box, Flex, Grid, Heading, Text, Card, Divider) to render as bare, unstyled HTML elements. No console error is thrown. No TypeScript warning fires. No hint appears anywhere that the import is missing. This is the most commonly missed setup step.
+Omitting this import causes all @sanity-labs/ui-poc components (Box, Flex, Grid, Heading, Text, Card, Divider) to render as bare, unstyled HTML elements. No console error is thrown. No TypeScript warning fires. No hint appears anywhere that the import is missing. This is the most commonly missed setup step.
 
 Import it in `main.tsx` — see that section below.
 
 ```tsx
-// Box, Flex, Grid, Divider, Heading, Text, and Card come from ui-poc — NOT from @sanity/ui
-// With the Vite alias configured, 'ui' is the canonical import:
-import { Box, Flex, Grid, Card, Heading, Text, Divider } from 'ui'
-// Without the alias (e.g. in a file that can't use the alias), use the full path:
-import { Box }     from '../ui-poc/packages/ui/src/components/Box'
-import { Flex }    from '../ui-poc/packages/ui/src/components/Flex'
-import { Grid }    from '../ui-poc/packages/ui/src/components/Grid'
-import { Divider } from '../ui-poc/packages/ui/src/components/Divider'
-import { Heading } from '../ui-poc/packages/ui/src/components/Heading'
-import { Text }    from '../ui-poc/packages/ui/src/components/Text'
-import { Card }    from '../ui-poc/packages/ui/src/components/Card'
+// Box, Flex, Grid, Divider, Heading, Text, and Card come from @sanity-labs/ui-poc — NOT from @sanity/ui
+import { Box, Flex, Grid, Card, Heading, Text, Divider } from '@sanity-labs/ui-poc'
 ```
 
 ## index.html
@@ -212,28 +173,20 @@ Sanity UI buttons and interactive parts apply `transition-duration: 0.1s` throug
 
 ## vite.config.ts
 
-Add a Vite alias so that `import { Box } from 'ui'` resolves to the ui-poc source. Also set up the `@vitejs/plugin-react` plugin.
+Set up the `@vitejs/plugin-react` plugin. No aliases are needed — `@sanity-labs/ui-poc` resolves from `node_modules`.
 
 ```ts
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import { fileURLToPath, URL } from 'node:url'
 
 export default defineConfig({
   plugins: [react()],
-  resolve: {
-    alias: {
-      ui: fileURLToPath(
-        new URL('./ui-poc/packages/ui/src', import.meta.url),
-      ),
-    },
-  },
 })
 ```
 
 ## main.tsx
 
-Wrap the app in `ThemeProvider` with `studioTheme` and `ToastProvider`. Both are required. `ToastProvider` must be **inside** `ThemeProvider`. Import `reduced-motion.css` and the compiled ui-poc styles here.
+Wrap the app in `ThemeProvider` with `studioTheme` and `ToastProvider`. Both are required. `ToastProvider` must be **inside** `ThemeProvider`. Import `reduced-motion.css` and the compiled `@sanity-labs/ui-poc` styles here.
 
 **`studioTheme` vs `buildTheme()`.** The quick-start uses `studioTheme` from `@sanity/ui` — a ready-made theme. You can also use `buildTheme()` from `@sanity/ui/theme`, which produces the same result. Use `buildTheme()` when you need to pass custom options.
 
@@ -244,7 +197,7 @@ import { createRoot } from 'react-dom/client'
 import { ThemeProvider, studioTheme, ToastProvider } from '@sanity/ui'
 import App from './App'
 import './reduced-motion.css'
-import '../ui-poc/packages/ui/src/styles.css'
+import '@sanity-labs/ui-poc/dist/styles.css'
 
 createRoot(document.getElementById('root')!).render(
   <ThemeProvider theme={studioTheme}>
@@ -257,7 +210,7 @@ createRoot(document.getElementById('root')!).render(
 
 > ⚠ **Both imports are required.**
 > - `reduced-motion.css` — suppresses animations for users with vestibular disorders.
-> - `ui-poc/…/styles.css` — **required for all ui-poc component styles** (Box, Flex, Grid, Heading, Text, Card). Without this import, components render silently unstyled with no error messages.
+> - `@sanity-labs/ui-poc/dist/styles.css` — **required for all @sanity-labs/ui-poc component styles** (Box, Flex, Grid, Heading, Text, Card). Without this import, components render silently unstyled with no error messages.
 >
 > **If `Box`, `Flex`, or `Grid` appear to have no borders, padding, or layout behaviour, this import is missing.**
 
@@ -274,12 +227,8 @@ import {
   Badge,
 } from '@sanity/ui'
 
-// Box, Flex, Grid, Divider, Heading, Text, and Card come from ui-poc — NOT from @sanity/ui
-import { Box }     from '../ui-poc/packages/ui/src/components/Box'
-import { Flex }    from '../ui-poc/packages/ui/src/components/Flex'
-import { Heading } from '../ui-poc/packages/ui/src/components/Heading'
-import { Text }    from '../ui-poc/packages/ui/src/components/Text'
-import { Card }    from '../ui-poc/packages/ui/src/components/Card'
+// Box, Flex, Grid, Divider, Heading, Text, and Card come from @sanity-labs/ui-poc — NOT from @sanity/ui
+import { Box, Flex, Heading, Text, Card } from '@sanity-labs/ui-poc'
 
 import { SearchIcon, AddIcon, MenuIcon, CloseIcon } from '@sanity/icons'
 
@@ -425,12 +374,8 @@ import { ThemeProvider, studioTheme } from '@sanity/ui'
 Box and Flex handle structural layout — landmarks, toolbars, padding regions, and scroll containers. They do not add a background color or visual surface. Use them anywhere you are grouping or positioning elements without needing a distinct content surface.
 
 ```tsx
-// Box, Flex, Heading, Text, and Card come from ui-poc — NOT from @sanity/ui
-import { Box }     from '../ui-poc/packages/ui/src/components/Box'
-import { Flex }    from '../ui-poc/packages/ui/src/components/Flex'
-import { Heading } from '../ui-poc/packages/ui/src/components/Heading'
-import { Text }    from '../ui-poc/packages/ui/src/components/Text'
-import { Card }    from '../ui-poc/packages/ui/src/components/Card'
+// Box, Flex, Heading, Text, and Card come from @sanity-labs/ui-poc — NOT from @sanity/ui
+import { Box, Flex, Heading, Text, Card } from '@sanity-labs/ui-poc'
 
 // Everything else comes from @sanity/ui
 import { Button } from '@sanity/ui'
@@ -530,7 +475,7 @@ Flex defaults to horizontal direction. Use `alignItems`, `justifyContent`, `gap`
 
 ### Heading needs a `level` prop
 
-The ui-poc Heading renders `<h2>` by default when you omit `level`. That means silently using the wrong heading level for the content hierarchy. Always set `level` explicitly. Use `size` for visual sizing — size and heading level are independent.
+The `@sanity-labs/ui-poc` Heading renders `<h2>` by default when you omit `level`. That means silently using the wrong heading level for the content hierarchy. Always set `level` explicitly. Use `size` for visual sizing — size and heading level are independent.
 
 ```jsx
 {/* ✗ Defaults to <h2> — may be the wrong semantic level for this context */}
@@ -587,10 +532,10 @@ The same pattern applies to `TextInput`, `TextArea`, and `Switch`. See `select.m
 
 All components come from one of two packages. Importing from the wrong source produces no error but silently renders the wrong component.
 
-### From `ui` (ui-poc)
+### From `@sanity-labs/ui-poc`
 
 ```tsx
-import { Box, Flex, Grid, Card, Heading, Text, Divider } from 'ui'
+import { Box, Flex, Grid, Card, Heading, Text, Divider } from '@sanity-labs/ui-poc'
 ```
 
 | Component | Purpose |
@@ -687,16 +632,14 @@ const abstract = "Fatima's approach to roadmapping cut the team's delivery time.
 
 ### Always import from the correct package
 
-Box, Flex, Grid, Card, Heading, Text, and Divider come from `ui` (ui-poc). Everything else comes from `@sanity/ui`. Importing from the wrong source produces no TypeScript error and no runtime warning — the component silently renders with the wrong API.
+Box, Flex, Grid, Card, Heading, Text, and Divider come from `@sanity-labs/ui-poc`. Everything else comes from `@sanity/ui`. Importing from the wrong source produces no TypeScript error and no runtime warning — the component silently renders with the wrong API.
 
 ```tsx
 // ✗ — Box from @sanity/ui has a completely different API
 import { Box, Flex, Card } from '@sanity/ui'
 
-// ✓ — layout primitives from ui-poc
-import { Box }  from '../ui-poc/packages/ui/src/components/Box'
-import { Flex } from '../ui-poc/packages/ui/src/components/Flex'
-import { Card } from '../ui-poc/packages/ui/src/components/Card'
+// ✓ — layout primitives from @sanity-labs/ui-poc
+import { Box, Flex, Card } from '@sanity-labs/ui-poc'
 
 // ✓ — everything else from @sanity/ui
 import { Button, Stack, Badge, TextInput, TextArea } from '@sanity/ui'
@@ -1112,8 +1055,8 @@ These are the most commonly encountered patterns that **fail without any error, 
 | 2 | Omitting `level` on `Heading` | `<h2>` rendered regardless of context, breaking heading hierarchy | Always set `level` explicitly: `<Heading level={1}>` |
 | 3 | Using `tone="primary"` on `Button` or `Badge` | Button renders but fails WCAG AA contrast (4.29:1) — looks correct, ships broken | Use `mode="default" tone="default"` for primary actions |
 | 4 | Passing `flexGrow`, `flexShrink`, or `flexBasis` to `Stack` | Stack doesn't grow or shrink — layout broken silently | Use `<Flex flexDirection="column" gap={3}>` or wrap in `<Box flexGrow={1}>` |
-| 5 | Importing `Box`, `Flex`, `Card`, `Heading`, or `Text` from `@sanity/ui` | Different prop API, no error — e.g. `padding` on Box silently does nothing | Import these from `'ui'`: `import { Box } from 'ui'` |
-| 6 | Omitting `import '../ui-poc/packages/ui/src/styles.css'` from `main.tsx` | All ui-poc components render as unstyled HTML — no error thrown | Add the import to `main.tsx`; see quick-start.md |
+| 5 | Importing `Box`, `Flex`, `Card`, `Heading`, or `Text` from `@sanity/ui` | Different prop API, no error — e.g. `padding` on Box silently does nothing | Import these from `@sanity-labs/ui-poc`: `import { Box } from '@sanity-labs/ui-poc'` |
+| 6 | Omitting `import '@sanity-labs/ui-poc/dist/styles.css'` from `main.tsx` | All ui-poc components render as unstyled HTML — no error thrown | Add the import to `main.tsx`; see quick-start.md |
 | 7 | Using `@vitejs/plugin-react-swc` instead of `@vitejs/plugin-react` | All styled-components styles missing — completely unstyled output, no error | Replace the plugin; see quick-start.md setup |
 | 8 | Using `space` prop on `Flex` (or `gap` on `Stack`) | Spacing has no effect — silently wrong prop on wrong component | `Flex` uses `gap`; `Stack` uses `space` — they are not interchangeable |
 | 9 | Using `var(--card-border-color)` outside a `Card` ancestor | Border is invisible — CSS variable resolves to `undefined` silently | Use `var(--gray-200)` — it resolves everywhere |
@@ -1122,6 +1065,7 @@ These are the most commonly encountered patterns that **fail without any error, 
 | 12 | Wrapping a non-ref-forwarding component in `Tooltip` | Tooltip never appears — no error | Use a native element or Sanity UI component as the child, or wrap with `React.forwardRef` |
 | 13 | `Text` inside `Stack` without `as="p"` | Text renders as inline `<span>`, items crowd together | Set `as="p"` on Text components used as block-level content |
 | 14 | Using `Card inverted` or dark inline styles on structural regions (sidebar, header) | Visual inconsistency — dark structural regions are not a supported pattern | Keep all structural regions light-themed; see `layouts.md` |
+| 15 | Using `icon` prop and `children` together on `MenuItem` | Icon renders on its own line above the children — label and badge drop to the next line | Use `icon` + `text` prop (no children), or put everything including the icon in `children` (no `icon` prop). See `patterns-navigation.md`. |
 
 ---
 
@@ -1132,11 +1076,12 @@ When something doesn't look right and there's no error:
 - [ ] Is `Card` receiving layout props? → Wrap in `Box`
 - [ ] Is `Heading` missing a `level`? → Add `level={N}`
 - [ ] Is a `Flex` or `Stack` using the wrong spacing prop? → `Flex` = `gap`, `Stack` = `space`
-- [ ] Are ui-poc components imported from `@sanity/ui`? → Switch to `import { Box } from 'ui'`
-- [ ] Is `styles.css` imported in `main.tsx`? → Add it
+- [ ] Are layout primitives imported from `@sanity/ui`? → Switch to `import { Box } from '@sanity-labs/ui-poc'`
+- [ ] Is `@sanity-labs/ui-poc/dist/styles.css` imported in `main.tsx`? → Add it
 - [ ] Is `var(--card-border-color)` used outside a Card? → Replace with `var(--gray-200)`
 - [ ] Is a MenuButton clipping? → Add `popover={{ portal: true }}`
 - [ ] Is a Tooltip invisible? → Check that its child forwards refs
+- [ ] Is a `MenuItem` icon on its own line? → Don't combine `icon` prop with `children`. Use `icon` + `text` prop, or put everything in `children`.
 
 # Accessibility standards
 
@@ -3883,7 +3828,7 @@ Everything references the palette tokens on `:root`. Override those tokens, and 
 
 **Use when:** You need the entire UI to shift to a different color palette — warm grays, amber accents, deeper blacks, etc.
 
-Create a `global.css` file and override the specific palette variables you need to change. Import it in `main.tsx` **before** the ui-poc `styles.css` so your values take precedence, or **after** it to override (both work since specificity is equal and later declarations win):
+Create a `global.css` file and override the specific palette variables you need to change. Import it in `main.tsx` **before** the `@sanity-labs/ui-poc` styles so your values take precedence, or **after** it to override (both work since specificity is equal and later declarations win):
 
 ```css
 /* global.css */
@@ -3916,7 +3861,7 @@ body {
 ```tsx
 // main.tsx
 import './global.css'
-import '../ui-poc/packages/ui/src/styles.css'
+import '@sanity-labs/ui-poc/dist/styles.css'
 ```
 
 Now every component that uses `--gray-*` tokens — borders, muted text, card backgrounds, tones, dividers — uses the warm palette. `<Box tone="neutral">` renders with `var(--gray-50)` which is now `#f8f5f0`. No component code changes needed.
@@ -4203,7 +4148,7 @@ import {
   ThemeProvider, ToastProvider, Stack, Button, Badge,
   Menu, MenuItem, Label, TextInput,
 } from '@sanity/ui'
-import { Box, Flex, Card, Heading, Text } from 'ui'
+import { Box, Flex, Card, Heading, Text } from '@sanity-labs/ui-poc'
 import { DashboardIcon, TagIcon, SearchIcon, AddIcon } from '@sanity/icons'
 
 const theme = buildTheme()
@@ -5395,15 +5340,17 @@ Use `Menu` + `MenuItem` (Option 1) or `Button mode="bleed"` (Option 2) instead. 
 
 ```tsx
 import { Menu, MenuItem, Badge, Stack, Label } from '@sanity/ui'
-import { Box, Flex, Text } from 'ui'
+import { Box, Flex, Text } from '@sanity-labs/ui-poc'
 import { DocumentTextIcon, CodeIcon, ClockIcon } from '@sanity/icons'
 
 function Sidebar({
   activeSection,
   setActiveSection,
+  counts,
 }: {
   activeSection: string
   setActiveSection: (section: string) => void
+  counts: { guides: number; api: number; changelogs: number }
 }) {
   return (
     <Box as="nav" aria-label="Main navigation" padding={3}>
@@ -5412,21 +5359,36 @@ function Sidebar({
         <Menu>
           <MenuItem
             icon={DocumentTextIcon}
-            text="Guides"
             selected={activeSection === 'guides'}
             onClick={() => setActiveSection('guides')}
+            text={
+              <Flex alignItems="center" justifyContent="space-between" gap={2}>
+                <Text size={1}>Guides</Text>
+                <Badge tone="default" fontSize={0}>{counts.guides}</Badge>
+              </Flex>
+            }
           />
           <MenuItem
             icon={CodeIcon}
-            text="API References"
             selected={activeSection === 'api'}
             onClick={() => setActiveSection('api')}
+            text={
+              <Flex alignItems="center" justifyContent="space-between" gap={2}>
+                <Text size={1}>API References</Text>
+                <Badge tone="default" fontSize={0}>{counts.api}</Badge>
+              </Flex>
+            }
           />
           <MenuItem
             icon={ClockIcon}
-            text="Changelogs"
             selected={activeSection === 'changelogs'}
             onClick={() => setActiveSection('changelogs')}
+            text={
+              <Flex alignItems="center" justifyContent="space-between" gap={2}>
+                <Text size={1}>Changelogs</Text>
+                <Badge tone="default" fontSize={0}>{counts.changelogs}</Badge>
+              </Flex>
+            }
           />
         </Menu>
       </Stack>
@@ -5435,15 +5397,39 @@ function Sidebar({
 }
 ```
 
+> ⚠️ **The primary example above uses `icon` + `text` prop — never `icon` + `children`.** Combining the `icon` prop with children causes the icon to render on its own line. See "Do not combine the `icon` prop with `children`" below.
+
 **What Menu provides automatically:**
 - `role="menu"` on the container, `role="menuitem"` on each item
 - Arrow Up / Arrow Down to move between items
 - Enter / Space to activate the focused item
 - Focus trapping within the menu while navigating
 
+### Do not combine the `icon` prop with `children`
+
+> ⛔ **Using `icon` and `children` together on `MenuItem` causes the icon to render on its own line.** The icon appears as a block-level element above the children content. This is the most common layout bug in sidebar navigation — it affects every nav item in the list and is visually obvious but not flagged by any error.
+
+```tsx
+{/* ✗ — icon renders on its own line; label + badge drop to the next line */}
+<MenuItem
+  icon={DocumentTextIcon}
+  selected={activeSection === 'guides'}
+  onClick={() => setActiveSection('guides')}
+>
+  <Flex alignItems="center" justifyContent="space-between" gap={2}>
+    <Text size={1}>Guides</Text>
+    <Badge tone="default" fontSize={0}>12</Badge>
+  </Flex>
+</MenuItem>
+```
+
+Use one of the two correct patterns below instead.
+
 ### Adding trailing badges or counts
 
-`MenuItem` does not support trailing content out of the box. To add a count badge, compose the item manually:
+**Pattern A — `icon` + `text` prop (no children):**
+
+Pass a `Flex` as the `text` prop value. The `icon` and `text` props are designed to render on the same line.
 
 ```tsx
 <Menu>
@@ -5451,14 +5437,38 @@ function Sidebar({
     icon={DocumentTextIcon}
     selected={activeSection === 'guides'}
     onClick={() => setActiveSection('guides')}
+    text={
+      <Flex alignItems="center" justifyContent="space-between" gap={2}>
+        <Text size={1}>Guides</Text>
+        <Badge tone="default" fontSize={0}>12</Badge>
+      </Flex>
+    }
+  />
+</Menu>
+```
+
+**Pattern B — everything in `children` (no `icon` prop):**
+
+Render the icon yourself inside the children's Flex. This gives full control over the layout.
+
+```tsx
+<Menu>
+  <MenuItem
+    selected={activeSection === 'guides'}
+    onClick={() => setActiveSection('guides')}
   >
     <Flex alignItems="center" justifyContent="space-between" gap={2}>
-      <Text size={1}>Guides</Text>
+      <Flex alignItems="center" gap={2}>
+        <Text as="span" size={1}><DocumentTextIcon /></Text>
+        <Text size={1}>Guides</Text>
+      </Flex>
       <Badge tone="default" fontSize={0}>12</Badge>
     </Flex>
   </MenuItem>
 </Menu>
 ```
+
+Both patterns keep icon, label, and badge on one line. Choose Pattern A when `MenuItem`'s built-in icon sizing is sufficient. Choose Pattern B when you need full layout control over the icon (custom size, spacing, or alignment).
 
 ### Selected state contrast warning
 
@@ -5470,7 +5480,7 @@ For simple nav items without arrow-key navigation between siblings, use `Button`
 
 ```tsx
 import { Button, Stack } from '@sanity/ui'
-import { Box } from 'ui'
+import { Box } from '@sanity-labs/ui-poc'
 import { DocumentTextIcon, CodeIcon } from '@sanity/icons'
 
 <Box as="nav" aria-label="Main navigation" padding={3}>
@@ -5539,7 +5549,7 @@ import { DocumentTextIcon, CodeIcon } from '@sanity/icons'
 
 Under review
 
-**Note: The following components currently only apply to the new Sanity UI POC library–specifically Box, Flex, and Grid components.**
+**Note: The following props apply to Box, Flex, and Grid from `@sanity-labs/ui-poc`. Install with `npm i @sanity-labs/ui-poc`.**
 
 ## Shared Props
 
@@ -5676,6 +5686,19 @@ See `style-overrides.md` for full examples and canonical workarounds.
 # Box
 
 Used as the lowest-level building block for containing UI elements.
+
+### Basic example
+
+**Source:** `@sanity-labs/ui-poc`
+```tsx
+import { Box } from '@sanity-labs/ui-poc'
+
+<Box padding={4} borderBottom>
+  This is a box
+</Box>
+
+```
+
 
 ### API
 
@@ -6017,6 +6040,19 @@ Under review
 
 Used as the lowest-level building block for laying out UI elements.
 
+### Basic example
+
+**Source:** `@sanity-labs/ui-poc`
+```tsx
+import { Flex } from '@sanity-labs/ui-poc'
+
+<Flex gap={3}>
+  <span>Item 1</span>
+  <span>Item 2</span>
+</Flex>
+```
+
+
 Warning:  `Flex` uses `gap`. `Stack` uses `space`. These are not the same prop. Using `space` on `Flex` silently does nothing.
 
 ### API
@@ -6143,7 +6179,7 @@ All props support responsive arrays (e.g. `flexDirection={['column', null, 'row'
 The most common Studio-like layout pattern. Critical details: use `minHeight` (not `height`) on the outer container, and `minWidth="0"` on flex children to prevent overflow.
 ```jsx
 // Box and Flex come from ui — NOT from @sanity/ui
-import { Box, Flex } from 'ui'
+import { Box, Flex } from '@sanity-labs/ui-poc'
 
 <Flex minHeight="100vh">
   {/* Sidebar — fixed width, full height */}
@@ -6390,6 +6426,21 @@ Under review
 
 Renders a grid layout container.
 
+### Basic example
+
+**Source:** `@sanity-labs/ui-poc`
+```tsx
+import { Grid } from '@sanity-labs/ui-poc'
+
+<Grid columns={2} gap={4}>
+  <div>Item 1</div>
+  <div>Item 2</div>
+  <div>Item 3</div>
+  <div>Item 4</div>
+</Grid>
+
+```
+
 ### API
 
 Grid's own props are `as`, `display`, and the grid-parent + gap props below. Everything else it accepts comes from shared layout props inherited from Box.
@@ -6618,6 +6669,17 @@ Use these when Grid is nested inside another Grid.
 
 Renders a horizontal rule that marks a thematic break between sections of content.
 
+### Basic example
+
+**Source:** `@sanity-labs/ui-poc`
+```tsx
+import { Divider } from '@sanity-labs/ui-poc'
+
+<Divider />
+
+```
+
+
 ## Props
 
 Divider accepts no props. It renders a single `<hr>` element with no configuration.
@@ -6688,6 +6750,24 @@ Divider accepts no props. It renders a single `<hr>` element with no configurati
 
 
 Arranges children in a single vertical column with consistent spacing between them.
+
+**Source:** `@sanity/ui`
+```tsx
+import { Stack } from '@sanity/ui'
+```
+
+### Basic example
+
+```tsx
+import { Stack } from '@sanity/ui'
+import { Heading, Text } from '@sanity-labs/ui-poc'
+
+<Stack space={3}>
+  <Heading level={2}>Section Title</Heading>
+  <Text as="p" size={1}>First paragraph of content.</Text>
+  <Text as="p" size={1} color="muted">Secondary description text.</Text>
+</Stack>
+```
 
 [Figma component](https://www.figma.com/design/5mhVqXlldJEEB2VWZeKQ4i/%F0%9F%A7%AC-Sanity-UI?node-id=29358-183&m=dev) · [React component](https://github.com/sanity-io/ui/blob/v4-beta/packages/ui/src/primitives/stack/Stack.tsx)
 
@@ -6880,9 +6960,17 @@ Example:
 
 Used for the majority of UI copy, including body paragraphs, captions, and metadata. It is distinct from other typography components, such as Code, Heading, KBD, and Label.
 
+### Basic example
+
+```tsx
+import { Text } from '@sanity-labs/ui-poc'
+
+<Text>Text</Text>
+```
+
 ### API
 
-> **Note:** This documents the `ui-poc` Text component (`../ui-poc/packages/ui/src/components/Text`). It has a narrower prop surface than `@sanity/ui`'s Text — there is no `accent` or `textOverflow` prop.
+> **Note:** This documents the `@sanity-labs/ui-poc` Text component. It has a narrower prop surface than `@sanity/ui`'s Text — there is no `accent` or `textOverflow` prop.
 
 | Prop | Type | Default | Description |
 |------|------|---------|-------------|
@@ -7054,10 +7142,10 @@ Accent is deprecated and should be avoided. Use `weight` and/or `size` instead o
 
 #### Lines (truncation)
 
-> **ui-poc:** Use the `lines` prop instead of `textOverflow`. Setting `lines={1}` clamps to a single line; `lines={3}` shows three lines then clips. This uses CSS `-webkit-line-clamp` under the hood.
+> **@sanity-labs/ui-poc:** Use the `lines` prop instead of `textOverflow`. Setting `lines={1}` clamps to a single line; `lines={3}` shows three lines then clips. This uses CSS `-webkit-line-clamp` under the hood.
 >
 > ```tsx
-> {/* ✗ — textOverflow prop does not exist on ui-poc Text */}
+> {/* ✗ — textOverflow prop does not exist on @sanity-labs/ui-poc Text */}
 > <Text textOverflow="ellipsis">long text...</Text>
 >
 > {/* ✓ — use lines prop */}
@@ -7094,9 +7182,17 @@ To ensure content is accessible to all users, including those using assistive te
 
 Headings are used to create a logical hierarchy and page structure. They guide the user's eye, group related content, and enable users of assistive technologies to navigate the interface quickly.
 
+### Basic example
+
+```tsx
+import { Heading } from '@sanity-labs/ui-poc'
+
+<Heading>Title</Heading>
+```
+
 ### API
 
-**Note:** This documents the `ui-poc` Heading component (`../ui-poc/packages/ui/src/components/Heading`). It uses a `level` prop (not `as`) to set the semantic heading tag. There is no `as`, `weight`, `muted`, `accent`, or `textOverflow` prop.
+**Note:** This documents the `@sanity-labs/ui-poc` Heading component. It uses a `level` prop (not `as`) to set the semantic heading tag. There is no `as`, `weight`, `muted`, `accent`, or `textOverflow` prop.
 
 ⛔ **Always set `level` explicitly. Omitting it silently renders `<h2>` regardless of context.**
 
@@ -7170,10 +7266,10 @@ Sets the Heading's horizontal alignment. **Use with caution. **Headings should a
 
 #### Lines (truncation)
 
-> **ui-poc:** Use the `lines` prop instead of `textOverflow`. `lines={1}` clamps to one line using CSS `-webkit-line-clamp`. Accepts a responsive array.
+> **@sanity-labs/ui-poc:** Use the `lines` prop instead of `textOverflow`. `lines={1}` clamps to one line using CSS `-webkit-line-clamp`. Accepts a responsive array.
 >
 > ```tsx
-> {/* ✗ — textOverflow prop does not exist on ui-poc Heading */}
+> {/* ✗ — textOverflow prop does not exist on @sanity-labs/ui-poc Heading */}
 > <Heading level={2} textOverflow="ellipsis">Long title...</Heading>
 >
 > {/* ✓ — use lines prop */}
@@ -7349,6 +7445,26 @@ Set `role="switch"` together with `aria-pressed` to create a toggle control. Whe
 
 **Description** The Tooltip is a floating text label that displays information when a user hovers, focuses, or taps on an element. Its purpose is to provide helpful, non-essential context to a UI element. It succinctly describes the function of an element (like an icon-only button) or enhances baseline understanding without cluttering the interface.
 
+**Source:** `@sanity/ui`
+```tsx
+import { Tooltip } from '@sanity/ui'
+```
+
+### Basic example
+
+```tsx
+import { Tooltip, Button } from '@sanity/ui'
+import { Text, Box } from '@sanity-labs/ui-poc'
+import { TrashIcon } from '@sanity/icons'
+
+<Tooltip
+  content={<Box padding={2}><Text size={1}>Delete this document</Text></Box>}
+  portal
+>
+  <Button icon={TrashIcon} mode="bleed" aria-label="Delete" />
+</Tooltip>
+```
+
 > ⛔ **Tooltip requires its child to forward refs.** If the child component does not use `React.forwardRef`, the tooltip will not appear — **no error is thrown and no warning is logged.** This is the #1 cause of "tooltip doesn't show up" issues. Use a native HTML element or a Sanity UI component as the direct child. If wrapping a custom component, it must use `React.forwardRef`. See `silent-failures.md` #12.
 
 ### **API Documentation**
@@ -7433,6 +7549,16 @@ _Refer to TypeDocs in Tooltip.tsx_
 
 Used to trigger an action–like submitting a form, opening a dialog, or performing a command.
 
+### Basic example
+
+**Source:** `@sanity/ui`
+```tsx
+import { Button } from '@sanity/ui'
+
+<Button text="Add document" />
+```
+
+
 > ⛔ **`tone="primary"` fails WCAG AA contrast — do not use it.** The primary tone produces white text on `#556bfc` at a 4.29:1 contrast ratio. WCAG AA requires 4.5:1 for text under 18px. This applies to Button, Badge, and any component using `tone="primary"`. For primary actions, use `mode="default" tone="default"` instead. No runtime warning or TypeScript error prevents this — the button renders and looks intentional, but ships an accessibility violation every time.
 
 ### API documentation
@@ -7503,6 +7629,28 @@ For custom interactive surfaces like navigation items (icon + label + trailing b
 
 Used to accept a single line of text from the user.
 
+**Source:** `@sanity/ui`
+```tsx
+import { TextInput } from '@sanity/ui'
+```
+
+### Basic example
+
+```tsx
+import { TextInput, Stack, Label } from '@sanity/ui'
+import { SearchIcon } from '@sanity/icons'
+
+<Stack space={1}>
+  <Label htmlFor="search">Search</Label>
+  <TextInput
+    id="search"
+    icon={SearchIcon}
+    placeholder="Search documents..."
+    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQuery(e.currentTarget.value)}
+  />
+</Stack>
+```
+
 ### API documentation
 
 _Refer to TypeDocs in TextInput.tsx_
@@ -7539,6 +7687,28 @@ _Refer to TypeDocs in TextInput.tsx_
 # Toast
 
 Used to show brief status messages about completed actions, warnings, or errors. Toasts appear at the edge of the screen and disappear after a short time.
+
+**Source:** `@sanity/ui`
+```tsx
+import { ToastProvider, useToast } from '@sanity/ui'
+```
+
+### Basic example
+
+```tsx
+import { useToast, Button } from '@sanity/ui'
+
+function SaveButton() {
+  const toast = useToast()
+
+  return (
+    <Button
+      text="Save"
+      onClick={() => toast.push({ status: 'success', title: 'Document saved' })}
+    />
+  )
+}
+```
 
 ## Setup — ToastProvider is required
 
@@ -7825,12 +7995,17 @@ Fire a toast when an action takes over 3 seconds. The user may have moved on.
 
 Container for content that requires a distinct visual surface — a background, optional border, and semantic tone color.
 
-**Note:** This documents the `ui-poc` Card component. Import it from `ui`, **not** from `@sanity/ui`:
+**Note:** This documents the `@sanity-labs/ui-poc` Card component. Import it from `@sanity-labs/ui-poc`, **not** from `@sanity/ui`:
+
+### Basic example
 
 ```tsx
-import { Card } from '../ui-poc/packages/ui/src/components/Card'
-// or with the Vite alias:
-import { Card } from 'ui'
+import { Card } from '@sanity-labs/ui-poc'
+
+<Card tone="positive" density="medium">
+  This is a card.
+</Card>
+
 ```
 
 The API is significantly different from `@sanity/ui`'s Card. There is no `padding`, `radius`, `shadow`, `scheme`, `selected`, `pressed`, `muted`, or individual `borderTop/Right/Bottom/Left` prop.
@@ -7978,6 +8153,20 @@ Card writes CSS custom properties onto its DOM subtree. Descendants can referenc
 
 The Menu component family is a set of interactive primitives used to build navigation and dropdown menus. It operates as a composition of several subcomponents that handle triggering, positioning, focus management, and item selection.
 
+### Basic example
+
+**Source:** `@sanity/ui`
+```tsx
+import { Menu, MenuItem, MenuDivider } from '@sanity/ui'
+
+<Menu>
+  <MenuItem text="Edit" />
+  <MenuDivider />
+  <MenuItem text="Delete" tone="critical" />
+</Menu>
+```
+
+
 **Components:**
 
 - **Menu:** The container element. It holds the items and manages focus flow (up/down navigation) .
@@ -8067,7 +8256,13 @@ _Refer to TypeDocs in MenuDivider.tsx_
 
 ##### Icon
 
-Used as a visual
+Used as a visual indicator alongside the menu item label. Pass a component reference via the `icon` prop.
+
+> ⛔ **Do not combine the `icon` prop with `children`.** When `MenuItem` receives both `icon` and `children`, the icon renders on its own line above the children content — the label and any badges drop to a second line. This is a silent layout failure with no error or warning.
+>
+> Use one of these patterns instead:
+> - **`icon` + `text` prop (no children):** `<MenuItem icon={EditIcon} text="Edit" />`. To include trailing content, pass a `Flex` as the `text` value: `text={<Flex alignItems="center" justifyContent="space-between" gap={2}><Text size={1}>Guides</Text><Badge tone="default">12</Badge></Flex>}`.
+> - **Everything in `children` (no `icon` prop):** Render the icon yourself inside a `Flex` in the children. See `patterns-navigation.md` for full examples.
 
 ##### IconRight
 
@@ -8121,7 +8316,34 @@ Used exclusively for communicating what navigation action the user should expect
 
 **Description** The Popover is a floating container used to display content on top of other UI elements. It is positioned relative to a reference element (usually a button or an input) and serves as a foundational primitive for building complex interactive components like menus, date pickers, and dropdowns,.
 
-**Purpose** The Popover’s primary purpose is to present secondary information or lightweight tasks without cluttering the main interface or forcing the user to leave the current context. It manages its own positioning, collision detection (flipping/shifting), and stacking context (z-index),.
+**Purpose** The Popover's primary purpose is to present secondary information or lightweight tasks without cluttering the main interface or forcing the user to leave the current context. It manages its own positioning, collision detection (flipping/shifting), and stacking context (z-index),.
+
+**Source:** `@sanity/ui`
+```tsx
+import { Popover } from '@sanity/ui'
+```
+
+### Basic example
+
+```tsx
+import { Popover, Button } from '@sanity/ui'
+import { Text, Box } from '@sanity-labs/ui-poc'
+import { useState } from 'react'
+
+function Example() {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <Popover
+      content={<Box padding={3}><Text size={1}>Popover content</Text></Box>}
+      open={open}
+      portal
+    >
+      <Button text="Toggle" onClick={() => setOpen(!open)} />
+    </Popover>
+  )
+}
+```
 
 ### **API Documentation**
 
@@ -8217,6 +8439,24 @@ Allows the user to choose one option from a dropdown list. Renders a native `<se
 **Source:** `@sanity/ui`
 ```tsx
 import { Select } from '@sanity/ui'
+```
+
+### Basic example
+
+```tsx
+import { Select, Stack, Label } from '@sanity/ui'
+
+<Stack space={1}>
+  <Label htmlFor="category">Category</Label>
+  <Select
+    id="category"
+    onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setCategory(e.currentTarget.value)}
+  >
+    <option value="starter">Starter</option>
+    <option value="main">Main</option>
+    <option value="dessert">Dessert</option>
+  </Select>
+</Stack>
 ```
 
 ### API documentation
@@ -8487,6 +8727,18 @@ A toggle control for binary on/off settings. Renders a styled checkbox input wit
 import { Switch } from '@sanity/ui'
 ```
 
+### Basic example
+
+```tsx
+import { Switch, Stack, Label } from '@sanity/ui'
+import { Flex } from '@sanity-labs/ui-poc'
+
+<Flex alignItems="center" gap={3}>
+  <Switch id="published" checked={isPublished} onChange={(e) => setPublished(e.currentTarget.checked)} />
+  <Label htmlFor="published">Published</Label>
+</Flex>
+```
+
 ### API documentation
 
 _Refer to TypeDocs in Switch.tsx_
@@ -8548,9 +8800,14 @@ _Refer to TypeDocs in Switch.tsx_
 
 A small label used to communicate status, category, count, or other metadata inline.
 
+### Basic example
+
+
 **Source:** `@sanity/ui`
 ```tsx
 import { Badge } from '@sanity/ui'
+
+<Badge tone="caution">Draft</Badge>
 ```
 
 ### API documentation
@@ -8644,6 +8901,22 @@ Multi-line text input. An alternative to the native `<textarea>` that integrates
 **Source:** `@sanity/ui`
 ```tsx
 import { TextArea } from '@sanity/ui'
+```
+
+### Basic example
+
+```tsx
+import { TextArea, Stack, Label } from '@sanity/ui'
+
+<Stack space={1}>
+  <Label htmlFor="description">Description</Label>
+  <TextArea
+    id="description"
+    rows={6}
+    placeholder="Write a description..."
+    onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setDescription(e.currentTarget.value)}
+  />
+</Stack>
 ```
 
 ### API documentation

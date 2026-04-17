@@ -65,15 +65,40 @@ function resolveRunDir(): string {
 
   if (!existsSync(OUTPUT_ROOT)) return OUTPUT_ROOT;
 
+  // Collect all run directories: both new (YYYY-MM-DD/HH.MM) and legacy (YYYY-MM-DD-HH.MM)
   const entries = readdirSync(OUTPUT_ROOT, { withFileTypes: true });
-  const timestamped = entries
-    .filter((e) => e.isDirectory() && /^\d{4}-\d{2}-\d{2}-/.test(e.name))
-    .map((e) => e.name)
-    .sort()
-    .reverse();
+  const runs: Array<{ sortKey: string; fullPath: string }> = [];
 
-  if (timestamped.length > 0) {
-    return path.join(OUTPUT_ROOT, timestamped[0]);
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+
+    // New format: date directory containing time subdirectories
+    if (/^\d{4}-\d{2}-\d{2}$/.test(entry.name)) {
+      const dateDir = path.join(OUTPUT_ROOT, entry.name);
+      const subs = readdirSync(dateDir, { withFileTypes: true });
+      for (const sub of subs) {
+        if (sub.isDirectory() && /^\d{2}\.\d{2}$/.test(sub.name)) {
+          runs.push({
+            sortKey: `${entry.name}-${sub.name}`,
+            fullPath: path.join(dateDir, sub.name),
+          });
+        }
+      }
+    }
+
+    // Legacy format: YYYY-MM-DD-HH.MM
+    if (/^\d{4}-\d{2}-\d{2}-\d{2}\.\d{2}$/.test(entry.name)) {
+      runs.push({
+        sortKey: entry.name,
+        fullPath: path.join(OUTPUT_ROOT, entry.name),
+      });
+    }
+  }
+
+  runs.sort((a, b) => b.sortKey.localeCompare(a.sortKey)); // newest first
+
+  if (runs.length > 0) {
+    return runs[0].fullPath;
   }
 
   return OUTPUT_ROOT;

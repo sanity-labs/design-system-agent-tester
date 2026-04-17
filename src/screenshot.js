@@ -35,10 +35,19 @@ export async function validateProject(projectDir, iterLabel) {
   try {
     // Install dependencies
     console.log(`[${iterLabel}] Installing dependencies...`);
-    await execFileAsync("npm", ["install", "--no-audit", "--no-fund"], {
-      cwd: projectDir,
-      timeout: 120_000,
-    });
+    try {
+      await execFileAsync("npm", ["install", "--no-audit", "--no-fund", "--legacy-peer-deps"], {
+        cwd: projectDir,
+        timeout: 120_000,
+      });
+    } catch (npmErr) {
+      // execFileAsync attaches stdout/stderr to the error object — surface them
+      const stderr = (npmErr.stderr || "").trim();
+      const stdout = (npmErr.stdout || "").trim();
+      const detail = stderr || stdout || npmErr.message;
+      console.error(`[${iterLabel}] npm install failed:\n${detail}`);
+      throw new Error(`npm install failed:\n${detail}`);
+    }
 
     // Start dev server
     console.log(`[${iterLabel}] Starting dev server...`);

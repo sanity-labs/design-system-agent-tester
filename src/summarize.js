@@ -8,7 +8,7 @@
  * Options:
  *   --output,  -o  Directory containing run folders to scan  (default: ./output)
  *   --count,   -n  Number of most-recent runs to include     (default: all)
- *   --from,    -f  Include runs at-or-after this folder name (e.g. 2026-04-14-13.00)
+ *   --from,    -f  Include runs at-or-after this folder name (e.g. 2026-04-14/13.00)
  *   --prompt,  -p  Prompt filter: control | training | both  (default: both)
  *   --save,    -s  Write output to a file instead of stdout
  *   --help,    -h  Print this help message
@@ -18,7 +18,7 @@
  *   node src/summarize.js --count 5
  *
  *   # All runs since a specific date, save to file
- *   node src/summarize.js --from 2026-04-14-14.20 --save
+ *   node src/summarize.js --from 2026-04-14/14.20 --save
  *
  *   # Training prompt only, last 8 runs
  *   node src/summarize.js --prompt training --count 8
@@ -61,14 +61,14 @@ Usage:
 Options:
   --output,  -o  Directory containing run folders to scan  (default: ./output)
   --count,   -n  Number of most-recent runs to include     (default: all)
-  --from,    -f  Include runs at-or-after this folder name (e.g. 2026-04-14-13.00)
+  --from,    -f  Include runs at-or-after this folder name (e.g. 2026-04-14/13.00)
   --prompt,  -p  Prompt filter: control | training | both  (default: both)
   --save,    -s  Write output to a file instead of stdout
   --help,    -h  Print this help message
 
 Examples:
   node src/summarize.js --count 5
-  node src/summarize.js --from 2026-04-14-14.20 --save
+  node src/summarize.js --from 2026-04-14/14.20 --save
   node src/summarize.js --prompt training --count 8
   node src/summarize.js --output /path/to/other/output --count 10
 `);
@@ -102,11 +102,35 @@ async function main() {
   }
 
   // Keep only directories matching the YYYY-MM-DD-HH.MM pattern, sorted chronologically
-  const RUN_DIR_RE = /^\d{4}-\d{2}-\d{2}-\d{2}\.\d{2}$/;
-  let runDirNames = entries
-    .filter(e => e.isDirectory() && RUN_DIR_RE.test(e.name))
-    .map(e => e.name)
-    .sort();   // lexicographic order == chronological order for this naming scheme
+  // Collect run directories from both new (YYYY-MM-DD/HH.MM) and legacy (YYYY-MM-DD-HH.MM) formats
+  const LEGACY_RE = /^\d{4}-\d{2}-\d{2}-\d{2}\.\d{2}$/;
+  const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+  const TIME_RE = /^\d{2}\.\d{2}$/;
+
+  let runDirNames = [];
+
+  for (const e of entries) {
+    if (!e.isDirectory()) continue;
+
+    // New format: date dirs containing time subdirs
+    if (DATE_RE.test(e.name)) {
+      const dateDir = resolve(outputDir, e.name);
+      let subs;
+      try { subs = await readdir(dateDir, { withFileTypes: true }); } catch { continue; }
+      for (const sub of subs) {
+        if (sub.isDirectory() && TIME_RE.test(sub.name)) {
+          runDirNames.push(`${e.name}/${sub.name}`);
+        }
+      }
+    }
+
+    // Legacy format
+    if (LEGACY_RE.test(e.name)) {
+      runDirNames.push(e.name);
+    }
+  }
+
+  runDirNames.sort(); // lexicographic == chronological for both formats
 
   if (runDirNames.length === 0) {
     console.error(`No test-run directories found in: ${outputDir}`);

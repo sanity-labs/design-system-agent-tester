@@ -3,7 +3,7 @@
  *
  * Usage:
  *   node --env-file=.env src/rediff-all.js
- *   node --env-file=.env src/rediff-all.js --run 2026-03-27-12.29   # single run
+ *   node --env-file=.env src/rediff-all.js --run 2026-03-27/12.29   # single run
  *   node --env-file=.env src/rediff-all.js --concurrency 4          # parallel runs
  */
 
@@ -39,16 +39,40 @@ const { values } = parseArgs({
 });
 
 /**
- * Discover all timestamped run directories under output/.
+ * Discover all timestamped run directories under output/, supporting both:
+ *   - New format: output/YYYY-MM-DD/HH.MM/  (returned as "YYYY-MM-DD/HH.MM")
+ *   - Legacy format: output/YYYY-MM-DD-HH.MM/  (returned as "YYYY-MM-DD-HH.MM")
+ * Returns names sorted chronologically (oldest first).
  */
 async function discoverRuns() {
   if (!existsSync(OUTPUT_ROOT)) return [];
 
   const entries = await readdir(OUTPUT_ROOT, { withFileTypes: true });
-  return entries
-    .filter((e) => e.isDirectory() && /^\d{4}-\d{2}-\d{2}-/.test(e.name))
-    .map((e) => e.name)
-    .sort();
+  const runs = [];
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+
+    // New format: date directory containing time subdirectories
+    if (/^\d{4}-\d{2}-\d{2}$/.test(entry.name)) {
+      const dateDir = resolve(OUTPUT_ROOT, entry.name);
+      const subs = await readdir(dateDir, { withFileTypes: true });
+      for (const sub of subs) {
+        if (sub.isDirectory() && /^\d{2}\.\d{2}$/.test(sub.name)) {
+          runs.push(`${entry.name}/${sub.name}`);
+        }
+      }
+    }
+
+    // Legacy format: YYYY-MM-DD-HH.MM
+    if (/^\d{4}-\d{2}-\d{2}-\d{2}\.\d{2}$/.test(entry.name)) {
+      runs.push(entry.name);
+    }
+  }
+
+  // Both formats sort correctly lexicographically (YYYY-MM-DD/HH.MM and YYYY-MM-DD-HH.MM)
+  runs.sort();
+  return runs;
 }
 
 /**

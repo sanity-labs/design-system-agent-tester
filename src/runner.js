@@ -7,7 +7,6 @@ import {
   rm,
   readFile,
   appendFile,
-  cp,
 } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,27 +15,7 @@ import { existsSync } from "node:fs";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(__dirname, "..");
 
-/**
- * Asset directories to copy into each generated project before validation.
- * Each entry is a directory name relative to the agent-tester project root.
- * The directory will be copied into the generated project at the same relative path.
- */
-const COPY_ASSETS = ["ui-poc"];
 
-/**
- * Copy asset directories into the generated project directory.
- * Skips assets that don't exist in the project root.
- */
-async function copyAssetsToProject(projectDir, iterLabel) {
-  for (const asset of COPY_ASSETS) {
-    const src = resolve(PROJECT_ROOT, asset);
-    if (!existsSync(src)) continue;
-
-    const dest = resolve(projectDir, asset);
-    console.log(`[${iterLabel}] Copying ${asset}/ into project...`);
-    await cp(src, dest, { recursive: true });
-  }
-}
 import {
   validateProject,
   killDevServer,
@@ -53,6 +32,14 @@ import {
 } from "./analyze.js";
 
 const SYSTEM_PROMPT = `You are an expert frontend developer. You will be given instructions to build a web application.
+
+CRITICAL — Package imports you MUST follow:
+- Box, Flex, Grid, Text, Heading, Card, and Divider come from "@sanity-labs/ui-poc", NOT from "@sanity/ui".
+- You MUST add "@sanity-labs/ui-poc" to package.json dependencies.
+- You MUST import "@sanity-labs/ui-poc/dist/styles.css" in main.tsx.
+- "@sanity-labs/ui-poc" requires React 19. You MUST use "react": "^19.2" and "react-dom": "^19.2" in package.json. Do NOT use React 18.
+- All other components (Button, Stack, Badge, TextInput, Label, Select, Menu, MenuItem, Tooltip, etc.) come from "@sanity/ui" as normal.
+- If the user prompt does not mention @sanity-labs/ui-poc, ignore this rule and use @sanity/ui for everything.
 
 Your task is to produce ALL the files needed for a complete, working project. Output each file using the following format:
 
@@ -84,8 +71,7 @@ Rules:
 - Do not include explanations outside of file blocks (except the FEEDBACK block at the end)
 - Do not include unit tests
 - Make sure the project works with "npm install && npm run dev"
-- The FEEDBACK block must appear after all FILE blocks
-- NEVER output any files under the ui-poc/ directory. The ui-poc/ directory is pre-installed in the project root and must not be created, modified, or overwritten. Import from it using relative paths (e.g. ../ui-poc/packages/ui/src/components/Box) but do not emit FILE blocks for any path starting with ui-poc/.`;
+- The FEEDBACK block must appear after all FILE blocks`;
 
 const FIX_SYSTEM_PROMPT = `You are an expert frontend developer debugging a web application that fails to render.
 
@@ -406,7 +392,6 @@ export async function runAgent({
   maxFixes = 5,
   maxGenerationRetries = 3,
   useMcp,
-  copyAssets = true,
 }) {
   // Sonnet 4.6 generation can take 2-3 minutes per call. The default SDK
   // timeout is 10 min with 2 retries (30 min worst-case per call). Increase
@@ -497,9 +482,14 @@ export async function runAgent({
   const projectDir = resolve(iterDir, "project");
   await writeProjectFiles(projectDir, files);
 
-  // Copy asset directories (e.g. ui-poc) into the project if enabled
-  if (copyAssets) {
-    await copyAssetsToProject(projectDir, iterLabel);
+  // If the prompt references @sanity-labs/ui-poc, enforce correct imports
+  // mechanically. The model's training prior for @sanity/ui is too strong
+  // for prompt instructions alone to override reliably.
+  if (promptContent.includes("@sanity-labs/ui-poc")) {
+    const patched = enforceUiPocImports(files, iterLabel);
+    if (patched) {
+      await writeProjectFiles(projectDir, files);
+    }
   }
 
   // Track fix attempts
@@ -740,6 +730,151 @@ export async function runAgent({
 // --- Helper functions ---
 
 /**
+ * Components that belong in @sanity-labs/ui-poc, NOT @sanity/ui.
+ */
+const UI_POC_COMPONENTS = ["Box", "Flex", "Grid", "Text", "Heading", "Card", "Divider"];
+
+/**
+ * Mechanically enforce @sanity-labs/ui-poc usage in generated files.
+ * Returns true if any file was modified.
+ *
+ * This exists because the model's training prior for @sanity/ui is too
+ * strong for prompt-only instructions to override reliably — even when
+ * stated in the system prompt and repeated 47 times in the user prompt.
+ */
+function enforceUiPocImports(files, iterLabel) {
+  let patched = false;
+
+  // --- 1. Patch package.json ---
+  const pkgFile = files.find((f) => f.path === "package.json");
+  if (pkgFile) {
+    try {
+      const pkg = JSON.parse(pkgFile.content);
+      const deps = pkg.dependencies || {};
+      let pkgChanged = false;
+
+      // Ensure @sanity-labs/ui-poc is listed
+      if (!deps["@sanity-labs/ui-poc"]) {
+        deps["@sanity-labs/ui-poc"] = "latest";
+        pkgChanged = true;
+      }
+
+      // Ensure classnames is listed (required by ui-poc)
+      if (!deps["classnames"]) {
+        deps["classnames"] = "latest";
+        pkgChanged = true;
+      }
+
+      // Ensure React 19 (ui-poc peer dep)
+      if (deps["react"] && !deps["react"].includes("19")) {
+        deps["react"] = "^19.2";
+        pkgChanged = true;
+      }
+      if (deps["react-dom"] && !deps["react-dom"].includes("19")) {
+        deps["react-dom"] = "^19.2";
+        pkgChanged = true;
+      }
+
+      // Upgrade @types/react* to v19 too
+      const devDeps = pkg.devDependencies || {};
+      if (devDeps["@types/react"] && !devDeps["@types/react"].includes("19")) {
+        devDeps["@types/react"] = "^19";
+        pkgChanged = true;
+      }
+      if (devDeps["@types/react-dom"] && !devDeps["@types/react-dom"].includes("19")) {
+        devDeps["@types/react-dom"] = "^19";
+        pkgChanged = true;
+      }
+
+      if (pkgChanged) {
+        pkg.dependencies = deps;
+        pkg.devDependencies = devDeps;
+        pkgFile.content = JSON.stringify(pkg, null, 2) + "\n";
+        patched = true;
+      }
+    } catch {
+      // Malformed package.json — skip
+    }
+  }
+
+  // --- 2. Rewrite imports in source files ---
+  // Build a regex that matches: import { Box, Flex, ... } from '@sanity/ui'
+  // where at least one of the UI_POC_COMPONENTS is in the import list.
+  const pocSet = new Set(UI_POC_COMPONENTS);
+
+  for (const file of files) {
+    if (!/\.(tsx?|jsx?|mjs)$/.test(file.path)) continue;
+
+    let content = file.content;
+    let fileChanged = false;
+
+    // Match all import statements from @sanity/ui
+    const importRe = /import\s*\{([^}]+)\}\s*from\s*['"]@sanity\/ui['"]/g;
+    const replacements = [];
+
+    let match;
+    while ((match = importRe.exec(content)) !== null) {
+      const names = match[1].split(",").map((n) => n.trim()).filter(Boolean);
+      const forPoc = names.filter((n) => pocSet.has(n));
+      const forSanity = names.filter((n) => !pocSet.has(n));
+
+      if (forPoc.length === 0) continue; // Nothing to move
+
+      const newStatements = [];
+      if (forPoc.length > 0) {
+        newStatements.push(
+          `import { ${forPoc.join(", ")} } from '@sanity-labs/ui-poc'`,
+        );
+      }
+      if (forSanity.length > 0) {
+        newStatements.push(
+          `import { ${forSanity.join(", ")} } from '@sanity/ui'`,
+        );
+      }
+
+      replacements.push({
+        original: match[0],
+        replacement: newStatements.join("\n"),
+      });
+    }
+
+    for (const { original, replacement } of replacements) {
+      content = content.replace(original, replacement);
+      fileChanged = true;
+    }
+
+    // --- 3. Ensure styles.css import in main.tsx / main.tsx ---
+    if (/main\.(tsx?|jsx?)$/.test(file.path)) {
+      if (!content.includes("@sanity-labs/ui-poc/dist/styles.css")) {
+        // Add after the last import statement
+        const lastImportIdx = content.lastIndexOf("\nimport ");
+        if (lastImportIdx !== -1) {
+          const eol = content.indexOf("\n", lastImportIdx + 1);
+          content =
+            content.slice(0, eol + 1) +
+            "import '@sanity-labs/ui-poc/dist/styles.css'\n" +
+            content.slice(eol + 1);
+          fileChanged = true;
+        }
+      }
+    }
+
+    if (fileChanged) {
+      file.content = content;
+      patched = true;
+    }
+  }
+
+  if (patched) {
+    console.log(
+      `[${iterLabel}] Post-processed files to enforce @sanity-labs/ui-poc imports`,
+    );
+  }
+
+  return patched;
+}
+
+/**
  * Write all files to the project directory (clean slate).
  */
 async function writeProjectFiles(projectDir, files) {
@@ -751,8 +886,7 @@ async function writeProjectFiles(projectDir, files) {
       for (const entry of entries) {
         if (
           entry !== "node_modules" &&
-          entry !== "package-lock.json" &&
-          !COPY_ASSETS.includes(entry)
+          entry !== "package-lock.json"
         ) {
           await rm(resolve(projectDir, entry), {
             recursive: true,

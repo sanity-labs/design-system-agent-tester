@@ -144,7 +144,6 @@ node --env-file=.env src/index.js --agent-prompt --prompt training --iterations 
 | `--concurrency` | `-c` | `2` | Max parallel agent calls. Capped at 2 by default to avoid rate limiting on slower models. Set higher with `--concurrency 5` if your API tier supports it. |
 | `--screenshot` | `-s` | `true` | Capture screenshots and run the validate/fix loop |
 | `--no-mcp` | | `false` | Disable MCP tool use. By default, MCP is auto-detected from prompt content (enabled when the prompt mentions "MCP"). Pass `--no-mcp` to force it off. |
-| `--no-copy-assets` | | `false` | Disable copying asset directories (e.g. `ui-poc/`) into each generated project before validation. By default, any directories listed in `COPY_ASSETS` are copied into the project so agents can reference local libraries. |
 | `--agent-prompt` | | `false` | When set, spawns a Claude call before the test run to auto-generate a varied, PRD-style interface brief. Both `control` and `training` agents receive the same generated brief in place of the `[ADD PROMPT HERE]` placeholder. When omitted (default), a fixed fallback brief is used: *"Create a simple interface that mimics Sanity Studio using Sanity UI."* The resolved brief is recorded in `report.json` and displayed at the top of `report.md`. |
 
 ### Models
@@ -219,9 +218,9 @@ npm run summarize             # Summarize all runs (print to stdout)
 npm run reperf                # Re-run Lighthouse perf on the latest run's iterations
 npm run reperf:training       # Re-run perf for training iterations only
 npm run summarize -- --count 8                        # Last 8 runs
-npm run summarize -- --from 2026-04-14-12.43          # From a specific run onward
+npm run summarize -- --from 2026-04-14/12.43          # From a specific run onward
 npm run summarize -- --prompt training --count 5      # Training prompt only, last 5 runs
-npm run summarize -- --count 10 --save                # Save to output/summary-YYYY-MM-DD-HH.MM.md
+npm run summarize -- --count 10 --save                # Save to output/summary-YYYY-MM-DD-HH.MM.md (in output root)
 ```
 
 ## Agent-Generated Interface Briefs
@@ -270,7 +269,7 @@ node src/summarize.js [options]
 |------|-------|---------|-------------|
 | `--output` | `-o` | `./output` | Directory containing run folders to scan |
 | `--count` | `-n` | all | Number of most-recent runs to include |
-| `--from` | `-f` | — | Include runs at-or-after this folder name (e.g. `2026-04-14-13.00`) |
+| `--from` | `-f` | — | Include runs at-or-after this folder name (e.g. `2026-04-14/13.00`) |
 | `--prompt` | `-p` | `both` | Filter to `control`, `training`, or `both` |
 | `--save` | `-s` | false | Write to `output/summary-YYYY-MM-DD-HH.MM.md` instead of stdout |
 | `--help` | `-h` | — | Print usage |
@@ -282,7 +281,7 @@ node src/summarize.js [options]
 node src/summarize.js --count 8
 
 # All runs since a specific date, save to file
-node src/summarize.js --from 2026-04-14-14.20 --save
+node src/summarize.js --from 2026-04-14/14.20 --save
 
 # Training prompt only, last 5 runs
 node src/summarize.js --prompt training --count 5
@@ -306,32 +305,35 @@ Runs with no `report.json`, or runs that don't contain the requested prompt, are
 
 ## Output
 
-Each run creates a timestamped directory under `output/`:
+Each run creates a timestamped directory under `output/`, organized by day:
 
 ```
 output/
-├── 2026-03-18-14.30/                  # One directory per run, timestamped YYYY-MM-DD-HH.MM
-│   ├── report.json                    # Machine-readable report (includes accessibility data)
-│   ├── report.md                      # Human-readable Markdown report
-│   ├── control/
-│   │   ├── iteration-1/
-│   │   │   ├── project/               # Generated (and fixed) project files
-│   │   │   ├── screenshot.png         # App screenshot
-│   │   │   ├── _raw_response.txt      # Initial Claude response
-│   │   │   ├── _feedback.json         # Parsed feedback items
-│   │   │   ├── _fix_response_1.txt    # First fix response (if needed)
-│   │   │   ├── _fix_response_2.txt    # Second fix response (if needed)
-│   │   │   ├── _console_errors.txt    # Final browser console errors (if any)
-│   │   │   ├── _meta.json            # Metrics including fixAttempts, fixLog, feedback, and a11yResults
-│   │   │   └── _a11y_results.json     # Accessibility test results (7 WCAG tests per iteration)
-│   │   ├── iteration-2/
-│   │   └── ...
-│   └── training/
-│       ├── iteration-1/
-│       │   ├── ...                    # Same files as control iterations
-│       │   └── _mcp_tool_log.json     # MCP tool call log (only when MCP is enabled)
+├── 2026-03-18/                        # One directory per day (YYYY-MM-DD)
+│   ├── 14.30/                         # One directory per run (HH.MM)
+│   │   ├── report.json                # Machine-readable report (includes accessibility data)
+│   │   ├── report.md                  # Human-readable Markdown report
+│   │   ├── control/
+│   │   │   ├── iteration-1/
+│   │   │   │   ├── project/           # Generated (and fixed) project files
+│   │   │   │   ├── screenshot.png     # App screenshot
+│   │   │   │   ├── _raw_response.txt  # Initial Claude response
+│   │   │   │   ├── _feedback.json     # Parsed feedback items
+│   │   │   │   ├── _fix_response_1.txt # First fix response (if needed)
+│   │   │   │   ├── _fix_response_2.txt # Second fix response (if needed)
+│   │   │   │   ├── _console_errors.txt # Final browser console errors (if any)
+│   │   │   │   ├── _meta.json        # Metrics including fixAttempts, fixLog, feedback, and a11yResults
+│   │   │   │   └── _a11y_results.json # Accessibility test results per iteration
+│   │   │   ├── iteration-2/
+│   │   │   └── ...
+│   │   └── training/
+│   │       ├── iteration-1/
+│   │       │   ├── ...                # Same files as control iterations
+│   │       │   └── _mcp_tool_log.json # MCP tool call log (only when MCP is enabled)
+│   │       └── ...
+│   └── 16.45/                         # Multiple runs per day are grouped together
 │       └── ...
-├── 2026-03-19-09.15/                  # Previous runs are preserved
+├── 2026-03-19/                        # Previous days are preserved
 │   └── ...
 └── ...
 ```
@@ -434,7 +436,7 @@ npm run test:a11y:training
 A11Y_ITERATION=2 npm run test:a11y:control
 
 # Point at a specific run directory
-A11Y_RUN_DIR=output/2026-03-18-14.30 npm run test:a11y
+A11Y_RUN_DIR=output/2026-03-18/14.30 npm run test:a11y
 ```
 
 The standalone Playwright tests auto-detect the latest timestamped run directory under `output/`, or you can point at a specific one with `A11Y_RUN_DIR`.
@@ -468,7 +470,7 @@ Each iteration gets an `_a11y_results.json` file:
 |----------|---------|-------------|
 | `A11Y_PROMPT` | `control` | Only test iterations for this prompt (Playwright only) |
 | `A11Y_ITERATION` | `2` | Only test a specific iteration number (Playwright only) |
-| `A11Y_RUN_DIR` | `output/2026-03-18-14.30` | Point Playwright at a specific run directory |
+| `A11Y_RUN_DIR` | `output/2026-03-18/14.30` | Point Playwright at a specific run directory |
 
 ## How Isolation Works
 

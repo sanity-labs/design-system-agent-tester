@@ -50,6 +50,46 @@ const { values } = parseArgs({
 });
 
 /**
+ * Discover all run directories under output/, supporting both:
+ *   - New format: output/YYYY-MM-DD/HH.MM/
+ *   - Legacy format: output/YYYY-MM-DD-HH.MM/
+ * Returns an array sorted newest-first: [{ sortKey, fullPath }]
+ */
+async function discoverAllRuns(outputRoot) {
+  const entries = await readdir(outputRoot, { withFileTypes: true });
+  const runs = [];
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+
+    // New format: date directory containing time subdirectories
+    if (/^\d{4}-\d{2}-\d{2}$/.test(entry.name)) {
+      const dateDir = resolve(outputRoot, entry.name);
+      const subs = await readdir(dateDir, { withFileTypes: true });
+      for (const sub of subs) {
+        if (sub.isDirectory() && /^\d{2}\.\d{2}$/.test(sub.name)) {
+          runs.push({
+            sortKey: `${entry.name}-${sub.name}`,
+            fullPath: resolve(dateDir, sub.name),
+          });
+        }
+      }
+    }
+
+    // Legacy format: YYYY-MM-DD-HH.MM
+    if (/^\d{4}-\d{2}-\d{2}-\d{2}\.\d{2}$/.test(entry.name)) {
+      runs.push({
+        sortKey: entry.name,
+        fullPath: resolve(outputRoot, entry.name),
+      });
+    }
+  }
+
+  runs.sort((a, b) => b.sortKey.localeCompare(a.sortKey)); // newest first
+  return runs;
+}
+
+/**
  * Resolve the run directory. If --output is given, use it directly.
  * Otherwise, find the latest timestamped subdirectory under output/.
  */
@@ -59,15 +99,11 @@ async function resolveRunDir(outputFlag) {
   const outputRoot = resolve(ROOT, "output");
   if (!existsSync(outputRoot)) return outputRoot;
 
-  const entries = await readdir(outputRoot, { withFileTypes: true });
-  const timestamped = entries
-    .filter((e) => e.isDirectory() && /^\d{4}-\d{2}-\d{2}-/.test(e.name))
-    .map((e) => e.name)
-    .sort()
-    .reverse();
+  // Collect all run directories: both new (YYYY-MM-DD/HH.MM) and legacy (YYYY-MM-DD-HH.MM)
+  const runs = await discoverAllRuns(outputRoot);
 
-  if (timestamped.length > 0) {
-    return resolve(outputRoot, timestamped[0]);
+  if (runs.length > 0) {
+    return runs[0].fullPath;
   }
 
   // Fallback: maybe it's an old-style flat output/ with control/training directly
