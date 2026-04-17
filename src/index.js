@@ -5,6 +5,7 @@ import { readFile, mkdir, cp } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { generateReport } from "./report.js";
 import { computeVisualDiff } from "./visual-diff.js";
+import { generateAppPrompt, STATIC_PROMPT } from "./prompt-generator.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
@@ -86,6 +87,10 @@ const { values } = parseArgs({
       type: "boolean",
       default: false,
     },
+    "agent-prompt": {
+      type: "boolean",
+      default: false,
+    },
   },
 });
 
@@ -93,6 +98,40 @@ const PROMPTS = {
   control: resolve(ROOT, "PROMPT-CONTROL.md"),
   training: resolve(ROOT, "PROMPT-WITH-TRAINING.md"),
 };
+
+/**
+ * Resolve the brief that replaces [ADD PROMPT HERE] in both prompt files.
+ *
+ * When --agent-prompt is false (default): returns the static fallback string.
+ * When --agent-prompt is true: calls the Anthropic API to generate a fresh
+ * PRD-style interface brief, then returns it.
+ *
+ * @param {boolean} useAgentPrompt
+ * @param {string}  model - Claude model used for generation
+ * @returns {Promise<string>}
+ */
+async function resolvePromptBrief(useAgentPrompt, model) {
+  if (!useAgentPrompt) {
+    return STATIC_PROMPT;
+  }
+
+  console.log("Generating interface brief with agent...");
+  const brief = await generateAppPrompt({ model });
+  console.log(`\n--- Generated interface brief ---\n${brief}\n---\n`);
+  return brief;
+}
+
+/**
+ * Inject the resolved brief into a raw prompt file's content by replacing
+ * the [ADD PROMPT HERE] placeholder.
+ *
+ * @param {string} fileContent  - Raw content read from the prompt .md file
+ * @param {string} brief        - The resolved brief text
+ * @returns {string}
+ */
+function injectBrief(fileContent, brief) {
+  return fileContent.replace(/\[ADD PROMPT HERE\]/g, brief);
+}
 
 /**
  * Build a timestamped directory name in the format YYYY-MM-DD-HH.MM
@@ -116,6 +155,7 @@ async function main() {
   const maxFixes = parseInt(values["max-fixes"], 10);
   const useMcp = !values["no-mcp"];
   const copyAssets = !values["no-copy-assets"];
+  const useAgentPrompt = values["agent-prompt"];
 
   if (isNaN(maxFixes) || maxFixes < 0) {
     console.error("Error: --max-fixes must be a non-negative integer");
@@ -158,6 +198,9 @@ async function main() {
   const runDir = resolve(ROOT, "output", runDirName);
   await mkdir(runDir, { recursive: true });
 
+  // Resolve the interface brief once — both prompt variants receive the same text.
+  const promptBrief = await resolvePromptBrief(useAgentPrompt, model);
+
   console.log("=== Agent Tester ===");
   console.log(
     `Runner:       ${runnerType}${runnerType === "cli" ? " (claude CLI — no API key needed)" : " (Anthropic SDK — requires ANTHROPIC_API_KEY)"}`,
@@ -169,15 +212,18 @@ async function main() {
   console.log(`Screenshots:  ${takeScreenshots}`);
   console.log(`MCP:          ${useMcp}`);
   console.log(`Copy assets:  ${copyAssets}`);
+  console.log(`Agent prompt: ${useAgentPrompt}`);
   console.log(`Prompts:      ${promptKeys.join(", ")}`);
   console.log(`Output:       ${runDir}`);
+  console.log(`Brief:        ${promptBrief.split("\n")[0]}${promptBrief.includes("\n") ? " …" : ""}`);
   console.log("");
 
   const allResults = {};
 
   for (const key of promptKeys) {
     const promptPath = PROMPTS[key];
-    const promptContent = await readFile(promptPath, "utf-8");
+    const rawContent = await readFile(promptPath, "utf-8");
+    const promptContent = injectBrief(rawContent, promptBrief);
 
     console.log(
       `\n--- Running "${key}" prompt (${iterations} iterations) ---\n`,
@@ -322,7 +368,7 @@ async function main() {
 
   // Generate report
   console.log("\n\n=== Generating Report ===\n");
-  await generateReport(allResults, runDir);
+  await generateReport(allResults, runDir, promptBrief);
 
   console.log(`\nDone! See ${runDir} for results and report.`);
 }

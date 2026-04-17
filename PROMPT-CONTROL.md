@@ -1,4 +1,4 @@
-Create a simple interface that mimics Sanity Studio using Sanity UI.  
+[ADD PROMPT HERE]  
 
 # Instructions
 * DO NOT USE OLDER VERSIONS OF SANITY ICONS OR SANITY UI.

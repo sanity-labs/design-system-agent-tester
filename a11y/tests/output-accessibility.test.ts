@@ -1071,6 +1071,57 @@ for (const iteration of iterations) {
           });
         }
 
+        // 5.2 — Ambiguous link text (passes axe but useless to screen readers)
+        const ambiguousTexts = [
+          "read more", "click here", "browse all", "learn more",
+          "here", "more", "details", "link", "continue",
+        ];
+        const ambiguousLinks: Array<{ html: string; text: string }> = [];
+        for (const link of links) {
+          const text = (link.textContent || "").trim().toLowerCase();
+          const ariaLabel = link.getAttribute("aria-label");
+          if (!ariaLabel && ambiguousTexts.includes(text)) {
+            ambiguousLinks.push({
+              html: (link as HTMLElement).outerHTML.slice(0, 150),
+              text,
+            });
+          }
+        }
+        if (ambiguousLinks.length > 0) {
+          issues.push({
+            item: "5.2 — Ambiguous link text",
+            wcag: "2.4.4 A",
+            detail: `${ambiguousLinks.length} link(s) use generic text like "read more" or "click here" that is meaningless out of context.`,
+            elements: ambiguousLinks.map((l) => `"${l.text}" → ${l.html}`),
+          });
+        }
+
+        // 5.3 — Generic/low-quality alt text (passes axe but communicates nothing)
+        const genericAlts = [
+          "image", "photo", "picture", "icon", "img", "banner",
+          "decorative image", "logo", "graphic", "placeholder",
+          "untitled", "screenshot", "thumbnail",
+        ];
+        const genericAltImages: Array<{ html: string; alt: string }> = [];
+        const allImgsWithAlt = document.querySelectorAll("img[alt]");
+        for (const img of allImgsWithAlt) {
+          const alt = (img.getAttribute("alt") || "").trim().toLowerCase();
+          if (alt && genericAlts.includes(alt)) {
+            genericAltImages.push({
+              html: (img as HTMLElement).outerHTML.slice(0, 200),
+              alt,
+            });
+          }
+        }
+        if (genericAltImages.length > 0) {
+          issues.push({
+            item: "5.3 — Generic alt text",
+            wcag: "1.1.1 A",
+            detail: `${genericAltImages.length} image(s) have generic alt text like "image" or "photo" that communicates nothing.`,
+            elements: genericAltImages.map((i) => `alt="${i.alt}" → ${i.html}`),
+          });
+        }
+
         return { issues };
       });
 
@@ -1499,6 +1550,218 @@ for (const iteration of iterations) {
           data.issues
             .map((i) => `  [${i.wcag}] ${i.item}: ${i.detail}`)
             .join("\n"),
+      ).toHaveLength(0);
+    });
+
+    // ================================================================
+    // §11 Skip navigation (WCAG 2.4.1 A)
+    //
+    // Checklist:
+    // - Skip link is the first focusable element
+    // - Skip link targets the main content region
+    // - Landmarks alone don't help keyboard-only sighted users
+    // ================================================================
+    test("§11 skip navigation", async ({ page }) => {
+      requireServer();
+      await navigateAndWait(page, serverUrl!);
+
+      const data = await page.evaluate(() => {
+        const issues: Array<{
+          item: string;
+          wcag: string;
+          detail: string;
+        }> = [];
+
+        const focusableSelector =
+          'a[href], button, input, textarea, select, [tabindex]:not([tabindex="-1"])';
+        const allFocusable = Array.from(
+          document.querySelectorAll(focusableSelector),
+        ).filter((el) => {
+          const style = window.getComputedStyle(el);
+          return style.display !== "none" && style.visibility !== "hidden";
+        });
+
+        const firstFocusable = allFocusable[0] as HTMLElement | undefined;
+        let hasSkipLink = false;
+        let skipLinkTarget: string | null = null;
+
+        if (firstFocusable) {
+          const tag = firstFocusable.tagName.toLowerCase();
+          const href = firstFocusable.getAttribute("href") || "";
+          const text = (firstFocusable.textContent || "").trim().toLowerCase();
+          const ariaLabel = (
+            firstFocusable.getAttribute("aria-label") || ""
+          )
+            .trim()
+            .toLowerCase();
+
+          const isAnchor = tag === "a" && href.startsWith("#");
+          const looksLikeSkip =
+            /skip/i.test(text) ||
+            /skip/i.test(ariaLabel) ||
+            /main.content/i.test(text) ||
+            /main.content/i.test(ariaLabel);
+
+          if (isAnchor && looksLikeSkip) {
+            hasSkipLink = true;
+            const targetId = href.slice(1);
+            const targetEl = targetId
+              ? document.getElementById(targetId)
+              : null;
+            if (!targetEl) {
+              skipLinkTarget = "missing";
+              issues.push({
+                item: "11.1 — Skip link target missing",
+                wcag: "2.4.1 A",
+                detail: `Skip link points to "${href}" but no element with id="${targetId}" exists.`,
+              });
+            } else {
+              skipLinkTarget = targetId;
+            }
+          }
+        }
+
+        if (!hasSkipLink) {
+          issues.push({
+            item: "11.1 — No skip navigation link",
+            wcag: "2.4.1 A",
+            detail:
+              "No skip link found as the first focusable element. " +
+              "Keyboard-only users must tab through all header/nav elements to reach main content.",
+          });
+        }
+
+        return { issues, hasSkipLink, skipLinkTarget };
+      });
+
+      results.tests["skip-navigation"] = {
+        status: data.issues.length === 0 ? "passed" : "failed",
+        details: data,
+      };
+
+      expect(
+        data.issues,
+        `Skip navigation: ${data.issues.length} issue(s):\n` +
+          data.issues
+            .map((i) => `  [${i.wcag}] ${i.item}: ${i.detail}`)
+            .join("\n"),
+      ).toHaveLength(0);
+    });
+
+    // ================================================================
+    // §12 Dark mode & state contrast (WCAG 1.4.3 AA, 2.4.7 AA)
+    //
+    // Checklist:
+    // - Dark mode contrast passes (1.4.3 AA)
+    // - Focus states have visible indicators (2.4.7 AA)
+    // - The default §6 scan only evaluates initial light-mode state;
+    //   contrast failures in dark mode or focus states are invisible
+    //   without triggering those states before scanning.
+    // ================================================================
+    test("§12 dark mode & state contrast", async ({ page }) => {
+      requireServer();
+      const rendered = await navigateAndWait(page, serverUrl!);
+      if (!rendered) {
+        results.tests["dark-mode-contrast"] = {
+          status: "skipped",
+          details: "Page did not render",
+        };
+        test.skip();
+        return;
+      }
+
+      const issues: Array<{
+        item: string;
+        wcag: string;
+        detail: string;
+        violations?: unknown[];
+        elements?: string[];
+      }> = [];
+
+      // 12.1 — Dark mode contrast
+      await page.emulateMedia({ colorScheme: "dark" });
+      await navigateAndWait(page, serverUrl!);
+
+      const darkResult = await new AxeBuilder({ page })
+        .withRules(["color-contrast"])
+        .analyze();
+
+      if (darkResult.violations.length > 0) {
+        issues.push({
+          item: "12.1 — Dark mode contrast violations",
+          wcag: "1.4.3 AA, 1.4.11 AA",
+          detail: `${darkResult.violations.length} contrast violation(s) in dark mode.`,
+          violations: darkResult.violations.flatMap((v) =>
+            v.nodes.map((n) => ({
+              target: n.target,
+              html: n.html.slice(0, 150),
+              impact: n.impact,
+              message: n.failureSummary,
+            })),
+          ),
+        });
+      }
+
+      // Restore light mode for focus indicator check
+      await page.emulateMedia({ colorScheme: "light" });
+      await navigateAndWait(page, serverUrl!);
+
+      // 12.2 — Focus indicator visibility
+      const focusIssues = await page.evaluate(() => {
+        const interactiveSelector =
+          'a[href], button, input, textarea, select, [tabindex]:not([tabindex="-1"])';
+        const interactiveEls = Array.from(
+          document.querySelectorAll(interactiveSelector),
+        ).slice(0, 20);
+
+        const problems: Array<{ html: string; tag: string }> = [];
+        for (const el of interactiveEls) {
+          (el as HTMLElement).focus();
+          const cs = window.getComputedStyle(el);
+          const outline = cs.outlineStyle;
+          const outlineWidth = parseFloat(cs.outlineWidth);
+          const boxShadow = cs.boxShadow;
+
+          const hasOutline = outline !== "none" && outlineWidth > 0;
+          const hasBoxShadow = boxShadow !== "none" && boxShadow !== "";
+
+          if (!hasOutline && !hasBoxShadow) {
+            problems.push({
+              html: (el as HTMLElement).outerHTML.slice(0, 120),
+              tag: el.tagName.toLowerCase(),
+            });
+          }
+          (el as HTMLElement).blur();
+        }
+        return problems;
+      });
+
+      if (focusIssues.length > 0) {
+        issues.push({
+          item: "12.2 — Missing focus indicator",
+          wcag: "2.4.7 AA",
+          detail: `${focusIssues.length} interactive element(s) lack a visible focus indicator.`,
+          elements: focusIssues.map((f) => f.html),
+        });
+      }
+
+      results.tests["dark-mode-contrast"] = {
+        status: issues.length === 0 ? "passed" : "failed",
+        details: {
+          issueCount: issues.length,
+          issues,
+          darkModeViolationCount: darkResult.violations.length,
+          missingFocusIndicatorCount: focusIssues.length,
+        },
+      };
+
+      const detail = issues
+        .map((i) => `  [${i.wcag}] ${i.item}: ${i.detail}`)
+        .join("\n");
+
+      expect(
+        issues,
+        `Dark mode & state contrast: ${issues.length} issue(s):\n${detail}`,
       ).toHaveLength(0);
     });
 

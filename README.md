@@ -121,6 +121,15 @@ node --env-file=.env src/index.js --no-screenshot
 
 # Use the CLI runner
 node src/index.js --runner cli --prompt control
+
+# Use a static fallback brief (default — no API call for prompt generation)
+node --env-file=.env src/index.js --prompt both
+
+# Auto-generate a fresh interface brief before each run
+node --env-file=.env src/index.js --agent-prompt
+
+# Auto-generate brief, training prompt only, 5 iterations
+node --env-file=.env src/index.js --agent-prompt --prompt training --iterations 5
 ```
 
 ### Options
@@ -136,6 +145,7 @@ node src/index.js --runner cli --prompt control
 | `--screenshot` | `-s` | `true` | Capture screenshots and run the validate/fix loop |
 | `--no-mcp` | | `false` | Disable MCP tool use. By default, MCP is auto-detected from prompt content (enabled when the prompt mentions "MCP"). Pass `--no-mcp` to force it off. |
 | `--no-copy-assets` | | `false` | Disable copying asset directories (e.g. `ui-poc/`) into each generated project before validation. By default, any directories listed in `COPY_ASSETS` are copied into the project so agents can reference local libraries. |
+| `--agent-prompt` | | `false` | When set, spawns a Claude call before the test run to auto-generate a varied, PRD-style interface brief. Both `control` and `training` agents receive the same generated brief in place of the `[ADD PROMPT HERE]` placeholder. When omitted (default), a fixed fallback brief is used: *"Create a simple interface that mimics Sanity Studio using Sanity UI."* The resolved brief is recorded in `report.json` and displayed at the top of `report.md`. |
 
 ### Models
 
@@ -206,11 +216,45 @@ npm run test:a11y:control     # A11y tests for control iterations only
 npm run test:a11y:training    # A11y tests for training iterations only
 
 npm run summarize             # Summarize all runs (print to stdout)
+npm run reperf                # Re-run Lighthouse perf on the latest run's iterations
+npm run reperf:training       # Re-run perf for training iterations only
 npm run summarize -- --count 8                        # Last 8 runs
 npm run summarize -- --from 2026-04-14-12.43          # From a specific run onward
 npm run summarize -- --prompt training --count 5      # Training prompt only, last 5 runs
 npm run summarize -- --count 10 --save                # Save to output/summary-YYYY-MM-DD-HH.MM.md
 ```
+
+## Agent-Generated Interface Briefs
+
+By default, both prompt files (`PROMPT-CONTROL.md` and `PROMPT-WITH-TRAINING.md`) contain an `[ADD PROMPT HERE]` placeholder at the top. Before each test run, this placeholder is replaced in memory (the files on disk are not modified) with an **interface brief** — a short description of what agents should build.
+
+### Static brief (default)
+
+When `--agent-prompt` is not set, the placeholder is replaced with:
+
+> *Create a simple interface that mimics Sanity Studio using Sanity UI.*
+
+### Agent-generated brief (`--agent-prompt`)
+
+When `--agent-prompt` is set, a Claude API call is made before the test run to generate a varied, PRD-style brief. The generator picks a random domain (news platform, travel, e-commerce, legal, HR, etc.) and asks Claude to write a concrete product requirement for a **frontend-only prototype** — explicitly scoping out Sanity backend setup, authentication, real API calls, and unit tests.
+
+Both `control` and `training` prompt variants receive the **same generated brief**, ensuring a fair comparison.
+
+The resolved brief is:
+- Logged to the console at startup
+- Stored in `report.json` under the top-level `promptText` field
+- Rendered at the top of `report.md` under an **Interface Brief** heading
+
+### Brief format
+
+Generated briefs follow a consistent structure:
+1. **Overview** — domain context and purpose of the interface
+2. **Required views / screens** — specific sections to build (e.g. nav sidebar, document list, inspector panel)
+3. **Content types** — named document types and key fields
+4. **UI requirements** — interactions, states, and display rules
+5. **Out of scope** — explicitly excludes backend setup, auth, real API calls, and tests
+
+---
 
 ## Summarizing Multiple Runs
 
