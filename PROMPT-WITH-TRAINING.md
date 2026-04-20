@@ -6,9 +6,9 @@
   * Sanity icons: `npm i @sanity/icons@latest`
   * Sanity UI: `npm i @sanity/ui@latest`
   * Sanity UI POC: `npm i @sanity-labs/ui-poc@0.0.1-alpha.2`
-* DO NOT import `Box`, `Flex`, `Grid`, or `Text` from `@sanity/ui`. These four components are **superseded** by the `UI POC` package.
+* DO NOT import `Box`, `Flex`, `Grid`, `Text`, `Heading`, `Card` or `Divider` from `@sanity/ui`. These four components are **superseded** by the `UI POC` package.
 
-  **Do NOT write your own versions of Box, Flex, Grid, or Divider.** They already exist in `UI POC`. Use them directly.
+  **Do NOT write your own versions of Box, Flex, Grid, Text, Heading, Card or Divider.** They already exist in `UI POC`. Use them directly.
 
   All other `@sanity/ui` components — `Avatar`, `Stack`, `Button`, `Badge`, `TextInput`, `Label`, `Tooltip`, `Menu`, `MenuItem`, `MenuButton`, `Toast`, `Popover`, etc. — continue to be imported from `@sanity/ui` as normal.
 
@@ -21,6 +21,9 @@
   | `Flex` | `@sanity-labs/ui-poc` |
   | `Grid` | `@sanity-labs/ui-poc` |
   | `Text` | `@sanity-labs/ui-poc` |
+  | `Heading` | `@sanity-labs/ui-poc` |
+  | `Card` | `@sanity-labs/ui-poc` |
+  | `Divider` | `@sanity-labs/ui-poc` |
   | Everything else | `@sanity/ui` |
 
 * Work within the constraints of Sanity UI the `ui-poc` package. **Do not make custom components if one exists in either library.**
