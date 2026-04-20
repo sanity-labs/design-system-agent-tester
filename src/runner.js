@@ -34,6 +34,156 @@ import {
 
 const SYSTEM_PROMPT = readFileSync(resolve(PROJECT_ROOT, "prompts", "system.md"), "utf-8").trim();
 const FIX_SYSTEM_PROMPT = readFileSync(resolve(PROJECT_ROOT, "prompts", "system-fix.md"), "utf-8").trim();
+const CONTRIBUTION_SYSTEM_PROMPT = readFileSync(resolve(PROJECT_ROOT, "prompts", "system-contribution.md"), "utf-8").trim();
+
+/**
+ * Parse ---CHALLENGES--- blocks from agent contribution responses.
+ * Returns an array of { category, text } objects.
+ */
+function parseChallenges(text) {
+  const match = text.match(/---CHALLENGES---\s*([\s\S]*?)\s*---END CHALLENGES---/);
+  if (!match) return [];
+  return match[1]
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("- "))
+    .map((line) => {
+      const catMatch = line.match(/^-\s*\[(\w[\w-]*)\]\s*(.*)/);
+      if (catMatch) return { category: catMatch[1], text: catMatch[2].trim() };
+      return { category: "other", text: line.slice(2).trim() };
+    });
+}
+
+/**
+ * Generate contributions based on feedback from the build step.
+ * Calls the model with the feedback items and the contribution system prompt,
+ * then writes all outputs to a contributions/ directory inside iterDir.
+ *
+ * @param {object} opts
+ * @param {import("@anthropic-ai/sdk").default} opts.client - Anthropic client
+ * @param {string} opts.model - Model name
+ * @param {Array<{category: string, text: string}>} opts.feedback - Parsed feedback items
+ * @param {string} opts.iterDir - Iteration output directory
+ * @param {string} opts.iterLabel - Label for logging
+ * @param {string} opts.agentLogPath - Path to cumulative agent log
+ * @returns {Promise<{inputTokens: number, outputTokens: number, fileCount: number, challengeCount: number}>}
+ */
+async function generateContributions({ client, model, feedback, iterDir, iterLabel, agentLogPath }) {
+  const contribDir = resolve(iterDir, "contributions");
+  await mkdir(contribDir, { recursive: true });
+
+  if (!feedback || feedback.length === 0) {
+    console.log(`[${iterLabel}] No feedback to generate contributions from — skipping`);
+    await writeFile(resolve(contribDir, "feedback.json"), JSON.stringify({ challenges: [], note: "No feedback was provided" }, null, 2), "utf-8");
+    await writeFile(resolve(contribDir, "feedback.md"), "# Contribution Challenges\n\nNo feedback was provided by the agent, so no contributions were generated.\n", "utf-8");
+    return { inputTokens: 0, outputTokens: 0, fileCount: 0, challengeCount: 0 };
+  }
+
+  // Build the user prompt with the feedback items
+  const feedbackText = feedback
+    .map((f, i) => `${i + 1}. [${f.category}] ${f.text}`)
+    .join("\n");
+
+  const userPrompt = `Here is the feedback I provided after building a web application with Sanity UI:\n\n${feedbackText}\n\nPlease create concrete contributions that address each piece of feedback. Follow the output format specified in your instructions.`;
+
+  console.log(`[${iterLabel}] Generating contributions from ${feedback.length} feedback item(s)...`);
+
+  const response = await callAnthropicWithRetry(
+    client,
+    {
+      model,
+      max_tokens: 16000,
+      system: CONTRIBUTION_SYSTEM_PROMPT,
+      messages: [{ role: "user", content: userPrompt }],
+    },
+    iterLabel,
+  );
+
+  const contribText = response.content
+    .filter((block) => block.type === "text")
+    .map((block) => block.text)
+    .join("\n");
+
+  const inputTokens = response.usage?.input_tokens ?? 0;
+  const outputTokens = response.usage?.output_tokens ?? 0;
+
+  // Save raw response
+  await writeFile(resolve(contribDir, "_raw_response.txt"), contribText, "utf-8");
+
+  // Log to cumulative agent log
+  await appendFile(
+    agentLogPath,
+    `=== CONTRIBUTION GENERATION [${new Date().toISOString()}] ===\n` +
+      `Feedback items: ${feedback.length}\n` +
+      `Response length: ${contribText.length} bytes\n\n` +
+      contribText +
+      "\n\n",
+    "utf-8",
+  );
+
+  // Parse contribution files and write them
+  const contribFiles = parseFiles(contribText);
+  for (const file of contribFiles) {
+    const filePath = resolve(contribDir, file.path);
+    const dir = resolve(filePath, "..");
+    await mkdir(dir, { recursive: true });
+    await writeFile(filePath, file.content, "utf-8");
+  }
+
+  console.log(`[${iterLabel}] Wrote ${contribFiles.length} contribution file(s) to contributions/`);
+
+  // Parse challenges
+  const challenges = parseChallenges(contribText);
+
+  // Write structured feedback as JSON
+  const feedbackJson = {
+    generatedAt: new Date().toISOString(),
+    model,
+    sourceFeedback: feedback,
+    contributions: contribFiles.map((f) => f.path),
+    challenges,
+  };
+  await writeFile(
+    resolve(contribDir, "feedback.json"),
+    JSON.stringify(feedbackJson, null, 2),
+    "utf-8",
+  );
+
+  // Write human-readable feedback as Markdown
+  let md = `# Contribution Challenges\n\n`;
+  md += `**Generated:** ${feedbackJson.generatedAt}\n`;
+  md += `**Model:** ${model}\n`;
+  md += `**Source feedback items:** ${feedback.length}\n`;
+  md += `**Contributions produced:** ${contribFiles.length}\n\n`;
+
+  if (contribFiles.length > 0) {
+    md += `## Contributions\n\n`;
+    for (const f of contribFiles) {
+      md += `- \`${f.path}\`\n`;
+    }
+    md += `\n`;
+  }
+
+  if (challenges.length > 0) {
+    md += `## Challenges\n\n`;
+    for (const c of challenges) {
+      md += `- **[${c.category}]** ${c.text}\n`;
+    }
+    md += `\n`;
+  } else {
+    md += `## Challenges\n\nNo challenges reported.\n\n`;
+  }
+
+  md += `## Source Feedback\n\n`;
+  for (const f of feedback) {
+    md += `- **[${f.category}]** ${f.text}\n`;
+  }
+  md += `\n`;
+
+  await writeFile(resolve(contribDir, "feedback.md"), md, "utf-8");
+
+  return { inputTokens, outputTokens, fileCount: contribFiles.length, challengeCount: challenges.length };
+}
 
 // Max tool-use round-trips before we force the model to finish
 const MAX_TOOL_TURNS = 25;
@@ -527,6 +677,20 @@ export async function runAgent({
             } catch { /* ignore */ }
           }
 
+          // --- Step 3: Generate contributions from feedback ---
+          let contribResult = null;
+          if (feedback.length > 0) {
+            try {
+              contribResult = await generateContributions({
+                client, model, feedback, iterDir, iterLabel, agentLogPath,
+              });
+              totalInputTokens += contribResult.inputTokens;
+              totalOutputTokens += contribResult.outputTokens;
+            } catch (err) {
+              console.warn(`[${iterLabel}] ⚠ Contribution generation failed: ${err.message}`);
+            }
+          }
+
           const result = buildResult({
             files,
             model,
@@ -541,6 +705,7 @@ export async function runAgent({
             a11yResults,
             perfResults,
             lintResults,
+            contribResult,
             runner: "api",
           });
           return result;
@@ -709,6 +874,20 @@ export async function runAgent({
       killDevServer(lastValidation.devServer);
     }
 
+    // --- Step 3: Generate contributions from feedback (fallback path) ---
+    let contribResult = null;
+    if (feedback.length > 0) {
+      try {
+        contribResult = await generateContributions({
+          client, model, feedback, iterDir, iterLabel, agentLogPath,
+        });
+        totalInputTokens += contribResult.inputTokens;
+        totalOutputTokens += contribResult.outputTokens;
+      } catch (err) {
+        console.warn(`[${iterLabel}] ⚠ Contribution generation failed: ${err.message}`);
+      }
+    }
+
     files = await readProjectFiles(projectDir, files);
     return buildResult({
       files,
@@ -723,8 +902,23 @@ export async function runAgent({
       feedback,
       a11yResults: null,
       perfResults: null,
+      contribResult,
       runner: "api",
     });
+  }
+
+  // --- Step 3: Generate contributions from feedback (no-screenshot path) ---
+  let contribResult = null;
+  if (feedback.length > 0) {
+    try {
+      contribResult = await generateContributions({
+        client, model, feedback, iterDir, iterLabel, agentLogPath,
+      });
+      totalInputTokens += contribResult.inputTokens;
+      totalOutputTokens += contribResult.outputTokens;
+    } catch (err) {
+      console.warn(`[${iterLabel}] ⚠ Contribution generation failed: ${err.message}`);
+    }
   }
 
   // No screenshots requested or no package.json — just return metrics
@@ -741,6 +935,7 @@ export async function runAgent({
     feedback,
     a11yResults: null,
     perfResults: null,
+    contribResult,
     runner: "api",
   });
 }
@@ -1014,6 +1209,7 @@ async function buildResult({
   a11yResults,
   perfResults,
   lintResults,
+  contribResult,
   runner,
 }) {
   const linesOfCode = files.reduce(
@@ -1048,6 +1244,7 @@ async function buildResult({
     a11yResults,
     perfResults,
     lintResults,
+    contribResult: contribResult || null,
   };
   await writeFile(
     resolve(iterDir, "_meta.json"),
@@ -1072,5 +1269,6 @@ async function buildResult({
     a11yResults,
     perfResults,
     lintResults,
+    contribResult: contribResult || null,
   };
 }
