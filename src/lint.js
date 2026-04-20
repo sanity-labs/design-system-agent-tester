@@ -241,7 +241,7 @@ function verifyWithRegex(code, filename, ruleConfig) {
         messages.push({
           ruleId: "sanity-ui/require-heading-level",
           message:
-            "Heading is missing the 'level' prop. Without it, <h2> is rendered silently regardless of context. Set level={1} through level={6} explicitly.",
+            "Heading is missing the 'level' prop. Without it, <h2> is rendered silently regardless of context. Set  through as="h6" explicitly.",
           severity: ruleConfig["sanity-ui/require-heading-level"],
           line,
           column: 1,

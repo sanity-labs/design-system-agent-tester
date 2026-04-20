@@ -5,7 +5,7 @@
 * Use the latest version of Sanity Icons and Sanity UI for the interface. YOU ARE NOT ALLOWED INSTALL A SPECIFIC VERSION. YOU HAVE TO EXPLICITLY INSTALL THE LATEST VERSION OF EACH PACKAGE WITH THE FOLLOWING COMMANDS:
   * Sanity icons: `npm i @sanity/icons@latest`
   * Sanity UI: `npm i @sanity/ui@latest`
-  * Sanity UI POC: `npm i @sanity-labs/ui-poc@0.0.1-alpha.2`
+  * Sanity UI POC: `npm i @sanity-labs/ui-poc@0.0.1-alpha.3`
 * DO NOT import `Box`, `Flex`, `Grid`, `Text`, `Heading`, `Card` or `Divider` from `@sanity/ui`. These four components are **superseded** by the `UI POC` package.
 
   **Do NOT write your own versions of Box, Flex, Grid, Text, Heading, Card or Divider.** They already exist in `UI POC`. Use them directly.
@@ -37,43 +37,9 @@
 
 ---
 
-# Quick start
+# Getting started for developers
 
-This guide walks you through setting up a Sanity UI project from scratch. By the end, you will have a working Vite + React app. It includes a sidebar, toolbar, content area, and proper accessibility structure.
-
-## Import sources — the one rule to memorize
-
-Components come from **two** packages. Importing from the wrong one produces **no TypeScript error and no runtime warning** — the component silently renders with a different API.
-
-| Import from `'@sanity-labs/ui-poc'` | Import from `'@sanity/ui'` |
-|------------------------------|----------------------------|
-| `Box` | `Badge` |
-| `Card` | `Button` |
-| `Divider` | `Checkbox`, `Dialog` |
-| `Flex` | `Inline`, `Label` |
-| `Grid` | `Menu`, `MenuButton`, `MenuItem`, `MenuDivider` |
-| `Heading` | `Popover`, `Select`, `Spinner`, `Stack` |
-| `Text` | `Switch`, `Tab`, `TabList`, `TabPanel` |
-| | `TextArea`, `TextInput`, `Tooltip` |
-| | `ThemeProvider`, `studioTheme`, `buildTheme` |
-| | `ToastProvider`, `useToast` |
-
-```tsx
-// Layout primitives from @sanity-labs/ui-poc
-import { Box, Flex, Grid, Card, Heading, Text, Divider } from '@sanity-labs/ui-poc'
-
-// everything else
-import { Button, Stack, Badge, TextInput, Select, Label } from '@sanity/ui'
-import { SearchIcon, CloseIcon } from '@sanity/icons'
-```
-
-> ⛔ If a Box, Flex, Card, Heading, or Text renders with unexpected behavior and no error, **check the import source first.** This is the #1 cause of silent failures across all test runs.
-
----
-
-## Create the project
-
-Start with a Vite project and add the packages Sanity UI needs.
+## Install
 
 ```sh
 npm create vite@latest my-app -- --template react-ts
@@ -81,85 +47,315 @@ cd my-app
 npm install @sanity/ui @sanity/icons @sanity-labs/ui-poc styled-components classnames
 ```
 
-⛔ **You must use `@vitejs/plugin-react` (Babel), not the SWC variant.** `@sanity/ui` uses `styled-components`, which requires Babel for correct behavior. Using the SWC plugin causes styled-components to silently produce unstyled or broken output — no error is thrown.
-
-The default Vite template now installs SWC. Always verify which plugin your project uses:
+Vite now defaults to the SWC plugin. Replace it with Babel — `styled-components` needs it:
 
 ```sh
 npm install @vitejs/plugin-react
-# then check vite.config.ts — it must import from '@vitejs/plugin-react', not '@vitejs/plugin-react-swc'
+npm uninstall @vitejs/plugin-react-swc
 ```
 
-If your `vite.config.ts` imports `@vitejs/plugin-react-swc`, replace it with `@vitejs/plugin-react`. The failure is completely silent — styled-components renders without styles and no error message points to the cause.
+## Two packages, one system
 
-## Known pitfalls — read before writing any code
+Sanity UI ships components from two packages. Importing from the wrong one fails silently.
 
-The following failures have **no error message, no TypeScript warning, and no console output**. They are the most common reasons a working-looking implementation silently breaks.
+| Package | Components |
+|---------|-----------|
+| `@sanity-labs/ui-poc` | `Box`, `Flex`, `Grid`, `Card`, `Heading`, `Text`, `Divider` |
+| `@sanity/ui` | `Button`, `Stack`, `Badge`, `Label`, `Menu`, `MenuItem`, `MenuButton`, `Select`, `TextInput`, `TextArea`, `Switch`, `Dialog`, `Tooltip`, `Popover`, `ThemeProvider`, `ToastProvider` |
 
-| Pitfall | Symptom | One-line fix |
-|---------|---------|-------------|
-| Layout props on `Card` | Layout broken, no error | Wrap in `<Box flexGrow={1}>` |
-| `Heading` without `level` | Wrong `<h2>` in heading hierarchy | `<Heading level={1}>` |
-| `tone="primary"` on Button | Fails WCAG AA contrast silently | Use `tone="default"` |
-| `Stack` with `gap` / `Flex` with `space` | Spacing ignored | `Flex`→`gap`, `Stack`→`space` |
-| Wrong package import | Different API, no error | `Box`/`Flex`/`Card`/`Heading`/`Text` → `import from '@sanity-labs/ui-poc'` |
-| `styles.css` not imported | All components unstyled | Import in `main.tsx` (see below) |
-| SWC plugin instead of Babel | Styled-components unstyled | Use `@vitejs/plugin-react` |
+```tsx
+import { Box, Flex, Card, Heading, Text } from '@sanity-labs/ui-poc'
+import { Button, Stack, Badge, Label } from '@sanity/ui'
+import { SearchIcon } from '@sanity/icons'
+```
 
-See `silent-failures.md` for the full reference including `MenuButton`, `Tooltip`, `--card-border-color`, and more.
+## Configure Vite
+
+```ts
+// vite.config.ts
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [react()],
+})
+```
+
+## Set up the entry point
+
+```tsx
+// src/main.tsx
+import { createRoot } from 'react-dom/client'
+import { ThemeProvider, studioTheme, ToastProvider } from '@sanity/ui'
+import '@sanity-labs/ui-poc/styles.css'
+import App from './App'
+
+createRoot(document.getElementById('root')!).render(
+  <ThemeProvider theme={studioTheme}>
+    <ToastProvider>
+      <App />
+    </ToastProvider>
+  </ThemeProvider>,
+)
+```
+
+⛔ **The `styles.css` import is required.** Without it, Box, Flex, Grid, Card, Heading, Text, and Divider render as plain, unstyled HTML. No error is thrown.
+
+## Build a layout
+
+```tsx
+// src/App.tsx
+import { Box, Flex, Card, Heading, Text } from '@sanity-labs/ui-poc'
+import { Button, Stack, Badge } from '@sanity/ui'
+import { AddIcon } from '@sanity/icons'
+
+export default function App() {
+  return (
+    <Flex minHeight="100vh">
+      <Box as="nav" aria-label="Main" padding={3} borderRight width="240px">
+        <Heading  size={1}>My App</Heading>
+      </Box>
+      <Box as="main" padding={4} flexGrow={1}>
+        <Stack space={3}>
+          <Flex alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={2}>
+            <Heading as="h2" size={2}>Documents</Heading>
+            <Button icon={AddIcon} text="New" />
+          </Flex>
+          <Card>
+            <Flex alignItems="center" justifyContent="space-between">
+              <Stack space={2}>
+                <Text as="p" size={1} weight="medium">First document</Text>
+                <Text as="p" size={1} color="muted">Edited 2 hours ago</Text>
+              </Stack>
+              <Badge tone="positive">Published</Badge>
+            </Flex>
+          </Card>
+        </Stack>
+      </Box>
+    </Flex>
+  )
+}
+```
+
+## Run it
+
+```sh
+npm run dev
+```
+
+## Quick rules
+
+- `Flex` uses `gap`. `Stack` uses `space`. They are not the same prop.
+- `Card` ignores layout props like `flexGrow`. Wrap it in a `Box`.
+- `Heading` defaults to `<h2>`. Always set `level`.
+- `Text` defaults to `<span>`. Use `as="p"` inside `Stack`.
+- `tone="primary"` fails WCAG AA contrast. Use `tone="default"`.
+
+See the [Tutorial: Build a document browser](quick-start.md) for a full walkthrough.
+
+# Tutorial: build a document browser
+
+This tutorial walks through building a three-region admin interface with Sanity UI. You will create a sidebar, a toolbar, and a content list — the same layout used in Sanity Studio.
+
+**Before you start:** complete the steps in `getting-started-developer.md`. You should have a Vite project with `@sanity/ui`, `@sanity-labs/ui-poc`, and `@sanity/icons` installed, a working `main.tsx` with `ThemeProvider`, and `@sanity-labs/ui-poc/styles.css` imported.
 
 ---
 
-## Project structure
+## What you will build
 
-After setup, you will have these files:
+A single-page app with:
 
-```text
-my-app/
-├── index.html
-├── package.json
-├── vite.config.ts
-└── src/
-    ├── main.tsx
-    ├── App.tsx
-    └── reduced-motion.css
-```
+- A collapsible sidebar (`<nav>`) with search and navigation links
+- A toolbar with a page title and an action button
+- A scrollable list of document cards with status badges
+- Correct heading hierarchy, landmarks, keyboard access, and responsive reflow
 
-## Import @sanity-labs/ui-poc components
+---
 
-⛔ **`@sanity-labs/ui-poc/styles.css` must be imported or nothing will render correctly — and no error will tell you why.**
+## Step 1: Create the outer shell
 
-Omitting this import causes all @sanity-labs/ui-poc components (Box, Flex, Grid, Heading, Text, Card, Divider) to render as bare, unstyled HTML elements. No console error is thrown. No TypeScript warning fires. No hint appears anywhere that the import is missing. This is the most commonly missed setup step.
-
-Import it in `main.tsx` — see that section below.
+The outer shell is a `Flex` that fills the viewport. The sidebar and main area sit side by side.
 
 ```tsx
-// Box, Flex, Grid, Divider, Heading, Text, and Card come from @sanity-labs/ui-poc — NOT from @sanity/ui
-import { Box, Flex, Grid, Card, Heading, Text, Divider } from '@sanity-labs/ui-poc'
+// src/App.tsx
+import { useState } from 'react'
+import { Box, Flex, Heading } from '@sanity-labs/ui-poc'
+import { Button } from '@sanity/ui'
+import { MenuIcon } from '@sanity/icons'
+
+const App = () => {
+  const [sidebarOpen, setSidebarOpen] = useState(true)
+
+  return (
+    <Flex flexWrap="wrap" minHeight="100vh">
+      {sidebarOpen && (
+        <Box as="nav" aria-label="Main navigation" borderRight width="260px" flexShrink={0}>
+          <Box padding={3}>
+            <Heading as="h2" size={1}>Studio</Heading>
+          </Box>
+        </Box>
+      )}
+
+      <Flex as="main" flexDirection="column" flexGrow={1} minWidth="0" overflow="hidden">
+        <Box padding={3} borderBottom>
+          <Heading >All Documents</Heading>
+        </Box>
+      </Flex>
+    </Flex>
+  )
+}
+
+export default App
 ```
 
-## index.html
+**What to notice:**
 
-Set `lang="en"` on the `<html>` element. Without it, screen readers cannot detect the page language (WCAG 3.1.1 A).
+- `Box as="nav"` renders a `<nav>` element. Screen readers list it as a landmark.
+- `Flex as="main"` renders a `<main>` element.
+- `flexWrap="wrap"` on the outer Flex lets the sidebar stack above the content at narrow widths (WCAG 1.4.10).
+- `minWidth="0"` on the main area prevents content from pushing the layout wider than the viewport.
+- `` on the page heading and `as="h2"` on the sidebar heading create a correct hierarchy.
 
-```html
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>My App</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
-</html>
+---
+
+## Step 2: Add a toolbar with reflow
+
+The toolbar holds the page title and an action button. Both wrap to separate lines on narrow screens.
+
+Replace the `<Box padding={3} borderBottom>` inside `main` with:
+
+```tsx
+import { AddIcon, MenuIcon, CloseIcon } from '@sanity/icons'
 ```
 
-## reduced-motion.css
+```tsx
+<Box padding={3} borderBottom>
+  <Flex alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={2}>
+    <Flex alignItems="center" gap={3} minWidth="0">
+      {!sidebarOpen && (
+        <Button
+          mode="bleed"
+          icon={MenuIcon}
+          aria-label="Show navigation"
+          onClick={() => setSidebarOpen(true)}
+        />
+      )}
+      <Heading  lines={1}>All Documents</Heading>
+    </Flex>
+    <Button text="New document" icon={AddIcon} tone="default" />
+  </Flex>
+</Box>
+```
 
-Sanity UI buttons and interactive parts apply `transition-duration: 0.1s` through styled-components. These transitions do not respect `prefers-reduced-motion` at the library level. This file overrides them. Import it in `main.tsx`. Every project needs it.
+**What to notice:**
+
+- `flexWrap="wrap"` is required on every `Flex` with two or more children. Without it the page overflows at 320px.
+- `lines={1}` on the Heading truncates with an ellipsis if the title is too long.
+- The `MenuIcon` button has `aria-label` because it has no visible text.
+- `tone="default"` on the action button — not `tone="primary"`, which fails WCAG AA contrast.
+
+---
+
+## Step 3: Build the sidebar
+
+Replace the sidebar placeholder with search, navigation links, and a close button.
+
+```tsx
+import { Stack, TextInput, Badge } from '@sanity/ui'
+import { SearchIcon, CloseIcon } from '@sanity/icons'
+import { Box, Flex, Heading, Text } from '@sanity-labs/ui-poc'
+```
+
+```tsx
+<Box as="nav" aria-label="Main navigation" borderRight width="260px" flexShrink={0} overflowY="auto">
+  <Stack>
+    <Box padding={3} borderBottom>
+      <Flex alignItems="center" justifyContent="space-between">
+        <Heading as="h2" size={1}>Studio</Heading>
+        <Button
+          mode="bleed"
+          icon={CloseIcon}
+          aria-label="Close navigation"
+          onClick={() => setSidebarOpen(false)}
+        />
+      </Flex>
+    </Box>
+    <Box padding={3}>
+      <Stack space={4}>
+        <TextInput
+          icon={SearchIcon}
+          placeholder="Search content..."
+          aria-label="Search content"
+        />
+        <Stack space={3}>
+          <Text as="p" size={1} weight="medium">Documents</Text>
+          <Text as="p" size={1} color="muted">Authors</Text>
+          <Text as="p" size={1} color="muted">Settings</Text>
+        </Stack>
+      </Stack>
+    </Box>
+  </Stack>
+</Box>
+```
+
+**What to notice:**
+
+- `Stack` uses the `space` prop for vertical spacing. `Flex` uses `gap`. They are not the same prop — using the wrong one does nothing silently.
+- `Text` defaults to `<span>` (inline). Setting `as="p"` makes each item block-level so `Stack space` works.
+- The search input uses `aria-label` instead of a visible `Label`. Both are valid ways to give an input an accessible name.
+
+---
+
+## Step 4: Add document cards
+
+Create a scrollable list of cards below the toolbar.
+
+```tsx
+import { Card } from '@sanity-labs/ui-poc'
+import { Badge } from '@sanity/ui'
+```
+
+```tsx
+const DOCUMENTS = [
+  { title: 'Getting Started', status: 'Published' },
+  { title: 'API Reference', status: 'Draft' },
+  { title: 'Design Tokens', status: 'Published' },
+]
+```
+
+Add this below the toolbar `Box`, still inside the `main` Flex:
+
+```tsx
+<Box padding={4} flexGrow={1} overflowY="auto">
+  <Stack space={3}>
+    {DOCUMENTS.map((doc) => (
+      <Card key={doc.title}>
+        <Flex alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={2}>
+          <Stack space={2}>
+            <Heading as="h2">{doc.title}</Heading>
+            <Text as="p" size={1} color="muted">Last edited 2 hours ago</Text>
+          </Stack>
+          <Badge tone={doc.status === 'Published' ? 'positive' : 'caution'}>
+            {doc.status}
+          </Badge>
+        </Flex>
+      </Card>
+    ))}
+  </Stack>
+</Box>
+```
+
+**What to notice:**
+
+- `Card` is a content surface — it adds a background and border. Do not use it for structural regions like sidebars or toolbars.
+- Layout props like `flexGrow` go on `Box`, not on `Card`. Card ignores them silently.
+- Each card heading is `as="h2"` because `` is the page title above. Never skip heading levels.
+
+---
+
+## Step 5: Add reduced-motion support
+
+Create `src/reduced-motion.css`:
 
 ```css
 @media (prefers-reduced-motion: reduce) {
@@ -174,168 +370,27 @@ Sanity UI buttons and interactive parts apply `transition-duration: 0.1s` throug
 }
 ```
 
-## vite.config.ts
-
-Set up the `@vitejs/plugin-react` plugin. No aliases are needed — `@sanity-labs/ui-poc` resolves from `node_modules`.
-
-```ts
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-
-export default defineConfig({
-  plugins: [react()],
-})
-```
-
-## main.tsx
-
-Wrap the app in `ThemeProvider` with `studioTheme` and `ToastProvider`. Both are required. `ToastProvider` must be **inside** `ThemeProvider`. Import `reduced-motion.css` and the compiled `@sanity-labs/ui-poc` styles here.
-
-**`studioTheme` vs `buildTheme()`.** The quick-start uses `studioTheme` from `@sanity/ui` — a ready-made theme. You can also use `buildTheme()` from `@sanity/ui/theme`, which produces the same result. Use `buildTheme()` when you need to pass custom options.
-
-**`ToastProvider` is required for `useToast()`.** It is NOT included in `ThemeProvider`. Omitting it causes a runtime error with no helpful message. Always include it in your provider stack. See `toast.md` for the full API.
+Import it in `main.tsx`:
 
 ```tsx
-import { createRoot } from 'react-dom/client'
-import { ThemeProvider, studioTheme, ToastProvider } from '@sanity/ui'
-import App from './App'
 import './reduced-motion.css'
-import '@sanity-labs/ui-poc/styles.css'
-
-createRoot(document.getElementById('root')!).render(
-  <ThemeProvider theme={studioTheme}>
-    <ToastProvider>
-      <App />
-    </ToastProvider>
-  </ThemeProvider>,
-)
 ```
 
-> ⚠ **Both imports are required.**
-> - `reduced-motion.css` — suppresses animations for users with vestibular disorders.
-> - `@sanity-labs/ui-poc/styles.css` — **required for all @sanity-labs/ui-poc component styles** (Box, Flex, Grid, Heading, Text, Card). Without this import, components render silently unstyled with no error messages.
->
-> **If `Box`, `Flex`, or `Grid` appear to have no borders, padding, or layout behaviour, this import is missing.**
+Sanity UI transitions do not respect `prefers-reduced-motion` at the library level. This file overrides them globally.
 
-## App.tsx — full scaffold
+---
 
-This file creates a three-region layout. It includes a navigation sidebar, a main content area with a toolbar, and a document list. It follows the accessibility standards from the component documentation.
+## Step 6: Set the page language
 
-```tsx
-import { useState } from 'react'
-import {
-  Stack,
-  Button,
-  TextInput,
-  Badge,
-} from '@sanity/ui'
+In `index.html`, set `lang="en"` on the `<html>` element:
 
-// Box, Flex, Grid, Divider, Heading, Text, and Card come from @sanity-labs/ui-poc — NOT from @sanity/ui
-import { Box, Flex, Heading, Text, Card } from '@sanity-labs/ui-poc'
-
-import { SearchIcon, AddIcon, MenuIcon, CloseIcon } from '@sanity/icons'
-
-const DOCUMENTS = ['Getting Started', 'API Reference', 'Design Tokens']
-
-function App() {
-  const [sidebarOpen, setSidebarOpen] = useState(true)
-  return (
-    <Flex flexWrap="wrap" minHeight="100vh">
-      {/* Navigation sidebar — renders as <nav> landmark */}
-      {sidebarOpen && (
-        <Box
-          as="nav"
-          aria-label="Main navigation"
-          borderRight
-          width="260px"
-          flexShrink={0}
-          overflowY="auto"
-        >
-          <Stack>
-            <Box padding={3} borderBottom>
-              <Flex alignItems="center" justifyContent="space-between">
-                <Heading level={2}>Studio</Heading>
-                <Button
-                  mode="bleed"
-                  icon={CloseIcon}
-                  aria-label="Close navigation"
-                  onClick={() => setSidebarOpen(false)}
-                />
-              </Flex>
-            </Box>
-            <Box padding={3}>
-              <Stack space={4}>
-                <TextInput
-                  id="nav-search"
-                  icon={SearchIcon}
-                  placeholder="Search content..."
-                  aria-label="Search content"
-                />
-                <Stack space={3}>
-                  <Text size={1} weight="medium">Documents</Text>
-                  <Text size={1} muted>Authors</Text>
-                  <Text size={1} muted>Settings</Text>
-                </Stack>
-              </Stack>
-            </Box>
-          </Stack>
-        </Box>
-      )}
-      {/* Main content — renders as <main> landmark */}
-      <Flex
-        as="main"
-        flexDirection="column"
-        flexGrow={1}
-        flexShrink={1}
-        flexBasis="0"
-        minWidth="0"
-        overflow="hidden"
-      >
-        {/* Toolbar */}
-        <Box padding={3} borderBottom>
-          <Flex alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={2}>
-            <Flex alignItems="center" gap={3} minWidth="0">
-              {!sidebarOpen && (
-                <Button
-                  mode="bleed"
-                  icon={MenuIcon}
-                  aria-label="Show navigation"
-                  onClick={() => setSidebarOpen(true)}
-                />
-              )}
-              <Heading
-                level={1}
-                lines={1}
-              >
-                All Documents
-              </Heading>
-            </Flex>
-            <Button text="New document" icon={AddIcon} tone="default" />
-          </Flex>
-        </Box>
-        {/* Content list */}
-        <Box padding={4} flexGrow={1} overflowY="auto">
-          <Stack space={3}>
-            {DOCUMENTS.map((title) => (
-              <Card key={title}>
-                <Flex alignItems="center" justifyContent="space-between">
-                  <Stack space={2}>
-                    <Heading level={2}>{title}</Heading>
-                    <Text size={1} muted>Last edited 2 hours ago</Text>
-                  </Stack>
-                  <Badge tone="positive">Published</Badge>
-                </Flex>
-              </Card>
-            ))}
-          </Stack>
-        </Box>
-      </Flex>
-    </Flex>
-  )
-}
-
-export default App
+```html
+<html lang="en">
 ```
+
+Without this, screen readers cannot detect the page language (WCAG 3.1.1 A).
+
+---
 
 ## Run it
 
@@ -343,266 +398,89 @@ export default App
 npm run dev
 ```
 
-Open `http://localhost:5173` in a browser. You should see a sidebar with a search field on the left and a document list on the right.
+Open `http://localhost:5173`. You should see a sidebar with search on the left and a document list on the right.
 
-## What the scaffold gives you
+---
 
-| **Feature** | **How it works** |
-| --- | --- |
-| Landmark structure | `Box as="nav"` or `Flex as="nav"` and `Flex as="main"` create `<nav>` and `<main>` elements. Screen readers list them as landmarks. |
-| Responsive sidebar | `width="260px"` on the sidebar and `flexWrap="wrap"` on the outer Flex container. At 320px the sidebar stacks above the content instead of overflowing. |
-| Toolbar reflow | `flexWrap="wrap"` on the toolbar Flex. The heading and button flow to separate lines at narrow widths instead of overflowing. |
-| Heading hierarchy | One `<h1>` for the content area title ("All Documents"). `<h2>` for the sidebar name and each document card heading. No levels are skipped. |
+## What you built
+
+| Feature | How it works |
+|---------|-------------|
+| Landmarks | `Box as="nav"` and `Flex as="main"` create `<nav>` and `<main>` for screen readers. |
+| Responsive sidebar | `flexWrap="wrap"` on the outer Flex. At 320px the sidebar stacks above the content. |
+| Toolbar reflow | `flexWrap="wrap"` on the toolbar Flex. Heading and button wrap at narrow widths. |
+| Heading hierarchy | One `<h1>` for the page title. `<h2>` for sidebar and card headings. No skipped levels. |
 | Page language | `<html lang="en">` in `index.html`. |
-| Icon-only buttons | `aria-label` on every button that has no visible text (`CloseIcon`, `MenuIcon`). |
-| Form input | `aria-label` on the search `TextInput` provides an accessible name for screen readers. |
-| Reduced motion | `reduced-motion.css` cancels transitions when the user prefers reduced motion. |
+| Icon-only buttons | `aria-label` on every button without visible text. |
+| Form input | `aria-label` on the search `TextInput`. |
+| Reduced motion | `reduced-motion.css` cancels transitions for users who prefer reduced motion. |
 
-## Key patterns to remember
+---
 
-### ThemeProvider wraps everything
+## Key patterns
 
-Every Sanity UI component reads color, spacing, and font values from the theme. Without `ThemeProvider`, components render with no styles.
+### Box vs Flex vs Card
+
+| Component | Use for | Adds a visual surface? |
+|-----------|---------|----------------------|
+| `Box` | Padding, borders, scroll containers, landmarks | No |
+| `Flex` | Row/column layout with alignment and gap | No |
+| `Card` | Content that needs a background, border, and tone | Yes |
+
+Do not use `Card` for toolbars, sidebars, or scroll wrappers. Use `Box` or `Flex`.
+
+### Stack vs Flex for vertical layout
+
+| Use `Stack` | Use `Flex flexDirection="column"` |
+|-------------|----------------------------------|
+| Simple vertical list with even spacing | Container needs `flexGrow`, `overflow`, or `minHeight` |
+| Spacing prop: `space={3}` | Spacing prop: `gap={3}` |
+
+### Card ignores layout props
+
+`Card` silently ignores `flexGrow`, `minWidth`, `overflow`, and all other layout props. Wrap it in a `Box`:
 
 ```tsx
-import { ThemeProvider, studioTheme } from '@sanity/ui'
+{/* ✗ — flexGrow on Card does nothing */}
+<Card flexGrow={1}>...</Card>
 
-<ThemeProvider theme={studioTheme}>
-  {/* All Sanity UI components go here */}
-</ThemeProvider>
-```
-
-### Box and Flex are structural containers
-
-Box and Flex handle structural layout — landmarks, toolbars, padding regions, and scroll containers. They do not add a background color or visual surface. Use them anywhere you are grouping or positioning elements without needing a distinct content surface.
-
-```tsx
-// Box, Flex, Heading, Text, and Card come from @sanity-labs/ui-poc — NOT from @sanity/ui
-import { Box, Flex, Heading, Text, Card } from '@sanity-labs/ui-poc'
-
-// Everything else comes from @sanity/ui
-import { Button } from '@sanity/ui'
-```
-
-```jsx
-{/* Navigation sidebar — structural landmark, no card surface */}
-<Box
-  as="nav"
-  aria-label="Main navigation"
-  borderRight
-  width="260px"
-  flexShrink={0}
->
-  {/* Sidebar header — a structural divider, not a card */}
-  <Box padding={3} borderBottom>
-    <Flex alignItems="center" justifyContent="space-between">
-      <Heading level={2}>Studio</Heading>
-    </Flex>
-  </Box>
-  {/* content */}
+{/* ✓ — Box handles layout, Card handles the surface */}
+<Box flexGrow={1}>
+  <Card>...</Card>
 </Box>
-
-{/* Main content area — structural landmark, Flex for column direction */}
-<Flex
-  as="main"
-  flexDirection="column"
-  flexGrow={1}
-  flexShrink={1}
-  flexBasis="0"
-  minWidth="0"
-  overflow="hidden"
->
-  {/* Toolbar — structural section, not a card */}
-  <Box padding={3} borderBottom>
-    {/* content */}
-  </Box>
-</Flex>
 ```
 
-### Card is a content surface
+### Form inputs need a Label
 
-Card renders a distinct visual surface with a background, border, and optional tone. Use it to group related content that deserves its own visual container. Do not use Card for structural UI regions like sidebars, toolbars, or scroll containers — those are layout, not content surfaces.
+Every `Select`, `TextInput`, `TextArea`, and `Switch` must have an accessible name — either a `Label` linked by `htmlFor`/`id`, or an `aria-label` prop.
 
-**Density quick reference** — Card uses `density` instead of separate `padding` and `radius` props:
-
-| `density` | Padding | Radius | Use when |
-|-----------|---------|--------|----------|
-| `"tight"` | 8px | 3px | High-density lists, compact items |
-| `"medium"` (default) | 12px | 7px | Standard content cards |
-| `"loose"` | 20px | 11px | Low-density layouts, featured cards |
-
-```jsx
-{/* ✓ A content surface — grouped content on a distinct background */}
-<Card>
-  <Flex alignItems="center" justifyContent="space-between">
-    <Stack space={2}>
-      <Heading level={2}>Document title</Heading>
-      <Text size={1} muted>Last edited 2 hours ago</Text>
-    </Stack>
-    <Badge tone="positive">Published</Badge>
-  </Flex>
-</Card>
-
-{/* ✗ Card used as a toolbar — use Box instead */}
-<Card>
-  <Flex alignItems="center" justifyContent="space-between">
-    <Heading level={1}>All Documents</Heading>
-    <Button text="New document" icon={AddIcon} />
-  </Flex>
-</Card>
-```
-
-### Stack spaces children in a vertical column
-
-Stack adds even spacing between children. The prop is `space`, not `gap`. (`Flex` uses `gap`; `Stack` uses `space`. They are different props on different components.)
-
-```jsx
-<Stack space={3}>
-  <Heading level={2}>Title</Heading>
-  <Text size={1}>Description</Text>
+```tsx
+<Stack space={1}>
+  <Label htmlFor="category">Category</Label>
+  <Select id="category" onChange={handleChange}>
+    <option value="all">All</option>
+  </Select>
 </Stack>
-```
-
-### Flex lays children out in a row
-
-Flex defaults to horizontal direction. Use `alignItems`, `justifyContent`, `gap`, and `flexWrap` to control the layout.
-
-> ⚠️ **Every Flex with 2+ children must set `flexWrap="wrap"`.** This includes both the outer page layout and any inner toolbars or action rows. Missing wrap on even one Flex causes a 320px reflow failure (WCAG 1.4.10 AA). See `flex.md` → Accessibility → Reflow checklist.
-
-```jsx
-<Flex alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={2}>
-  <Heading level={1}>Page Title</Heading>
-  <Button text="Action" />
-</Flex>
-```
-
-### Heading needs a `level` prop
-
-The `@sanity-labs/ui-poc` Heading renders `<h2>` by default when you omit `level`. That means silently using the wrong heading level for the content hierarchy. Always set `level` explicitly. Use `size` for visual sizing — size and heading level are independent.
-
-```jsx
-{/* ✗ Defaults to <h2> — may be the wrong semantic level for this context */}
-<Heading size={0}>Title</Heading>
-
-{/* ✓ Renders as <h1> — the content area page title */}
-<Heading level={1} size={0}>Page Title</Heading>
-
-{/* ✓ Renders as <h2> — sidebar name, section headings, list items */}
-<Heading level={2} size={0}>Section Title</Heading>
 ```
 
 ### Icon-only buttons need aria-label
 
-When a button has only an icon and no `text` prop, add `aria-label`. The `tooltip` prop does not set an accessible name — it is only visible on hover and does not reach screen readers.
+The `tooltip` prop does not set an accessible name. Add `aria-label`:
 
-```jsx
-{/* ✗ No accessible name */}
-<Button icon={SearchIcon} mode="bleed" />
-
-{/* ✓ Screen readers announce "Search" */}
+```tsx
 <Button icon={SearchIcon} mode="bleed" aria-label="Search" />
 ```
 
-### Form inputs always need a Label
-
-Every `Select`, `TextInput`, `TextArea`, and `Switch` must be wrapped in a `Stack` with an associated `Label`. A bare input with no label is an axe `select-name` critical violation (WCAG 4.1.2 A).
-
-```tsx
-{/* ✗ — axe critical: no accessible name */}
-<Select onChange={handleChange}>...</Select>
-
-{/* ✓ — required for all form inputs */}
-<Stack space={1}>
-  <Label htmlFor="category">Category</Label>
-  <Select id="category" onChange={handleChange}>...</Select>
-</Stack>
-```
-
-The same pattern applies to `TextInput`, `TextArea`, and `Switch`. See `select.md`, `textinput.md`, `textarea.md`, and `switch.md`.
+---
 
 ## Next steps
 
-- Add an inspector sidebar with `Box as="aside" aria-label="Inspector"`.
-- Add a `Menu` and `MenuButton` for dropdown actions. `MenuButton` requires an `id` prop for ARIA and a `popover` prop with `portal: true` inside `overflow: hidden` containers. See `menu.md`.
-- Use `tone` on Card and Button to show status (`"positive"`, `"caution"`, `"critical"`). Pair each tone with an icon. Do not use `tone="primary"` in default mode — it fails contrast.
-- Use `useToast()` for async action feedback. See `toast.md` for the full `toast.push()` API.
-- **Custom brand colors (warm backgrounds, dark sidebars, amber accents):** Override existing Sanity UI palette tokens (`--gray-*`, `--blue-*`, etc.) on `:root` in `global.css`. Use `Card inverted` for dark regions. Do not use inline `style={{ background }}` or `style={{ color }}` on Sanity UI components. See `patterns-custom-theming.md`.
-- See the component docs for Button, Card, Stack, Flex, Box, Heading, and Text for full prop references and accessibility guidelines.
-
----
-
-## Available components
-
-All components come from one of two packages. Importing from the wrong source produces no error but silently renders the wrong component.
-
-### From `@sanity-labs/ui-poc`
-
-```tsx
-import { Box, Flex, Grid, Card, Heading, Text, Divider } from '@sanity-labs/ui-poc'
-```
-
-| Component | Purpose |
-|-----------|---------|
-| `Box` | Structural container — padding, margin, borders, sizing, overflow |
-| `Flex` | One-dimensional layout — row or column with alignment and gap |
-| `Grid` | Two-dimensional layout — rows and columns |
-| `Card` | Content surface — background, border, tone, density |
-| `Heading` | Semantic heading (`level` 1–6, visual `size` 0–5) |
-| `Text` | Body copy, captions, metadata (`size` 0–4, `color`, `muted`, `lines`) |
-| `Divider` | Horizontal rule — thematic break between sections |
-
-### From `@sanity/ui`
-
-```tsx
-import {
-  Avatar, Badge, Button, Checkbox,
-  Dialog, Inline, Label,
-  Menu, MenuButton, MenuDivider, MenuItem,
-  Popover, Select, Spinner, Stack, Switch,
-  Tab, TabList, TabPanel,
-  TextArea, TextInput, Tooltip,
-  ThemeProvider, studioTheme, buildTheme,
-  ToastProvider, useToast,
-} from '@sanity/ui'
-```
-
-| Component | Purpose |
-|-----------|---------|
-| `Avatar` | User profile photo or initials |
-| `Badge` | Small status or count label |
-| `Button` | Action trigger — modes: `default`, `ghost`, `bleed` |
-| `Checkbox` | Boolean form input |
-| `Dialog` | Modal overlay |
-| `Inline` | Horizontal wrapping row for variable-width items |
-| `Label` | Form field label — always pair with `htmlFor` |
-| `Menu` | Dropdown menu container |
-| `MenuButton` | Button that opens a Menu — requires `id` prop |
-| `MenuDivider` | Separator inside a Menu |
-| `MenuItem` | Clickable item inside a Menu |
-| `Popover` | Non-modal floating panel |
-| `Select` | Native dropdown — one value from a fixed list. See `select.md`. |
-| `Spinner` | Loading indicator |
-| `Stack` | Vertical column with even `space` between children |
-| `Switch` | Toggle for boolean settings |
-| `Tab` / `TabList` / `TabPanel` | Tabbed navigation |
-| `TextArea` | Multi-line text input |
-| `TextInput` | Single-line text input. See `textinput.md`. |
-| `Tooltip` | Hover/focus label for icon-only elements |
-| `ThemeProvider` | Root theme context — required at app root |
-| `studioTheme` | Pre-built theme object |
-| `buildTheme()` | Customisable theme builder |
-| `ToastProvider` | Required for `useToast()` — must be inside `ThemeProvider` |
-| `useToast()` | Hook to push toast notifications |
-
-### Not available — use native HTML
-
-| Need | Use instead |
-|------|-------------|
-| Multi-line text | `TextArea` from `@sanity/ui` |
-| Date / time picker | Native `<input type="date">` / `<input type="time">` |
-| Multi-select | Composed `Checkbox` list |
-| Data table | Native `<table>` — see `table.md` |
-| Navigation item | `Menu` + `MenuItem` or `Button mode="bleed"` — see `patterns-navigation.md` |
+- Add a right-side inspector panel with `Box as="aside" aria-label="Inspector"`.
+- Add dropdown actions with `MenuButton`. It needs an `id` prop for ARIA and `popover={{ portal: true }}` inside scrollable containers. See `menu.md`.
+- Use `tone` on Card and Button for status: `"positive"`, `"caution"`, `"critical"`. Always pair with an icon.
+- Show feedback with `useToast()`. See `toast.md`.
+- Add custom brand colors by overriding CSS variables. See `patterns-custom-theming.md`.
+- Build sidebar navigation with `Menu` + `MenuItem`. See the [Sidebar navigation pattern](../patterns/navigation.md).
 
 # Code style guide
 
@@ -687,39 +565,6 @@ See `box.md` → "Inline style alternatives" for the full lookup table.
 ---
 
 ## TypeScript
-
-### Event handlers: use `currentTarget`, not `target`
-
-> **This is the canonical reference for input event handling in Sanity UI.** The `select.md`, `textinput.md`, and `textarea.md` docs all follow this same pattern. When in doubt, refer here.
-
-Sanity UI input components (`TextInput`, `Select`, `TextArea`) wrap native browser events. Use `event.currentTarget` to read values and cast the event type explicitly.
-
-```tsx
-// ✗ — event.target may be the wrong type
-<TextInput onChange={(e) => setValue(e.target.value)} />
-
-// ✓
-<TextInput
-  onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-    setValue(e.currentTarget.value)
-  }}
-/>
-
-// ✓ — same pattern for Select
-<Select
-  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
-    setFilter(e.currentTarget.value)
-  }}
-/>
-
-// ✓ — Switch uses checked, not value
-<Switch
-  checked={isEnabled}
-  onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-    setIsEnabled(e.currentTarget.checked)  // boolean, not string
-  }}
-/>
-```
 
 ### Responsive arrays: use `null` to inherit, not `undefined`
 
@@ -816,7 +661,7 @@ These six inline styles appear most often in test runs. Every one has a prop equ
 
 Two other frequent mistakes are not Box/Flex prop issues but component-choice issues:
 
-- **Native `<button style={{...}}>` for nav items** — use `Menu` + `MenuItem` or `Button mode="bleed"` instead. See `patterns-navigation.md`.
+- **Native `<button style={{...}}>` for nav items** — use `Menu` + `MenuItem` or `Button mode="bleed"` instead. See the [Sidebar navigation pattern](../patterns/navigation.md).
 - **Inline `style={{...}}` on `<th>` and `<td>`** — put table styles in `global.css` using palette tokens. See `table.md`.
 
 ## Quick lookup: CSS property → prop
@@ -1055,12 +900,12 @@ These are the most commonly encountered patterns that **fail without any error, 
 | # | Trigger | Symptom | Fix |
 |---|---------|---------|-----|
 | 1 | Placing `flexGrow`, `minWidth`, `overflow`, or any layout prop directly on `Card` | Layout silently broken — card doesn't grow, overflow is ignored | Wrap Card in `Box` or `Flex`: `<Box flexGrow={1}><Card>` |
-| 2 | Omitting `level` on `Heading` | `<h2>` rendered regardless of context, breaking heading hierarchy | Always set `level` explicitly: `<Heading level={1}>` |
+| 2 | Omitting `level` on `Heading` | `<h2>` rendered regardless of context, breaking heading hierarchy | Always set `level` explicitly: `<Heading >` |
 | 3 | Using `tone="primary"` on `Button` or `Badge` | Button renders but fails WCAG AA contrast (4.29:1) — looks correct, ships broken | Use `mode="default" tone="default"` for primary actions |
 | 4 | Passing `flexGrow`, `flexShrink`, or `flexBasis` to `Stack` | Stack doesn't grow or shrink — layout broken silently | Use `<Flex flexDirection="column" gap={3}>` or wrap in `<Box flexGrow={1}>` |
 | 5 | Importing `Box`, `Flex`, `Card`, `Heading`, or `Text` from `@sanity/ui` | Different prop API, no error — e.g. `padding` on Box silently does nothing | Import these from `@sanity-labs/ui-poc`: `import { Box } from '@sanity-labs/ui-poc'` |
-| 6 | Omitting `import '@sanity-labs/ui-poc/styles.css'` from `main.tsx` | All ui-poc components render as unstyled HTML — no error thrown | Add the import to `main.tsx`; see quick-start.md |
-| 7 | Using `@vitejs/plugin-react-swc` instead of `@vitejs/plugin-react` | All styled-components styles missing — completely unstyled output, no error | Replace the plugin; see quick-start.md setup |
+| 6 | Omitting `import '@sanity-labs/ui-poc/styles.css'` from `main.tsx` | All ui-poc components render as unstyled HTML — no error thrown | Add the import to `main.tsx`; see the [Getting started guide](../process/getting-started-developer.md) |
+| 7 | Using `@vitejs/plugin-react-swc` instead of `@vitejs/plugin-react` | All styled-components styles missing — completely unstyled output, no error | Replace the plugin; see the [Getting started guide](../process/getting-started-developer.md) setup |
 | 8 | Using `space` prop on `Flex` (or `gap` on `Stack`) | Spacing has no effect — silently wrong prop on wrong component | `Flex` uses `gap`; `Stack` uses `space` — they are not interchangeable |
 | 9 | Using `var(--card-border-color)` outside a `Card` ancestor | Border is invisible — CSS variable resolves to `undefined` silently | Use `var(--gray-200)` — it resolves everywhere |
 | 10 | Omitting `id` on `MenuButton` | ARIA relationship broken — screen readers can't associate trigger with menu | Always set `id`: `<MenuButton id="my-menu" ...>` |
@@ -1068,7 +913,7 @@ These are the most commonly encountered patterns that **fail without any error, 
 | 12 | Wrapping a non-ref-forwarding component in `Tooltip` | Tooltip never appears — no error | Use a native element or Sanity UI component as the child, or wrap with `React.forwardRef` |
 | 13 | `Text` inside `Stack` without `as="p"` | Text renders as inline `<span>`, items crowd together | Set `as="p"` on Text components used as block-level content |
 | 14 | Using `Card inverted` or dark inline styles on structural regions (sidebar, header) | Visual inconsistency — dark structural regions are not a supported pattern | Keep all structural regions light-themed; see `layouts.md` |
-| 15 | Using `icon` prop and `children` together on `MenuItem` | Icon renders on its own line above the children — label and badge drop to the next line | Use `icon` + `text` prop (no children), or put everything including the icon in `children` (no `icon` prop). See `patterns-navigation.md`. |
+| 15 | Using `icon` prop and `children` together on `MenuItem` | Icon renders on its own line; label and badge drop below | Use `icon` + `text` (no children), or all content in `children` (no `icon`). See [Sidebar navigation](../patterns/navigation.md) |
 
 ---
 
@@ -1105,9 +950,9 @@ Use `Box` or `Flex` for structural regions that have no visual surface (sidebars
 
 **Headings (§2)**
 
-- ✓ Do set `level={1}` on the page title and `level={2}` on list items below it.
+- ✓ Do set `` on the page title and `as="h2"` on list items below it.
 - ✓ Do use `size` for visual sizing — it is independent of the heading level.
-- ✓ Do use `level={2}` for the sidebar/app name. Only the content area title is h1.
+- ✓ Do use `as="h2"` for the sidebar/app name. Only the content area title is h1.
 - ✗ Don't skip from `1` to `3`. Use `2` for the next level down.
 - ✗ Don't use two `1` levels. One page, one h1.
 - ✗ Don't omit the `level` prop on Heading.
@@ -1196,49 +1041,49 @@ Use the `as` prop on `Box` or `Flex` to render landmark elements:
 
 ### Every page needs exactly one h1
 
-Headings give screen reader users an outline of the page. A page with zero headings forces users to read every element in sequence. Use `<Heading level={1}>` for the page title and `<Heading level={2}>` for each major section.
+Headings give screen reader users an outline of the page. A page with zero headings forces users to read every element in sequence. Use `<Heading >` for the page title and `<Heading as="h2">` for each major section.
 
-**Only one h1 per page.** The h1 is the main content title — not the app name or studio label. If your sidebar has a heading like "My Studio," make it `<Heading level={2}>`. The content area title ("All Documents") is the h1. Two h1 elements confuse screen readers about which heading represents the page.
+**Only one h1 per page.** The h1 is the main content title — not the app name or studio label. If your sidebar has a heading like "My Studio," make it `<Heading as="h2">`. The content area title ("All Documents") is the h1. Two h1 elements confuse screen readers about which heading represents the page.
 
 ```jsx
 // ✗ Two h1 elements — screen readers cannot determine the page title
-<Box as="nav"><Heading level={1}>My Studio</Heading></Box>
-<Box as="main"><Heading level={1}>Documents</Heading></Box>
+<Box as="nav"><Heading >My Studio</Heading></Box>
+<Box as="main"><Heading >Documents</Heading></Box>
 
 // ✓ One h1 for the page title — sidebar heading is h2
-<Box as="nav"><Heading level={2}>My Studio</Heading></Box>
-<Box as="main"><Heading level={1}>Documents</Heading></Box>
+<Box as="nav"><Heading as="h2">My Studio</Heading></Box>
+<Box as="main"><Heading >Documents</Heading></Box>
 ```
 
 ### Always set the `level` prop
 
-The `Heading` component defaults to `level={2}`. Set `level` on every `Heading`. This keeps the hierarchy clear and intentional.
+The `Heading` component defaults to `as="h2"`. Set `level` on every `Heading`. This keeps the hierarchy clear and intentional.
 
 ```jsx
 // ✗ Renders as <h2> by default — the level may be wrong
 <Heading>Page Title</Heading>
 
 // ✓ Renders as <h1> — screen readers find it
-<Heading level={1}>Page Title</Heading>
+<Heading >Page Title</Heading>
 ```
 
 ### Do not skip heading levels
 
 Heading levels must descend in sequence: H1 → H2 → H3. Do not skip from H1 to H3. The `level` prop sets the semantic level. The `size` prop sets the visual size. They are independent.
 
-**Rule: items in a list under an h1 are h2, not h3.** This is the most common heading skip. When a page title is `<Heading level={1}>` and you show a list of documents below it, each document heading must be `<Heading level={2}>`.
+**Rule: items in a list under an h1 are h2, not h3.** This is the most common heading skip. When a page title is `<Heading >` and you show a list of documents below it, each document heading must be `<Heading as="h2">`.
 
 ```jsx
 // ✗ Skips h2 — agents default to h3 for "small" list items
-<Heading level={1}>All Documents</Heading>
+<Heading >All Documents</Heading>
 <Card padding={3} border>
-  <Heading level={3}>Getting Started Guide</Heading>
+  <Heading as="h3">Getting Started Guide</Heading>
 </Card>
 
 // ✓ h2 follows h1 — use size={1} to make it look small
-<Heading level={1}>All Documents</Heading>
+<Heading >All Documents</Heading>
 <Card padding={3} border>
-  <Heading level={2}>Getting Started Guide</Heading>
+  <Heading as="h2">Getting Started Guide</Heading>
 </Card>
 ```
 
@@ -1518,7 +1363,7 @@ At 320px, the 260px sidebar plus any content exceeds the viewport.
 { /* ✗ FAILS EVERY TIME — no wrap on toolbar Flex */}
 <Flex as="main" flexGrow={1} flexShrink={1} flexBasis="0" minWidth="0" overflow="hidden" padding={4}>
   <Flex alignItems="center" justifyContent="space-between">
-    <Heading level={1}>All Documents</Heading>
+    <Heading >All Documents</Heading>
     <Button text="New document" icon={AddIcon} />
   </Flex>
 </Flex>
@@ -1526,7 +1371,7 @@ At 320px, the 260px sidebar plus any content exceeds the viewport.
 { /* ✓ PASSES — flexWrap="wrap" and gap={2} on toolbar Flex */ }
 <Flex as="main" flexGrow={1} flexShrink={1} flexBasis="0" minWidth="0" overflow="hidden" padding={4}>
   <Flex alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={2}>
-    <Heading level={1}>All Documents</Heading>
+    <Heading >All Documents</Heading>
     <Button text="New document" icon={AddIcon} tone="default" />
   </Flex>
 </Flex>
@@ -1582,7 +1427,7 @@ This scaffold passes all automated accessibility tests. Use it as a starting poi
       maxWidth="260px"
     >
       <Stack space={3}>
-        <Heading level={2}>Navigation</Heading>
+        <Heading as="h2">Navigation</Heading>
         {/* nav items */}
       </Stack>
     </Box>
@@ -1596,7 +1441,7 @@ This scaffold passes all automated accessibility tests. Use it as a starting poi
     >
       {/* Toolbar — wrap prevents overflow at 320px */}
       <Flex alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={2}>
-        <Heading level={1}>Page Title</Heading>
+        <Heading >Page Title</Heading>
         <Button text="New document" icon={AddIcon} tone="default" />
       </Flex>
 
@@ -1604,7 +1449,7 @@ This scaffold passes all automated accessibility tests. Use it as a starting poi
       <Stack space={3} marginTop={4}>
         {documents.map(doc => (
           <Card key={doc.id} padding={3} border radius={2}>
-            <Heading level={2}>{doc.title}</Heading>
+            <Heading as="h2">{doc.title}</Heading>
           </Card>
         ))}
       </Stack>
@@ -2136,29 +1981,27 @@ All items from the initial audit have been resolved. The table below tracks only
 
 # Color
 
-
-
 ## Principles
 
 ### Color is functional
 
-It expresses semantic meaning, intent, and hierarchy. Color is not a decorative element within the core Sanity product.
+Color is not a decorative element within the core Sanity product. It reinforces meaning, intent, and weight.
 
 ### Color is never a barrier to entry
 
-Never rely on color exclusively to convey meaning, indicate an action, or prompt a response. If color is your only cue (e:, relying solely on a red outline to indicate a form error), users with color blindness or low vision will not receive the intended message. Always pair semantic colors with text labels, icons, or other non-color information.
+Don't rely on color alone to convey meaning, indicate an action, or prompt a response. Users with color blindness or low vision will not see the intended message when color is the only use. Pair semantic colors with text labels, icons, or other non-color information.
 
 ### Color is used with restraint
 
-Better use of less is always preferred over "more on top of more". Keeping a limited palette of colors working harmoniously together is manageable; trying to balance dozens of colors leads to visual clashing and cognitive overload.
+Restained use of color makes each color more impactful. Keep a limited palette. Doing so helps avoid color clashes and cognitive overload.
 
 ## Best practices
 
-- Primary colors should be reserved for conveying high-emphasis, core actions that you want the user to take. Secondary colors should be used for medium-to-low emphasis actions, creating visual balance and ensuring the primary actions stand out.
-- Semantic & Status Communication: Color is an excellent supplement to indicate the severity of a message, helping to distance a minor issue from a critical error. Background colors should purposefully deliver specific meanings, such as information, success, warning, or error.
-- High-Intensity Backgrounds: Solid, bold semantic colors should be used on distinct UI elements (like badges or toast notifications) to immediately draw attention to a status.
-- Low-Intensity Backgrounds: Light tints (or "weak" colors) of semantic colors are safe to use as larger background areas or behind text, maintaining readability while still conveying the status.
-- Typography & Iconography: Text colors must be strictly managed to maintain readability hierarchy (e.g., separating default body text from subtle metadata). Icon colors should generally match their accompanying text colors to maintain visual consistency.
+- Primary colors are reserved for emphasis, core actions that you want the user to take. Secondary colors should be used for medium-to-low emphasis actions, creating visual balance and ensuring the primary actions stand out.
+- Color should emphasize the severity of a message. It helps  distance a minor issue from a critical error. Background colors should help convey specific meanings, such as information, success, warning, or error.
+- Elements that require the highest emphasis or immediate attention (like toast notifications) should display as inverted. The inverted palette creates strong contrast to quickly draw attention.
+- Low-intensity backgrounds should be used for medium emphasis and/or larger surface areas.
+- Paired text and icons should share the same tone to maintain visual consistency.
 
 ## Applying color in practice
 
@@ -2707,7 +2550,7 @@ Every layout prop that accepts a `Responsive<T>` type also accepts an array. Eac
 
 **Text size — larger at wider viewports:**
 ```tsx
-<Heading level={1} size={[1, null, null, 3]} />
+<Heading  size={[1, null, null, 3]} />
 {/* size 1 on mobile, size 3 on 900px+ */}
 ```
 
@@ -2754,13 +2597,13 @@ The three most common causes of failure:
 ```tsx
 {/* ✗ FAILS — heading + button overflow at 320px */}
 <Flex alignItems="center" justifyContent="space-between">
-  <Heading level={1}>All Documents</Heading>
+  <Heading >All Documents</Heading>
   <Button text="New document" icon={AddIcon} />
 </Flex>
 
 {/* ✓ PASSES — button wraps to next line at narrow widths */}
 <Flex alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={2}>
-  <Heading level={1}>All Documents</Heading>
+  <Heading >All Documents</Heading>
   <Button text="New document" icon={AddIcon} />
 </Flex>
 ```
@@ -2844,14 +2687,14 @@ This is the most commonly missed prop. By default, a flex child's minimum size i
 ```tsx
 {/* ✗ Long heading in flex row pushes layout past viewport */}
 <Flex gap={3}>
-  <Heading level={1}>A very long document title that overflows</Heading>
+  <Heading >A very long document title that overflows</Heading>
   <Button icon={CloseIcon} aria-label="Close" />
 </Flex>
 
 {/* ✓ Heading container can shrink; text truncates instead of overflowing */}
 <Flex gap={3}>
   <Box flexGrow={1} minWidth="0">
-    <Heading level={1} lines={1}>A very long document title that overflows</Heading>
+    <Heading  lines={1}>A very long document title that overflows</Heading>
   </Box>
   <Button icon={CloseIcon} aria-label="Close" flexShrink={0} />
 </Flex>
@@ -2883,14 +2726,14 @@ Use the `lines` prop on `Text` and `Heading` to truncate text at a specific numb
 ```tsx
 {/* ✗ Inline overflow styles bypass the spacing scale and break in flex containers */}
 <Heading
-  level={2}
+  as="h2"
   style={{ overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}
 >
   Long title
 </Heading>
 
 {/* ✓ Single-line truncation with full text accessible via tooltip or title */}
-<Heading level={2} lines={1}>Long title</Heading>
+<Heading as="h2" lines={1}>Long title</Heading>
 
 {/* ✓ Multi-line clamp */}
 <Text size={1} lines={3}>
@@ -2902,7 +2745,7 @@ Use the `lines` prop on `Text` and `Heading` to truncate text at a specific numb
 
 ```tsx
 <Tooltip content={fullTitle} placement="bottom">
-  <Heading level={2} lines={1}>{fullTitle}</Heading>
+  <Heading as="h2" lines={1}>{fullTitle}</Heading>
 </Tooltip>
 ```
 
@@ -3170,7 +3013,7 @@ Tones map a semantic intent to a palette hue. They are the primary way to apply 
 
 Not every component supports every tone. Check the component doc for its accepted values. The visual treatment of a tone (hue, saturation, contrast) varies by component. A `"critical"` Button is a solid red fill. A `"critical"` Card is a light red tint. The meaning is the same. The intensity differs.
 
-**`tone="primary"` fails WCAG AA contrast.** The default theme produces white text (`#fff`) on `#556bfc` for `tone="primary"` in default mode. The contrast ratio is 4.29:1 — below the 4.5:1 AA threshold. Automated tests flag this every time. Use `tone="default"` for primary actions. Do not use `tone="primary"` on Buttons, Cards, or MenuItems that display standard-size text. See `accessibility-standards.md` §4 for the full table of palette colors that fail with white text.
+**`tone="primary"` fails WCAG AA contrast.** The default theme produces white text (`#fff`) on `#556bfc` for `tone="primary"` in default mode. The contrast ratio is 4.29:1 — below the 4.5:1 AA threshold. Automated tests flag this every time. Use `tone="default"` for primary actions. Do not use `tone="primary"` on Buttons, Cards, or MenuItems that display standard-size text. See the [Accessibility foundation](../foundations/accessibility.md) §4 for the full table of palette colors that fail with white text.
 
 ### States
 
@@ -4804,11 +4647,82 @@ Not every component accepts the props above. Card, Stack, and Button ignore flex
 
 See `style-overrides.md` for full examples and canonical workarounds.
 
-# Box
+# Components
 
+All Sanity UI components come from one of two packages. Importing from the wrong source produces no error — the component silently renders with a different API.
+
+## From `@sanity-labs/ui-poc`
+
+```tsx
+import { Box, Flex, Grid, Card, Heading, Text, Divider } from '@sanity-labs/ui-poc'
+```
+
+| Component | Purpose |
+|-----------|---------|
+| `Box` | Structural container — padding, margin, borders, sizing, overflow |
+| `Flex` | One-dimensional layout — row or column with alignment and gap |
+| `Grid` | Two-dimensional layout — rows and columns |
+| `Card` | Content surface — background, border, tone, density |
+| `Heading` | Semantic heading (`level` 1–6, visual `size` 0–5) |
+| `Text` | Body copy, captions, metadata (`size` 0–4, `color`, `muted`, `lines`) |
+| `Divider` | Horizontal rule — thematic break between sections |
+
+## From `@sanity/ui`
+
+```tsx
+import {
+  Avatar, Badge, Button, Checkbox,
+  Dialog, Inline, Label,
+  Menu, MenuButton, MenuDivider, MenuItem,
+  Popover, Select, Spinner, Stack, Switch,
+  Tab, TabList, TabPanel,
+  TextArea, TextInput, Tooltip,
+  ThemeProvider, studioTheme, buildTheme,
+  ToastProvider, useToast,
+} from '@sanity/ui'
+```
+
+| Component | Purpose |
+|-----------|---------|
+| `Avatar` | User profile photo or initials |
+| `Badge` | Small status or count label |
+| `Button` | Action trigger — modes: `default`, `ghost`, `bleed` |
+| `Checkbox` | Boolean form input |
+| `Dialog` | Modal overlay |
+| `Inline` | Horizontal wrapping row for variable-width items |
+| `Label` | Form field label — always pair with `htmlFor` |
+| `Menu` | Dropdown menu container |
+| `MenuButton` | Button that opens a Menu — requires `id` prop |
+| `MenuDivider` | Separator inside a Menu |
+| `MenuItem` | Clickable item inside a Menu |
+| `Popover` | Non-modal floating panel |
+| `Select` | Native dropdown — one value from a fixed list |
+| `Spinner` | Loading indicator |
+| `Stack` | Vertical column with even `space` between children |
+| `Switch` | Toggle for boolean settings |
+| `Tab` / `TabList` / `TabPanel` | Tabbed navigation |
+| `TextArea` | Multi-line text input |
+| `TextInput` | Single-line text input |
+| `Tooltip` | Hover/focus label for icon-only elements |
+| `ThemeProvider` | Root theme context — required at app root |
+| `studioTheme` | Pre-built theme object |
+| `buildTheme()` | Customisable theme builder |
+| `ToastProvider` | Required for `useToast()` — must be inside `ThemeProvider` |
+| `useToast()` | Hook to push toast notifications |
+
+## Not available — use native HTML
+
+| Need | Use instead |
+|------|-------------|
+| Date / time picker | Native `<input type="date">` / `<input type="time">` |
+| Multi-select | Composed `Checkbox` list |
+| Data table | Native `<table>` — see `table.md` |
+| Navigation item | `Menu` + `MenuItem` or `Button mode="bleed"` — see the [Sidebar navigation pattern](../patterns/navigation.md) |
+
+# Box
 Used as the lowest-level building block for containing UI elements.
 
-### Basic example
+## Basic example
 
 **Source:** `@sanity-labs/ui-poc`
 ```tsx
@@ -4820,8 +4734,7 @@ import { Box } from '@sanity-labs/ui-poc'
 
 ```
 
-
-### API
+## API
 
 Box's own props are `as` and `display`. Everything else it accepts comes from shared layout props.
 
@@ -4832,49 +4745,40 @@ Box's own props are `as` and `display`. Everything else it accepts comes from sh
 
 Box also inherits shared layout props (padding, margin, sizing, border, overflow, position, tone, flex-child, grid-child). See "All available props" at the bottom of this document for the complete reference.
 
-### **Usage guidelines**
+## Usage guidelines
 
-#### **When to use:**
+### When to use
 
 - As a container for child elements  
 - To  apply padding or margin to a group of elements  
 - To create basic visual styling (such as background, border, shadow, etc.) for the purposes of composing a custom component
 
-#### **When not to use:**
+### When not to use
 
 - As an interactive element  
 - As a way to stack or align one of more child elements. Use Flex, Stack, or Inline instead.  
 - When you want to render an element with `display: flex`. Don't use inline styles to render a Box with flex styles. Use Flex instead.
 - As a way to display children in a grid layout. Use Grid instead.  
 - To act as a container for content that would otherwise be reserved for Card.  
-- To center content at a max width. Use **Container** instead — it sets `max-width` and centers itself.
-- 
-#### **Choosing between Box, Flex, Grid, Stack, Inline, and Container:**
+- To center content at a max width. Use **Container** instead — it sets `max-width` and centers itself. 
 
-| Component | Dimensions | Adds visual styling | Use case |
-| :---- | :---- | :---- | :---- |
-| Box | Spacing and structure | Yes (background and, border) | Wrapping elements with padding or margin |
-| Flex | One-dimensional (row or column) | Yes (background and, border) | Toolbars, split layouts, aligned groups of elements |
-| Grid | Two-dimensional (rows \+ columns) | Yes (background and, border) | Card grids, dashboards, aligned column layouts |
-| Stack | One-dimensional (column only) | No | Vertical sequences of elements with uniform spacing |
-| Inline | One-dimensional (wrapping row) | No | Badges, Buttons, or any set of variable-width items that wrap |
-| Container | Centered column | No | Constraining content width and centering it |
 
-### **Best practices**
+## Best practices
 
-#### **Do**
+### Do
 
 - Use Box's styling props, such as `tone`, `padding`, `width`, etc. to adjust the visual appearance of the component. Refer to **core component props** to review available styling props. 
-- Use padding over margin when possible to avoid spacing issues related to margin collapse
+- Use padding over margin when possible. Padding keeps spacing inside the component's own box. Margin creates spacing that depends on siblings and parent context, making layout harder to predict — especially with margin collapse.
 
-#### **Don't**
+### Don't
+
 - **Never use `as="button"`.** `Box as="button"` does not reset browser defaults — the result has a visible border, background color, padding, and an inappropriate cursor. Correcting these requires inline style overrides that directly contradict the library's anti-inline-style guidance. There is no prop-based reset escape hatch. **Use the `Button` component instead.**
 - Don't use `style` to adjust visual attributes of `Box` when a style prop exists. Avoid inline styles for `width`, `height`, `borderRadius`, `background`, `color`, `fontSize`, `fontWeight`, and `cursor` on `Flex` or `Box`. Use the matching style prop instead. Check whether `Avatar`, `Badge`, `Button`, or `Card` with appropriate props covers your use case before writing a custom element. See "All available props" at the bottom of this document for the complete reference.
 - Don't give Box inline styles to display as flex. Sanity UI components are meant to be modular, single purpose and composable. If you need a container with a background and flex display, use wrap Flex with Box that uses `tone`: `<Box tone="neutral" ... ><Flex ... > ... </Flex></Box>`
 - Avoid adding margin/padding to individual elements like Buttons or Text to set placement.  Instead, wrap elements in Box with margin/padding.  
 - Don't add onClick to Box
 
-### Accessibility
+## Accessibility
 
 - **Layout only.** Box provides spacing and structure. It does not add keyboard handling, focus management, or ARIA state. If you render Box as a semantic element via `as`, you are responsible for the behavior that element requires.  
 - **Semantic elements via `as`.** Box accepts an `as` prop. Use it to render semantic HTML when the content requires it:  
@@ -4887,126 +4791,10 @@ Box also inherits shared layout props (padding, margin, sizing, border, overflow
 - **Lists.** When rendering `as="ul"` or `as="ol"`, add `role="list"` if `list-style: none` is applied. WebKit strips list semantics without it (WCAG 1.3.1 A). Children must be `<li>` elements.  
 - **Visual-to-DOM order.** Do not use CSS `order` or grid placement on Box children to reorder them from source order. Screen readers and keyboard navigation follow DOM order, not visual order (WCAG 1.3.2 A).  
 - **Spacing and reflow.** Box spacing tokens use `rem` units and scale with user font-size settings. Content inside Box must reflow at 320px viewport width without horizontal scrolling (WCAG 1.4.10 AA).  
-- 
 
-### Content
+## Content
 
 - **Box does not set text styles.** Box provides spacing and structure. It does not set font size, line height, weight, or color. Use Text, Heading, or Label for text styling.
-
-### CSS custom properties — do not use them
-
-⛔ **Never reference `--card-*` CSS custom properties directly. These are internal implementation details of the Card component, not a public API.**
-Outside a `Card` ancestor they silently resolve to `undefined`. The browser swallows undefined CSS custom properties with no warning.
-**Use `tone` instead.** The `tone` prop on `Box`, `Flex`, `Grid`, and `Card` is the public API for semantic background color:
-```tsx
-{/* ✗ — silently does nothing outside a Card ancestor */}
-<Box style={{ background: 'var(--card-bg)' }} />
-{/* ✓ */}
-<Box tone="neutral" />
-{/* ✗ — silently fails outside Card */}
-<Box style={{ borderTop: '1px solid var(--card-border-color)' }} />
-{/* ✓ */}
-<Divider />
-```
-
-
-### Code examples 
-
-#### Anti-patterns
-```jsx
-{/* ✗ Don't use inline styles or reference --card-* CSS variables */}
-<Box
-  padding={2}
-  radius={2}
-  
-  style={{ background: 'var(--card-bg)', flexShrink: 0, width: '260px' }}
->
-  <Text size={1} color="muted">
-    <DocumentTextIcon />
-  </Text>
-</Box>
-
-{* ✓ Use Box's style props instead *}
-<Box
-  padding={2}
-  radius={2}
-  tone="neutral"
-  flexShrink={0}
-  width="260px"
->
-  <Text size={1} color="muted">
-    <DocumentTextIcon />
-  </Text>
-</Box>
-```
-
-```jsx
-{/* ✗ Don't use inline styles for flex-shrink rules */}
-<Box style={{ flexShrink: 0, width: 32, height: 32 }}>
-  <SomeIcon />
-</Box>
-
-{/* ✓ Use flexShrink prop — no inline style needed */}
-<Box flexShrink={0} width="32px" height="32px">
-   <DocumentTextIcon />
-</Box>
-```
-
-```jsx
-{/* ✗ Don't use tokens for unintended purposes to get a desired style */}
-<Box
-  padding={1}
-  radius={2}
-  style={{ background: 'var(--blue-600)' }}
->
-  <Text size={1} style={{ color: '#fff', lineHeight: 1 }}>
-    <DocumentsIcon />
-  </Text>
-</Box>
-
-{/* ✓ Work within the system's intentional constraints */}
-<Box
-  padding={1}
-  radius={2}
-  tone="primary"
->
-  <Text size={1} color="primary">
-    <DocumentsIcon />
-  </Text>
-</Box>
-```
-
-
-```jsx
-{/* ✗ Don't use Box as a flex container via inline styles */}
-<Box style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32 }}>
-  <Icon />
-</Box>
-
-{/* ✓ Use Flex directly */}
-<Flex alignItems="center" justifyContent="center" width="32px" height="32px">
-  <Icon />
-</Flex>
-```
-
-```jsx
-{/* ✗ Don't use styling to mimic components that already exist, such as Avatar */}
-<Box style={{ width: '28px', height: '28px', borderRadius: '50%', background: '#556bfc',
-  display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-  <Text>AJ</Text>
-</Box>
-
-{/* ✓ Use the Avatar component */}
-<Avatar>AJ</Avatar>
-```
-
-```jsx
-{/* ✗ Don't build a divider from scratch */ }
-<Box style={{ borderTop: '1px solid var(--card-border-color)', marginTop: '4px', marginBottom: '4px' }} />
-
-{/* ✓ Use the Divider component */ }
-<Divider />
-```
 
 ## All available props
 
@@ -5129,7 +4917,43 @@ Use these when Box is a direct child of Grid.
 
 > See the "Inline style overrides" section for the full inline style lookup guide, including workarounds for Card, Stack, and Button.
 
-## Inline style alternatives
+## Related components
+
+- **Flex** — Row or column layout with alignment and gap
+- **Grid** — Two-axis layout for card grids and dashboards
+- **Card** — Adds a visual surface with background, border, and tone
+
+
+## For agents
+
+### Choosing between Box, Flex, Grid, Stack, Inline, and Container
+
+| Component | Dimensions | Adds visual styling | Use case |
+| :---- | :---- | :---- | :---- |
+| Box | Spacing and structure | Yes (background and, border) | Wrapping elements with padding or margin |
+| Flex | One-dimensional (row or column) | Yes (background and, border) | Toolbars, split layouts, aligned groups of elements |
+| Grid | Two-dimensional (rows \+ columns) | Yes (background and, border) | Card grids, dashboards, aligned column layouts |
+| Stack | One-dimensional (column only) | No | Vertical sequences of elements with uniform spacing |
+| Inline | One-dimensional (wrapping row) | No | Badges, Buttons, or any set of variable-width items that wrap |
+| Container | Centered column | No | Constraining content width and centering it |
+
+### CSS custom properties — do not use them
+
+⛔ **Never reference `--card-*` CSS custom properties directly. These are internal implementation details of the Card component, not a public API.**
+Outside a `Card` ancestor they silently resolve to `undefined`. The browser swallows undefined CSS custom properties with no warning.
+**Use `tone` instead.** The `tone` prop on `Box`, `Flex`, `Grid`, and `Card` is the public API for semantic background color:
+```tsx
+{/* ✗ — silently does nothing outside a Card ancestor */}
+<Box style={{ background: 'var(--card-bg)' }} />
+{/* ✓ */}
+<Box tone="neutral" />
+{/* ✗ — silently fails outside Card */}
+<Box style={{ borderTop: '1px solid var(--card-border-color)' }} />
+{/* ✓ */}
+<Divider />
+```
+
+### Inline style alternatives
 
 Most inline styles are not needed for Box. Use the alternatives below when considering an inline style.
 
@@ -5151,17 +4975,112 @@ Most inline styles are not needed for Box. Use the alternatives below when consi
 | `<Box style={{ position: "sticky" }} ... >` | `<Box position="sticky" ... >` |
 | `<Box style={{ background: '#f5f5f5' }} ... >` | Use `<Box tone="neutral" ... >` |
 | `<Box style={{ textAlign: 'center' }} ...>` | Use `<Flex justifyContent="center ... >` |
-| `<Box style={{ display: 'flex' }} ...> | Use `<Flex ... >` |
+| `<Box style={{ display: 'flex' }} ...>` | Use `<Flex ... >` |
 | `<Box tone="primary" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }} ...>` | Use `<Box tone="primary"><Flex alignItems="center" justifyContent="center">` |
 | `<Box style={{ color: 'var(--card-fg-color)' }} ... ><HomeIcon /></Box>` | Use `<Text color="neutral"><HomeIcon /</Text>` |
 
-# Flex
+### Code examples 
 
-Under review
+#### Anti-patterns
+```jsx
+{/* ✗ Don't use inline styles or reference --card-* CSS variables */}
+<Box
+  padding={2}
+  radius={2}
+  
+  style={{ background: 'var(--card-bg)', flexShrink: 0, width: '260px' }}
+>
+  <Text size={1} color="muted">
+    <DocumentTextIcon />
+  </Text>
+</Box>
+
+{* ✓ Use Box's style props instead *}
+<Box
+  padding={2}
+  radius={2}
+  tone="neutral"
+  flexShrink={0}
+  width="260px"
+>
+  <Text size={1} color="muted">
+    <DocumentTextIcon />
+  </Text>
+</Box>
+```
+
+```jsx
+{/* ✗ Don't use inline styles for flex-shrink rules */}
+<Box style={{ flexShrink: 0, width: 32, height: 32 }}>
+  <SomeIcon />
+</Box>
+
+{/* ✓ Use flexShrink prop — no inline style needed */}
+<Box flexShrink={0} width="32px" height="32px">
+   <DocumentTextIcon />
+</Box>
+```
+
+```jsx
+{/* ✗ Don't use tokens for unintended purposes to get a desired style */}
+<Box
+  padding={1}
+  radius={2}
+  style={{ background: 'var(--blue-600)' }}
+>
+  <Text size={1} style={{ color: '#fff', lineHeight: 1 }}>
+    <DocumentsIcon />
+  </Text>
+</Box>
+
+{/* ✓ Work within the system's intentional constraints */}
+<Box
+  padding={1}
+  radius={2}
+  tone="primary"
+>
+  <Text size={1} color="primary">
+    <DocumentsIcon />
+  </Text>
+</Box>
+```
+
+```jsx
+{/* ✗ Don't use Box as a flex container via inline styles */}
+<Box style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32 }}>
+  <Icon />
+</Box>
+
+{/* ✓ Use Flex directly */}
+<Flex alignItems="center" justifyContent="center" width="32px" height="32px">
+  <Icon />
+</Flex>
+```
+
+```jsx
+{/* ✗ Don't use styling to mimic components that already exist, such as Avatar */}
+<Box style={{ width: '28px', height: '28px', borderRadius: '50%', background: '#556bfc',
+  display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+  <Text>AJ</Text>
+</Box>
+
+{/* ✓ Use the Avatar component */}
+<Avatar>AJ</Avatar>
+```
+
+```jsx
+{/* ✗ Don't build a divider from scratch */ }
+<Box style={{ borderTop: '1px solid var(--card-border-color)', marginTop: '4px', marginBottom: '4px' }} />
+
+{/* ✓ Use the Divider component */ }
+<Divider />
+```
+
+# Flex
 
 Used as the lowest-level building block for laying out UI elements.
 
-### Basic example
+## Basic example
 
 **Source:** `@sanity-labs/ui-poc`
 ```tsx
@@ -5173,79 +5092,66 @@ import { Flex } from '@sanity-labs/ui-poc'
 </Flex>
 ```
 
-
-Warning:  `Flex` uses `gap`. `Stack` uses `space`. These are not the same prop. Using `space` on `Flex` silently does nothing.
-
-### API
+## API
 
 Flex's own props are `as`, `display`, and the flex-parent + gap props below. Everything else it accepts comes from shared layout props inherited from Box.
 
-**Component props:**
+### Component props
 
 | Prop | Type | Default | Description |
 |------|------|---------|-------------|
 | `as` | React element type | `'div'` | HTML element to render (e.g. `as="main"`, `as="nav"`) |
-| `display` | `'flex'`, `'inline-flex'`, `'none'` | — | CSS `display` property |
+| `display` | `'flex'` \| `'inline-flex'` \| `'none'` | `'flex'` | CSS `display` property |
 
-**Flex-specific props:**
+### Flex-specific props
 
-| Prop | Type | CSS equivalent |
-|------|------|----------------|
-| `flexDirection` | `'row'`, `'row-reverse'`, `'column'`, `'column-reverse'` | `flex-direction` |
-| `flexWrap` | `'wrap'`, `'wrap-reverse'`, `'nowrap'` | `flex-wrap` |
-| `alignItems` | `'baseline'`, `'center'`, `'flex-end'`, `'flex-start'`, `'stretch'` | `align-items` |
-| `justifyContent` | `'flex-start'`, `'flex-end'`, `'center'`, `'space-between'`, `'space-around'`, `'space-evenly'` | `justify-content` |
-| `gap` | `0`–`9` | `gap` |
-| `rowGap` | `0`–`9` | `row-gap` |
-| `columnGap` | `0`–`9` | `column-gap` |
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `flexDirection` | `'row'` \| `'row-reverse'` \| `'column'` \| `'column-reverse'` | — | Main axis direction |
+| `flexWrap` | `'wrap'` \| `'wrap-reverse'` \| `'nowrap'` | — | Whether children wrap to new lines. Set `'wrap'` on every Flex with 2+ children for WCAG 1.4.10 reflow |
+| `alignItems` | `'baseline'` \| `'center'` \| `'flex-end'` \| `'flex-start'` \| `'stretch'` | — | Cross-axis alignment |
+| `justifyContent` | `'flex-start'` \| `'flex-end'` \| `'center'` \| `'space-between'` \| `'space-around'` \| `'space-evenly'` | — | Main-axis distribution |
+| `gap` | `0`–`9` | — | Space between children (spacing scale) |
+| `rowGap` | `0`–`9` | — | Row gap override |
+| `columnGap` | `0`–`9` | — | Column gap override |
 
 All props support responsive arrays (e.g. `flexDirection={['column', null, 'row']}`). Flex also inherits shared layout props — see **All available props** at the bottom for the full list.
 
-### **Usage guidelines**
+## Usage guidelines
 
-**When to use:**
+### When to use
 
 - To stack items vertically or horizontally. Flex defaults to horizontal direction.  
 - To control alignment: center children, space them apart, or push one to the end.  
-- To lay items in a column with alignment or wrap control. Use `direction="column"` when you need more control than Stack provides.  
-- To create responsive layouts that change direction at breakpoints: `direction={['column', , 'row']}`.
+- To lay items in a column with alignment or wrap control. Use `flexDirection="column"` when you need more control than Stack provides.  
+- To create responsive layouts that change direction at breakpoints: `flexDirection={['column', , 'row']}`.
 
-**When not to use:**
+### When not to use
 
 - To stack items in a simple vertical column with even spacing. Use **Stack** instead — it is simpler and locks direction to vertical.  
 - To create a two-axis grid. Use **Grid** instead.  
 - To wrap a single child with spacing or visual styling. Use **Box** instead.  
 - To flow inline items that wrap to the next line. Use **Inline** instead.
 
-#### **Choosing between Box, Flex, Grid, Stack, Inline, and Container:**
+## Best practices
 
-| Component | Dimensions | Adds visual styling | Use case |
-| :---- | :---- | :---- | :---- |
-| Box | Spacing and structure | Yes (background and, border) | Wrapping elements with padding or margin |
-| Flex | One-dimensional (row or column) | Yes (background and, border) | Toolbars, split layouts, aligned groups of elements |
-| Grid | Two-dimensional (rows \+ columns) | Yes (background and, border) | Card grids, dashboards, aligned column layouts |
-| Stack | One-dimensional (column only) | No | Vertical sequences of elements with uniform spacing |
-| Inline | One-dimensional (wrapping row) | No | Badges, Buttons, or any set of variable-width items that wrap |
-| Container | Centered column | No | Constraining content width and centering it |
+### Do
 
-### **Best practices**
-
-**Do**
-
-- **Set `flexWrap="wrap"` on every Flex with two or more children.** This is required for WCAG 1.4.10 AA (Reflow at 320px). A single non-wrapping Flex causes the page to overflow on narrow viewports. This includes outer layout containers, toolbar rows, and action rows inside cards.
+- Set `flexWrap="wrap"` on every Flex with two or more children. This is required for WCAG 1.4.10 AA (Reflow at 320px). A single non-wrapping Flex causes the page to overflow on narrow viewports. This includes outer layout containers, toolbar rows, and action rows inside cards.
 - Bias towards horizontally start-aligned content over center alignment. Most interface elements with Sanity are start aligned–most notably menus and navigational elements. Only use center alignment to create visual distinction/emphasis–such as an empty state.
 - Consider responsive breakpoints when stacking items horizontally. If the number of items can vary, pair `flexWrap="wrap"` with `gap={2}` to prevent clipping and maintain spacing.
 
-**Don't**
+### Don't
+
 - Don't use inline styles to create specific UI elements. If you find yourself setting `width`, `height`, `borderRadius`, `background`, `color`, `fontSize`, `fontWeight`, or `cursor` as inline styles on a `Flex` or `Box`, stop. You're likely reinventing a component that already exists. Check whether `Avatar`, `Badge`, `Button`, or `Card` with appropriate props covers your use case. See "All available props" at the bottom for the complete reference.
 - Don't rely on `row-reverse` or `column-reverse` as a way to change sort order or logical order of items. These direction settings only change the visual layer. They will not impact tab index or how screen readers interpret Flex items.  
 - Don’t add onClick to Flex. Flex is not intended to be an interactive element.
 
-### Content
+## Content
 
 - **Flex does not set text styles.** Flex provides layout along an axis. It does not set font size, line height, weight, or color. Use Text, Heading, or Label for text styling.
 
-### Accessibility
+## Accessibility
 
 - **Layout only.** Flex provides layout along an axis. It does not add keyboard handling, focus management, or ARIA state. If you render Flex as a semantic element via `as`, you are responsible for the behavior that element requires.  
 - **Semantic elements via `as`.** Flex accepts an `as` prop. Use it to render semantic HTML when the content requires it:  
@@ -5258,145 +5164,6 @@ All props support responsive arrays (e.g. `flexDirection={['column', null, 'row'
 - **Lists.** When rendering `as="ul"` or `as="ol"`, add `role="list"` if `list-style: none` is applied. WebKit strips list semantics without it (WCAG 1.3.1 A). Children must be `<li>` elements.  
 - **Visual-to-DOM order.** Do not use `flex-direction: row-reverse` or `flex-direction: column-reverse` when children contain interactive or readable content. Do not use CSS `order` on Flex children. Screen readers and keyboard navigation follow DOM order, not visual order (WCAG 1.3.2 A, WCAG 2.4.3 A). If visual reordering cannot be avoided, confirm the DOM order produces a logical reading sequence.  
 - **Reflow at 320px.** Layouts built with Flex must work at 320px viewport width without horizontal scrolling (WCAG 1.4.10 AA). **Every Flex with more than one child must have `flexWrap="wrap"`.** This includes the outer layout Flex, toolbar rows, action rows inside cards, and any other horizontal grouping. A single non-wrapping Flex causes the page to overflow. Avoid fixed `px` widths on Flex children — use percentage-based or `flex-grow` sizing. Flex spacing tokens use `rem` and scale with user font-size settings (WCAG 1.4.12 AA).  
-    
-  **Reflow checklist** — confirm each before shipping:  
-    
-  - [ ] Outer layout Flex has `flexWrap="wrap"`  
-  - [ ] Toolbar Flex (heading \+ buttons) has `flexWrap="wrap"` and `gap={2}`  
-  - [ ] Actions row inside each Card has `flexWrap="wrap"`  
-  - [ ] No Flex child uses a fixed `px` width without a `maxWidth` fallback  
-  - [ ] Outer Flex uses `minHeight`, not `height`
-
-### Code examples
-
-#### General layout patterns
-```jsx
-{/* Horizontal row — space between */}
-<Flex alignItems="center" justifyContent="space-between" gap={3}>
-  <Heading level={1}>Title</Heading>
-  <Button text="Action" />
-</Flex>
-
-{/* Wrapping toolbar row (for responsive reflow) */}
-<Flex alignItems="center" flexWrap="wrap" gap={2}>
-  {/* items wrap to next line at narrow widths */}
-</Flex>
-
-{/* Vertical column (sidebar, main area) */}
-<Flex flexDirection="column" flexGrow={1} overflow="hidden">
-  <Box padding={3} borderBottom>{/* toolbar */}</Box>
-  <Box flexGrow={1} overflowY="auto">{/* scrollable content */}</Box>
-</Flex>
-
-{/* Full-height two-panel layout */}
-<Flex minHeight="100vh">
-  <Box as="nav" aria-label="Main navigation" borderRight flexGrow={0} flexShrink={0} flexBasis="260px">{/* sidebar */}</Box>
-  <Flex flexDirection="column" flexGrow={1} minWidth="0">{/* main */}</Flex>
-</Flex>
-```
-
-#### Full-height app shell layout
-
-The most common Studio-like layout pattern. Critical details: use `minHeight` (not `height`) on the outer container, and `minWidth="0"` on flex children to prevent overflow.
-```jsx
-// Box and Flex come from ui — NOT from @sanity/ui
-import { Box, Flex } from '@sanity-labs/ui-poc'
-
-<Flex minHeight="100vh">
-  {/* Sidebar — fixed width, full height */}
-  <Box
-    as="nav"
-    aria-label="Main navigation"
-    borderRight
-    width="260px"
-    flexShrink={0}
-    overflowY="auto"
-  >
-    {/* nav content */}
-  </Box>
-
-  {/* Main — fills remaining width, scrolls internally */}
-  <Flex
-    as="main"
-    flexDirection="column"
-    flexGrow={1}
-    minWidth="0"       {/* prevents flex child from overflowing */}
-    overflow="hidden"
-  >
-    <Box padding={3} borderBottom>{/* toolbar */}</Box>
-    <Box flexGrow={1} overflowY="auto" padding={4}>{/* content */}</Box>
-  </Flex>
-</Flex>
-```
-
-#### Empty state
-```jsx
-{/* ✓ Empty state — minHeight as named prop, no style={} needed */}
-<Flex
-  alignItems="center"
-  justifyContent="center"
-  flexDirection="column"
-  minHeight="300px"
-  gap={3}
-  <Text muted>No documents yet</Text>
-  <Button text="Create document" icon={AddIcon} />
-</Flex>
-```
-
-#### Anti-patterns
-
-```jsx
-{ /* ✗ Don't use inline margin styles to move elements around Flex */ }
-<Flex alignItems="center">
-  <Text>Label</Text>
-  <Box style={{marginLeft: "auto"}}>
-    <Badge tone="positive">Published</Badge>
-  </Box>
-</Flex>
-
-{ /* ✓ To push an element to the far end of a Flex row, use `marginLeft="auto"` on the Box: */ }
-<Flex alignItems="center">
-  <Text>Label</Text>
-  <Box marginLeft="auto">
-    <Badge tone="positive">Published</Badge>
-  </Box>
-</Flex>
-```
-
-```jsx
-{/* ✗ Don't use inline styles to set visual attributes */}
-<Flex
-  alignItems="center"
-  justifyContent="center"
-  style={{
-    width: 28,
-    height: 28,
-    borderRadius: "50%",
-    fontSize: 12,
-    color: "red"
-    border: "1px solid #868686"
-    }}
-  ><Text>AJ</Text>
-</Flex>
-  
-{/* ✓ Work within the system's structure */}
-<Box width="28px" height="28px" radius="full" border={true}>
-  <Flex 
-    width="100%" 
-    height="100%"
-    alignItems="center"
-    justifyContent="center"
-    >
-    <Text tone="critical">AJ</Text>
-  </Flex>
-</Box>
-```
-
-### CSS custom properties and Card context
-
-> **`--card-bg`, `--card-border-color`, `--card-color` and other `--card-*` variables are only available inside a `Card` ancestor.** `Card` establishes the color context — it writes these CSS custom properties onto its DOM subtree. Using them in a `Flex` (or any element) outside a `Card` ancestor produces undefined values and no visual effect.
->
-> If you need a themed container without Card's visible surface, use `Card` with `border={false}`. Don't reference `--card-*` variables from a raw `Flex`.
 
 ## All available props
 
@@ -5523,8 +5290,155 @@ Use these when Flex is a direct child of Grid.
 | `gridRowEnd` | string | `grid-row-end` |
 
 
+### Related components
 
-## Inline style alternatives
+- **Box** — Simpler container for spacing and structure
+- **Grid** — Two-axis layout for card grids and dashboards
+- **Stack** — Vertical list with even spacing between items
+
+
+## For agents
+
+Warning:  `Flex` uses `gap`. `Stack` uses `space`. These are not the same prop. Using `space` on `Flex` silently does nothing.
+
+### Choosing between Box, Flex, Grid, Stack, Inline, and Container
+
+| Component | Dimensions | Adds visual styling | Use case |
+| :---- | :---- | :---- | :---- |
+| Box | Spacing and structure | Yes (background and, border) | Wrapping elements with padding or margin |
+| Flex | One-dimensional (row or column) | Yes (background and, border) | Toolbars, split layouts, aligned groups of elements |
+| Grid | Two-dimensional (rows \+ columns) | Yes (background and, border) | Card grids, dashboards, aligned column layouts |
+| Stack | One-dimensional (column only) | No | Vertical sequences of elements with uniform spacing |
+| Inline | One-dimensional (wrapping row) | No | Badges, Buttons, or any set of variable-width items that wrap |
+| Container | Centered column | No | Constraining content width and centering it |
+
+
+### Code examples
+
+#### General layout patterns
+```jsx
+{/* Horizontal row — space between */}
+<Flex alignItems="center" justifyContent="space-between" gap={3}>
+  <Heading >Title</Heading>
+  <Button text="Action" />
+</Flex>
+
+{/* Wrapping toolbar row (for responsive reflow) */}
+<Flex alignItems="center" flexWrap="wrap" gap={2}>
+  {/* items wrap to next line at narrow widths */}
+</Flex>
+
+{/* Vertical column (sidebar, main area) */}
+<Flex flexDirection="column" flexGrow={1} overflow="hidden">
+  <Box padding={3} borderBottom>{/* toolbar */}</Box>
+  <Box flexGrow={1} overflowY="auto">{/* scrollable content */}</Box>
+</Flex>
+
+{/* Full-height two-panel layout */}
+<Flex minHeight="100vh">
+  <Box as="nav" aria-label="Main navigation" borderRight flexGrow={0} flexShrink={0} flexBasis="260px">{/* sidebar */}</Box>
+  <Flex flexDirection="column" flexGrow={1} minWidth="0">{/* main */}</Flex>
+</Flex>
+```
+
+#### Full-height app shell layout
+
+The most common Studio-like layout pattern. Critical details: use `minHeight` (not `height`) on the outer container, and `minWidth="0"` on flex children to prevent overflow.
+```jsx
+// Box and Flex come from ui — NOT from @sanity/ui
+import { Box, Flex } from '@sanity-labs/ui-poc'
+
+<Flex minHeight="100vh">
+  {/* Sidebar — fixed width, full height */}
+  <Box
+    as="nav"
+    aria-label="Main navigation"
+    borderRight
+    width="260px"
+    flexShrink={0}
+    overflowY="auto"
+  >
+    {/* nav content */}
+  </Box>
+
+  {/* Main — fills remaining width, scrolls internally */}
+  <Flex
+    as="main"
+    flexDirection="column"
+    flexGrow={1}
+    minWidth="0"       {/* prevents flex child from overflowing */}
+    overflow="hidden"
+  >
+    <Box padding={3} borderBottom>{/* toolbar */}</Box>
+    <Box flexGrow={1} overflowY="auto" padding={4}>{/* content */}</Box>
+  </Flex>
+</Flex>
+```
+
+#### Empty state
+```jsx
+{/* ✓ Empty state — minHeight as named prop, no style={} needed */}
+<Flex
+  alignItems="center"
+  justifyContent="center"
+  flexDirection="column"
+  minHeight="300px"
+  gap={3}
+  <Text muted>No documents yet</Text>
+  <Button text="Create document" icon={AddIcon} />
+</Flex>
+```
+
+#### Anti-patterns
+
+```jsx
+{ /* ✗ Don't use inline margin styles to move elements around Flex */ }
+<Flex alignItems="center">
+  <Text>Label</Text>
+  <Box style={{marginLeft: "auto"}}>
+    <Badge tone="positive">Published</Badge>
+  </Box>
+</Flex>
+
+{ /* ✓ To push an element to the far end of a Flex row, use `marginLeft="auto"` on the Box: */ }
+<Flex alignItems="center">
+  <Text>Label</Text>
+  <Box marginLeft="auto">
+    <Badge tone="positive">Published</Badge>
+  </Box>
+</Flex>
+```
+
+```jsx
+{/* ✗ Don't use inline styles to set visual attributes */}
+<Flex
+  alignItems="center"
+  justifyContent="center"
+  style={{
+    width: 28,
+    height: 28,
+    borderRadius: "50%",
+    fontSize: 12,
+    color: "red"
+    border: "1px solid #868686"
+    }}
+  ><Text>AJ</Text>
+</Flex>
+  
+{/* ✓ Work within the system's structure */}
+<Box width="28px" height="28px" radius="full" border={true}>
+  <Flex 
+    width="100%" 
+    height="100%"
+    alignItems="center"
+    justifyContent="center"
+    >
+    <Text tone="critical">AJ</Text>
+  </Flex>
+</Box>
+```
+
+### Inline style alternatives
 
 Most inline styles are not needed for Flex. Use the alternatives below when considering an inline style.
 
@@ -5541,13 +5455,26 @@ Most inline styles are not needed for Flex. Use the alternatives below when cons
 | `<Flex style={{ background: '#f5f5f5' }} ... >` | Use `<Flex tone="neutral" ... >` |
 | `<Flex style={{ display: 'grid' }} ...>` | Use `<Grid ... >` |
 
-# Grid
+### CSS custom properties and Card context
 
-Under review
+> **`--card-bg`, `--card-border-color`, `--card-color` and other `--card-*` variables are only available inside a `Card` ancestor.** `Card` establishes the color context — it writes these CSS custom properties onto its DOM subtree. Using them in a `Flex` (or any element) outside a `Card` ancestor produces undefined values and no visual effect.
+>
+> If you need a themed container without Card's visible surface, use `Card` with `border={false}`. Don't reference `--card-*` variables from a raw `Flex`.
+
+###  Reflow checklist
+
+Confirm each before shipping:     
+- [ ] Outer layout Flex has `flexWrap="wrap"`  
+- [ ] Toolbar Flex (heading \+ buttons) has `flexWrap="wrap"` and `gap={2}`  
+- [ ] Actions row inside each Card has `flexWrap="wrap"`  
+- [ ] No Flex child uses a fixed `px` width without a `maxWidth` fallback  
+- [ ] Outer Flex uses `minHeight`, not `height`
+
+# Grid
 
 Renders a grid layout container.
 
-### Basic example
+## Basic example
 
 **Source:** `@sanity-labs/ui-poc`
 ```tsx
@@ -5562,73 +5489,63 @@ import { Grid } from '@sanity-labs/ui-poc'
 
 ```
 
-### API
+## API
 
 Grid's own props are `as`, `display`, and the grid-parent + gap props below. Everything else it accepts comes from shared layout props inherited from Box.
 
-**Component props:**
+### Component props
 
 | Prop | Type | Default | Description |
 |------|------|---------|-------------|
 | `as` | React element type | `'div'` | HTML element to render |
-| `display` | `'grid'`, `'inline-grid'`, `'none'` | — | CSS `display` property |
+| `display` | `'grid'` \| `'inline-grid'` \| `'none'` | `'grid'` | CSS `display` property |
 
-**Grid-specific props:**
+### Grid-specific props
 
-| Prop | Type | CSS equivalent |
-|------|------|----------------|
-| `gridAutoFlow` | `'row'`, `'column'`, `'row dense'`, `'column dense'`, `'dense'` | `grid-auto-flow` |
-| `gridAutoColumns` | string | `grid-auto-columns` |
-| `gridAutoRows` | string | `grid-auto-rows` |
-| `gridTemplateColumns` | string | `grid-template-columns` |
-| `gridTemplateRows` | string | `grid-template-rows` |
-| `gap` | `0`–`9` | `gap` |
-| `rowGap` | `0`–`9` | `row-gap` |
-| `columnGap` | `0`–`9` | `column-gap` |
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `gridAutoFlow` | `'row'` \| `'column'` \| `'row dense'` \| `'column dense'` \| `'dense'` | — | How auto-placed items flow into the grid |
+| `gridAutoColumns` | `string` | — | Size of implicitly created columns (any CSS value) |
+| `gridAutoRows` | `string` | — | Size of implicitly created rows (any CSS value) |
+| `gridTemplateColumns` | `string` | — | Column track sizing (e.g. `'1fr 1fr'`, `'repeat(3, 1fr)'`) |
+| `gridTemplateRows` | `string` | — | Row track sizing (any CSS value) |
+| `gap` | `0`–`9` | — | Space between rows and columns (spacing scale) |
+| `rowGap` | `0`–`9` | — | Row gap override |
+| `columnGap` | `0`–`9` | — | Column gap override |
 
 All props support responsive arrays (e.g. `gridTemplateColumns={['1fr', '1fr 1fr', 'repeat(3, 1fr)']}`). Grid also inherits shared layout props — see **All available props** at the bottom of this document for the complete reference.
 
-### **Usage guidelines**
+## Usage guidelines
 
-**When to use:**
+### When to use
 
 - To display non-tabular content in multiple rows and columns   
 - To build fixed-column layouts where items should align on a shared grid (dashboards, card grids, settings panels)  
 - When you need precise control over row and column sizing, spanning, or placement  
 - To implement responsive multi-column layouts where the number of columns changes at different breakpoints
 
-**When not to use:**
+### When not to use
 
 - When content flows in a single direction. Use **Flex** for a flexible one-dimensional, vertical/horizontal layout. Use **Stack/Inline** for a vertical/horizontal layout with more opinionated defaults.  
 - When you need inline wrapping of variable-width items (ex: badges, buttons, etc.). Use **Inline** instead.  
 - When you need to constrain and center content at a max width. Use **Container** — it sets `max-width` and centers itself.
 
-#### **Choosing between Box, Flex, Grid, Stack, Inline, and Container:**
+## Best practices
 
-| Component | Dimensions | Adds visual styling | Use case |
-| :---- | :---- | :---- | :---- |
-| Box | Spacing and structure | Yes (background and, border) | Wrapping elements with padding or margin |
-| Flex | One-dimensional (row or column) | Yes (background and, border) | Toolbars, split layouts, aligned groups of elements |
-| Grid | Two-dimensional (rows \+ columns) | Yes (background and, border) | Card grids, dashboards, aligned column layouts |
-| Stack | One-dimensional (column only) | No | Vertical sequences of elements with uniform spacing |
-| Inline | One-dimensional (wrapping row) | No | Badges, Buttons, or any set of variable-width items that wrap |
-| Container | Centered column | No | Constraining content width and centering it |
-
-### **Best practices**
-
-**Do**
+### Do
 
 - Use `gridTemplateColumns` with `repeat()` and `minmax()` or `fr` units to build layouts that adapt gracefully to available space  
 - Use the responsive prop array (e.g. `gridTemplateColumns={["1fr", "1fr 1fr", "repeat(3, 1fr)"]}`) to adjust column count at breakpoints instead of writing media queries by hand  
 - Use `gap` (or `gapX` / `gapY`) over padding or margin on children to control spacing between grid cells  
 - Prefer `gridColumn` and `gridRow` on child Box elements to span items across cells, keeping placement logic close to the content that needs it
 
-**Don't**
+### Don't
+
 - Don't use `style` to adjust visual attributes of `Grid` when a style prop exists. Using `style` should be reserved for unsupported CSS rules. See "All available props" at the bottom of this document for the complete reference.
 - Don't use CSS `order`, `gridColumn`, or `gridRow` to visually reorder items away from their DOM order. Screen readers and keyboard navigation follow DOM order, not visual order — reordering with CSS silently breaks reading and focus sequence for non-sighted users (WCAG 1.3.2 A).  
 - Don't hardcode pixel values in `gridTemplateColumns` or `gridTemplateRows` when `fr`, `minmax()`, or `auto` would give you a more resilient layout.
 
-### Accessibility
+## Accessibility
 
 - **Layout only.** Flex provides layout along an axis. It does not add keyboard handling, focus management, or ARIA state. If you render Flex as a semantic element via `as`, you are responsible for the behavior that element requires.  
 - **Semantic elements via `as`.** Flex accepts an `as` prop. Use it to render semantic HTML when the content requires it:  
@@ -5650,18 +5567,21 @@ All props support responsive arrays (e.g. `gridTemplateColumns={['1fr', '1fr 1fr
   - [ ] No Flex child uses a fixed `px` width without a `maxWidth` fallback  
   - [ ] Outer Flex uses `minHeight`, not `height`
 
-### Content
+## Content
 
 - **Grid does not set text styles.** Grid provides spatial structure. It does not set font size, line height, weight, or color. Use Text, Heading, or Label inside grid cells for text styling.
 
-### Accessibility
+## Accessibility
 - **Layout only.** Grid provides spatial structure. It does not add keyboard handling, focus management, or ARIA state. If you render Grid as a semantic element via `as`, you are responsible for the behavior that element requires.  
 - **Visual-to-DOM order.** This is the most important accessibility concern for Grid. CSS grid placement (`gridColumn`, `gridRow`, `gridAutoFlow: "column dense"`) can visually reorder items without touching the DOM. Screen readers and keyboard users follow DOM order, not visual order. Never use grid placement to change the logical reading or focus sequence — keep visual order and DOM order in sync (WCAG 1.3.2 A).  
 - **`dense` packing.** `gridAutoFlow: "row dense"` and `"column dense"` fill holes in the grid by pulling later items forward. This produces a visual order that can diverge significantly from DOM order. Only use dense packing for purely decorative or non-interactive content (e.g., image mosaics) where reading order does not matter.  
-- **Semantic elements via `as`.** Grid accepts an `as` prop. Use it to render semantic HTML when the content requires it. Requirements are the same as Box: `as="ul"` requires `<li>` children and `role="list"` when `list-style: none` is applied; `as="nav"` requires `aria-label` when more than one `<nav>` exists on the page; `as="section"` requires a heading or `aria-label` to register as a landmark (WCAG 1.3.1 A).  
+- **Semantic elements via `as`.** Grid accepts an `as` prop. Use it to render semantic HTML when the content requires it. Requirements match Box:
+  - `as="ul"` requires `<li>` children and `role="list"` when `list-style: none` is applied.
+  - `as="nav"` requires `aria-label` when more than one `<nav>` exists on the page.
+  - `as="section"` requires a heading or `aria-label` to register as a landmark (WCAG 1.3.1 A).
 - **Reflow.** Grid layouts must reflow to a single column at 320 CSS pixels viewport width without horizontal scrolling. Use responsive `gridTemplateColumns` values to reduce column count at small breakpoints rather than enforcing a fixed multi-column layout (WCAG 1.4.10 AA).  
 - **Spacing and zoom.** Grid gap tokens use `rem` units and scale with the user's font-size setting. Do not use fixed `px` values for gap or sizing where token values exist — fixed values break spacing proportionality at large text sizes.  
-- **Interactive grid patterns.** If Grid is used to construct an interactive widget (e.g., a calendar, data grid, or color picker), it must implement the appropriate WAI-ARIA pattern (e.g., `role="grid"` with `role="row"` and `role="gridcell"` children, roving tabindex, and full keyboard navigation). Grid the component does not provide any of this — you must build it. See the WAI-ARIA Authoring Practices Guide for the `grid` pattern.
+- **Interactive grid patterns.** If Grid is used for an interactive widget (calendar, data grid, color picker), you must implement the WAI-ARIA grid pattern yourself. This means `role="grid"` with `role="row"` and `role="gridcell"` children, roving tabindex, and full keyboard navigation. Grid the component provides none of this. See the WAI-ARIA Authoring Practices Guide for the `grid` pattern.
 
 ## All available props
 
@@ -5786,11 +5706,30 @@ Use these when Grid is nested inside another Grid.
 | `gridRowStart` | string | `grid-row-start` |
 | `gridRowEnd` | string | `grid-row-end` |
 
+## Related components
+
+- **Flex** — One-axis layout for rows or columns
+- **Box** — Single container for spacing and structure
+
+
+## For agents
+
+### Choosing between Box, Flex, Grid, Stack, Inline, and Container
+
+| Component | Dimensions | Adds visual styling | Use case |
+| :---- | :---- | :---- | :---- |
+| Box | Spacing and structure | Yes (background and, border) | Wrapping elements with padding or margin |
+| Flex | One-dimensional (row or column) | Yes (background and, border) | Toolbars, split layouts, aligned groups of elements |
+| Grid | Two-dimensional (rows \+ columns) | Yes (background and, border) | Card grids, dashboards, aligned column layouts |
+| Stack | One-dimensional (column only) | No | Vertical sequences of elements with uniform spacing |
+| Inline | One-dimensional (wrapping row) | No | Badges, Buttons, or any set of variable-width items that wrap |
+| Container | Centered column | No | Constraining content width and centering it |
+
 # Divider
 
 Renders a horizontal rule that marks a thematic break between sections of content.
 
-### Basic example
+## Basic example
 
 **Source:** `@sanity-labs/ui-poc`
 ```tsx
@@ -5800,26 +5739,62 @@ import { Divider } from '@sanity-labs/ui-poc'
 
 ```
 
-
-## Props
+## API
 
 Divider accepts no props. It renders a single `<hr>` element with no configuration.
 
-### **Usage guidelines**
+## Usage guidelines
 
-#### **When to use:**
+### When to use
 
 - To visually and semantically separate sections of logically distinct content within a vertical layout
 - Between groups of items in a list or menu where a clear boundary aids scanning
 - To mark a thematic shift in content — for example, between a primary action group and a destructive action in a panel
 
-#### **When not to use:**
+### When not to use
 
 - As a spacing tool. A Divider adds a visible line, not space. Use Stack's `space` prop to add vertical spacing between elements.
 - To add a border to the bottom of a container (such as a toolbar or nav header). Use `borderBottom` on Box instead — it is part of the container's own styling, not a thematic break in the content flow.
 - When the line is purely decorative and carries no meaning. The `<hr>` element announces a thematic break to screen readers. If no break is intended, use a CSS border or Box with `borderBottom` instead.
 
-#### **Choosing between Divider and Box borderBottom:**
+## Best practices
+
+### Do
+
+- Place Divider between logically distinct content groups — for example, between a metadata section and an actions section within a panel. Divider renders a semantic `<hr>`. Screen readers announce it as a thematic break, helping users understand content boundaries.
+- Use Divider inside a Stack so that spacing on either side of the rule is consistent with surrounding content
+
+### Don't
+
+- Don't use Divider as a substitute for spacing. Wrap content in a Stack with appropriate `space` instead.
+- Don't use Divider at the very top or bottom of a container to create an edge border. Use `borderTop` or `borderBottom` on a Box instead — edge borders are decorative, not thematic breaks.
+- Don't add multiple consecutive Dividers. Use Stack with a larger `space` value to create visual distance without redundant separators.
+
+## Content guidelines
+
+Divider has no text content of its own. These guidelines cover how content around a Divider should be structured.
+
+- **Label groups, not items.** Place a Divider between groups of related content, not between every individual item. If each item needs separation, use Stack `space` instead.
+- **Keep adjacent content self-explanatory.** A Divider signals "these two sections are different." The content on each side should make the difference clear without relying on the line itself to convey meaning.
+- **Pair with group headings when scanning matters.** In long lists (navigation, settings panels), use a heading or Label above each group so users can identify sections without reading every item. The Divider reinforces the boundary; the heading names it.
+- **Don't use Divider to separate a label from its content.** A Label followed by a Divider followed by the field creates a false thematic break. Use Stack `space={1}` to pair a label with its field.
+
+## Accessibility
+
+- **Semantic thematic break.** Divider renders as `<hr>`, which carries the implicit ARIA role `separator`. Screen readers announce it as a thematic break. Use it only when the content on either side is genuinely distinct — not for purely visual spacing.
+- **Not interactive.** Divider is not focusable and has no keyboard interaction. Do not add `onClick` or other event handlers to it.
+- **Do not suppress semantics.** Do not override the `<hr>` role with `role="presentation"` or `aria-hidden="true"` unless the line is genuinely decorative. If the line is decorative, use a CSS border or Box with `borderBottom` instead of Divider.
+- **Does not create landmarks.** Unlike `<section>` or `<nav>`, `<hr>` does not create an ARIA landmark. Screen reader users navigating by landmarks will not stop at a Divider. Use it for in-flow separation only, not as a structural navigation aid.
+
+## Related components
+
+- **Stack** — Vertical spacing between items without a visible line
+- **Box** — Use `borderBottom` for a decorative line on a container edge
+
+
+## For agents
+
+### Choosing between Divider and Box borderBottom
 
 | | **Divider** | **Box borderBottom** |
 | :---- | :---- | :---- |
@@ -5828,31 +5803,10 @@ Divider accepts no props. It renders a single `<hr>` element with no configurati
 | **Sits** | Between siblings in a content flow | On the outside edge of a container |
 | **Use case** | Separating content items within a Stack | Separating a toolbar or header from the content below it |
 
-### **Best practices**
-
-#### **Do**
-
-- Place Divider between logically distinct content groups — for example, between a metadata section and an actions section within a panel
-- Use Divider inside a Stack so that spacing on either side of the rule is consistent with surrounding content
-
-#### **Don't**
-
-- Don't use Divider as a substitute for spacing. Wrap content in a Stack with appropriate `space` instead.
-- Don't use Divider at the very top or bottom of a container to create an edge border. Use `borderTop` or `borderBottom` on Box or Card instead.
-- Don't add multiple consecutive Dividers. If you need more visual separation, increase the Stack `space` value or restructure the content into distinct sections.
-
-### Accessibility
-
-- **Semantic thematic break.** Divider renders as `<hr>`, which carries the implicit ARIA role `separator`. Screen readers announce it as a thematic break. Use it only when the content on either side is genuinely distinct — not for purely visual spacing.
-- **Not interactive.** Divider is not focusable and has no keyboard interaction. Do not add `onClick` or other event handlers to it.
-- **Do not suppress semantics.** Do not override the `<hr>` role with `role="presentation"` or `aria-hidden="true"` unless the line is genuinely decorative. If the line is decorative, use a CSS border or Box with `borderBottom` instead of Divider.
-- **Does not create landmarks.** Unlike `<section>` or `<nav>`, `<hr>` does not create an ARIA landmark. Screen reader users navigating by landmarks will not stop at a Divider. Use it for in-flow separation only, not as a structural navigation aid.
-
-
 ### Code examples
-```
-{/* Use `<Divider>` for horizontal separators between navigation groups.** It uses `var(--card-border-color)` automatically and handles spacing: /* }
 ```tsx
+{/* Use `<Divider>` for horizontal separators between navigation groups.** It uses `var(--card-border-color)` automatically and handles spacing: /* }
+
 <Stack space={2}>
   <Stack space={1}>
     <Text size={1} weight="semibold" muted>Content</Text>
@@ -5884,7 +5838,7 @@ import { Stack } from '@sanity/ui'
 import { Heading, Text } from '@sanity-labs/ui-poc'
 
 <Stack space={3}>
-  <Heading level={2}>Section Title</Heading>
+  <Heading as="h2">Section Title</Heading>
   <Text as="p" size={1}>First paragraph of content.</Text>
   <Text as="p" size={1} color="muted">Secondary description text.</Text>
 </Stack>
@@ -5894,7 +5848,17 @@ import { Heading, Text } from '@sanity-labs/ui-poc'
 
 ### API documentation
 
-_Refer to TypeDocs in Flex.tsx_
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `as` | React element type | `'div'` | HTML element to render (e.g. `as="ul"`, `as="nav"`, `as="fieldset"`) |
+| `space` | `0`–`9` or responsive array | — | Vertical spacing between children from the spacing scale |
+| `padding` | `0`–`9` or responsive array | — | Inner padding around all children |
+| `paddingX` | `0`–`9` or responsive array | — | Inline (horizontal) padding |
+| `paddingY` | `0`–`9` or responsive array | — | Block (vertical) padding |
+| `border` | `boolean` | `false` | Adds a visible border |
+| `borderTop` | `boolean` | `false` | Top border only |
+| `borderBottom` | `boolean` | `false` | Bottom border only |
+| `overflow` | `'auto'` \| `'hidden'` \| `'visible'` | — | Overflow behavior |
 
 ### Usage guidelines
 
@@ -6075,75 +6039,184 @@ Example:
 </Stack>
 ```
 
+### Related components
+
+- **Flex** — Use `flexDirection="column"` when flex-child props like `flexGrow` are needed
+- **Grid** — Two-axis layout for card grids and dashboards
+
 # Text
-
-
 
 Used for the majority of UI copy, including body paragraphs, captions, and metadata. It is distinct from other typography components, such as Code, Heading, KBD, and Label.
 
-### Basic example
+## Basic example
 
+**Source:** `@sanity-labs/ui-poc`
 ```tsx
 import { Text } from '@sanity-labs/ui-poc'
 
-<Text>Text</Text>
+<Text>Body text rendered as a paragraph.</Text>
 ```
 
-### API
-
-> **Note:** This documents the `@sanity-labs/ui-poc` Text component. It has a narrower prop surface than `@sanity/ui`'s Text — there is no `accent` or `textOverflow` prop.
+## API
 
 | Prop | Type | Default | Description |
 |------|------|---------|-------------|
-| `as` | React element type | `'span'` | HTML element or component to render (e.g. `as="p"`, `as="span"`, `as="label"`) |
-| `size` | `0`–`4` or responsive array | `2` | Font size and line height from the typography scale |
-| `weight` | `'regular'`, `'medium'`, `'semibold'`, `'bold'` or responsive array | — | Font weight |
-| `align` | `'start'`, `'center'`, `'end'` or responsive array | — | Text alignment using CSS logical properties (`text-align: start/center/end`). `'start'` is left in LTR, right in RTL. |
-| `color` | `'default'`, `'muted'`, `'primary'`, `'positive'`, `'caution'`, `'critical'` or responsive array | `'default'` | Text color. `'muted'` sets gray-500. Combine with the `muted` prop to shift to an even lighter tint. |
-| `muted` | boolean | `false` | Lightens the text color to the lighter tint of the active `color`. Combine with `color` to de-emphasize semantic text (e.g. `color="critical" muted` → lighter red). Standalone `muted` with no `color` resolves to gray-500. |
-| `lines` | number or responsive array | — | Clamp text to N visible lines using `-webkit-line-clamp`. Use instead of `textOverflow="ellipsis"`. |
-| `className` | string | — | Additional CSS class names |
-| `style` | React.CSSProperties | — | Inline styles |
+| `as` | React element type | `'p'` | HTML element to render (e.g. `as="span"`, `as="label"`, `as="li"`) |
+| `size` | `0`–`4` | `2` | Font size and line height from the typography scale |
+| `weight` | `'regular'` \| `'medium'` \| `'semibold'` \| `'bold'` | — | Font weight |
+| `align` | `'left'` \| `'center'` \| `'right'` \| `'justify'` | — | Text alignment |
+| `muted` | `boolean` | `false` | Reduces text opacity for de-emphasized content |
+| `trim` | `boolean` | `false` | Applies `text-box-trim` to remove leading/trailing whitespace from the text box |
+| `lineClamp` | `number` | — | Clamp to N visible lines using CSS `-webkit-line-clamp` |
+| `margin` | `0`–`9` \| `'auto'` | — | CSS `margin` (spacing scale) |
+| `marginX` | `0`–`9` \| `'auto'` | — | Inline (horizontal) margin |
+| `marginY` | `0`–`9` \| `'auto'` | — | Block (vertical) margin |
+| `marginTop` | `0`–`9` \| `'auto'` | — | Top margin |
+| `marginRight` | `0`–`9` \| `'auto'` | — | Right margin |
+| `marginBottom` | `0`–`9` \| `'auto'` | — | Bottom margin |
+| `marginLeft` | `0`–`9` \| `'auto'` | — | Left margin |
+
+All props accept responsive arrays (e.g. `size={[1, null, 2]}`).
+
+## Usage guidelines
+
+### When to use
+
+- Body copy, descriptions, captions, and metadata.
+
+### When not to use
+
+- To label a section within a Menu, side panel, or above headings. Use **Label** instead.
+- To establish page structure (page title, section header). Use **Heading** instead.
+- To denote a keyboard shortcut. Use **KBD** instead.
+- For inline or block code samples. Use **Code** instead.
+- As a clickable link. Wrap in a link component or anchor tag.
+
+## Best practices
+
+### Do
+
+- Left-align text in most cases. Sanity's typographic system prefers left-aligned body copy.
+- Use `muted` for secondary or helper text (timestamps, captions, metadata).
+- Use responsive arrays (e.g. `size={[1, null, 2]}`) to keep text readable across viewports.
+- Aim for 55–70 characters per line in multiline blocks for best legibility.
+
+### Don't
+
+- Don't center-align long blocks of paragraph text. This disrupts reading flow and is difficult for users with dyslexia.
+- Don't rely on color alone to convey importance. Pair with an icon or badge instead.
+- Don't italicize or underline for emphasis. Use the `weight` prop.
+- Don't truncate text unless absolutely needed. Truncation hides information and creates friction.
+
+## Variants
+
+### Muted
+
+`muted` reduces the text's visual prominence. Use it for secondary content that supports but does not compete with the primary text.
+
+```tsx
+<Text muted>Last edited 2 hours ago</Text>
+<Text size={1} muted>Supplementary description</Text>
+```
+
+> ⚠️ **Muted text at small sizes may fail WCAG AA contrast.** Test `muted` at `size={0}` (10px) and `size={1}` (13px) against your background. For small muted text, use `size={2}` or higher, or add `weight="medium"` to improve legibility.
+
+### Weight
+
+| Value | CSS weight | Use case |
+|-------|-----------|----------|
+| `'regular'` | 400 | General body text. The default for text above `size={0}`. |
+| `'medium'` | 500 | Visual separation from body copy. Improves legibility at small sizes. |
+| `'semibold'` | 600 | Emphasis within body copy. Labels in custom interactive components. |
+| `'bold'` | 700 | Strong emphasis at `size={0}` to aid legibility at the smallest size. |
+
+### Size
+
+| Value | Description | Use case |
+|-------|------------|----------|
+| `0` | Smallest | Fine print, legal text, high-density layouts |
+| `1` | Small | UI labels (buttons, menu items, tabs), toast messages, empty states |
+| `2` | Medium (default) | Content editing text (fields, selects), calls to action |
+| `3` | Large | Rarely needed. Most uses are better served by Heading. |
+| `4` | Extra large | Rarely needed. Most uses are better served by Heading. |
+
+### Align
+
+| Value | Use case |
+|-------|----------|
+| `'left'` | Body copy, UI labels, headings — the default alignment. |
+| `'center'` | Rare. Empty state copy. Labels inside centered UI elements. |
+| `'right'` | Numeric data in table cells. RTL body copy. |
+| `'justify'` | Rarely appropriate in UI. May cause uneven word spacing at narrow widths. |
+
+### Line clamp (truncation)
+
+```tsx
+{/* Single-line clamp with ellipsis */}
+<Text lineClamp={1}>Long text that will be truncated after one line...</Text>
+
+{/* Two-line clamp */}
+<Text lineClamp={2}>Text that wraps to two lines before truncating</Text>
+```
+
+Truncation is a last resort. When using `lineClamp`, make the full text available via a `Tooltip` or `title` attribute. Use cases:
+
+- Text in a grid where wrapping would cause irregular row heights.
+- User-generated or machine-generated text with unpredictable length.
+- UUIDs or long strings in compact areas.
+
+### Trim
+
+`trim` applies CSS `text-box-trim` to remove extra whitespace above and below the text box. Use it when precise vertical alignment with adjacent elements matters (e.g., aligning text baseline with an icon or badge).
+
+```tsx
+<Text size={1} trim>Trimmed text</Text>
+```
+
+## Accessibility
+
+- **Semantic structure.** Text defaults to `<p>`. Use `as="span"` when the text is inline within another element. Use `as="li"` inside lists.
+- **Contrast.** Text must maintain 4.5:1 contrast against the background for standard text and 3:1 for large text (WCAG 1.4.3 AA). Be careful with `muted` on non-white backgrounds.
+- **Don't rely on color.** Do not use visual styling as the only way to indicate status. Always pair with text labels or icons.
+- **Scaling.** Text must remain legible at 200% browser zoom. Avoid fixed pixel units in overrides.
+
+## Content
+
+- **Sentence case.** Use sentence case for UI labels and body text (e.g., "Edit profile" not "Edit Profile").
+- **Clear language.** Avoid jargon, acronyms, and complex sentences. Aim for an 8th-grade reading level.
+- **Conciseness.** Be succinct. Users scan text rather than reading word-for-word.
+- **Actionable.** Frame instructions as actionable steps, not passive descriptions.
+
+## Related components
+
+- **Heading** — Semantic page headings that define content hierarchy
+- **Label** — Form field labels and small UI annotations
+- **Badge** — Inline status labels with semantic tone
+
+## For agents
+
+**Note:** This documents the `@sanity-labs/ui-poc` Text component. It uses `as` to control the rendered element (default: `<p>`). There is no `color`, `accent`, `textOverflow`, or `lines` prop.
+
+### Key differences from `@sanity/ui` Text
+
+- **Default element is `<p>`**, not `<span>`. Text renders as a block-level paragraph by default. Use `as="span"` when inline rendering is needed.
+- **No `color` prop.** Use `muted` for de-emphasized text. Semantic color is not available on Text in this version.
+- **`lineClamp` replaces `lines` and `textOverflow`.** Use `lineClamp={1}` for single-line truncation.
+- **`trim` is new.** Applies `text-box-trim` for precise vertical alignment.
+- **Margin props are available.** `margin`, `marginX`, `marginY`, `marginTop`, `marginRight`, `marginBottom`, `marginLeft` — all accept the 0–9 spacing scale or `'auto'`.
 
 ### Common patterns
 
-These are the most frequent Text use cases. Each has a prop-based solution — no inline style needed.
-
-**Secondary / helper text (timestamps, metadata, descriptions):**
+**Secondary / helper text:**
 ```tsx
-{/* ✓ — use color="muted" for secondary text */}
-<Text size={1} color="muted">Last edited 2 hours ago</Text>
+{/* ✓ — muted prop */}
+<Text size={1} muted>Last edited 2 hours ago</Text>
 
 {/* ✗ — inline style bypasses theming and dark mode */}
 <Text size={1} style={{ color: '#666' }}>Last edited 2 hours ago</Text>
 ```
 
-**Status metadata:**
-```tsx
-{/* ✓ — semantic color via prop */}
-<Text size={1} color="positive">Published</Text>
-<Text size={1} color="critical">Failed</Text>
-
-{/* ✗ — hardcoded color breaks in dark mode */}
-<Text size={1} style={{ color: 'green' }}>Published</Text>
-```
-
-**Block-level text in a Stack:**
-```tsx
-{/* ✓ — as="p" renders block-level, Stack space works correctly */}
-<Stack space={2}>
-  <Text as="p" size={1}>First paragraph</Text>
-  <Text as="p" size={1} color="muted">Second paragraph</Text>
-</Stack>
-
-{/* ✗ — default <span> is inline; items crowd together in Stack */}
-<Stack space={2}>
-  <Text size={1}>First paragraph</Text>
-  <Text size={1} color="muted">Second paragraph</Text>
-</Stack>
-```
-
-**Emphasized text (without inline font-weight):**
+**Emphasized text:**
 ```tsx
 {/* ✓ — weight prop */}
 <Text size={1} weight="semibold">Important note</Text>
@@ -6152,288 +6225,216 @@ These are the most frequent Text use cases. Each has a prop-based solution — n
 <Text size={1} style={{ fontWeight: 600 }}>Important note</Text>
 ```
 
+**Inline text inside a Flex row:**
+```tsx
+{/* Text defaults to <p> (block). Use as="span" for inline context. */}
+<Flex alignItems="center" gap={2}>
+  <Text as="span" size={1}>Label:</Text>
+  <Text as="span" size={1} weight="semibold">Value</Text>
+</Flex>
+```
+
 **Text inside native HTML elements (`<td>`, `<th>`, `<li>`):**
 
-> ⚠️ **Always wrap text content inside native HTML elements in a Text, Label, or Badge component.** Bare strings inside `<td>`, `<th>`, `<li>`, `<span>`, or `<div>` inherit the browser's default font and size — they do not match the Sanity UI type scale. This also applies to table headers.
+> ⚠️ **Always wrap text content inside native HTML elements in a Text, Label, or Badge component.** Bare strings inherit the browser's default font and size.
 
 ```tsx
-{/* ✗ — bare string in <td>; browser default font, no type scale */}
+{/* ✗ — bare string in <td> */}
 <td>{row.title}</td>
 
-{/* ✓ — Text controls font, size, weight, color */}
-<td><Text size={1} weight="medium">{row.title}</Text></td>
+{/* ✓ — Text controls font, size, weight */}
+<td><Text as="span" size={1} weight="medium">{row.title}</Text></td>
 ```
 
 ```tsx
-{/* ✗ — bare string in <th>; agents then add inline fontSize/fontWeight/color to compensate */}
+{/* ✗ — inline styles to compensate for bare string in <th> */}
 <th style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280' }}>Title</th>
 
-{/* ✓ — Text handles all typography; <th> styling comes from global.css */}
-<th><Text size={0} weight="semibold" color="muted">Title</Text></th>
+{/* ✓ — Text handles typography
+; <th> styling comes from global.css */}
+<th><Text as="span" size={0} weight="semibold" muted>Title</Text></th>
 ```
 
-See `table.md` for the full table pattern with CSS-based styling.
+See the [Table docs](table.md) for the full table pattern with CSS-based styling.
 
-### **Usage guidelines**
+### Inline style alternatives
 
-**When to use:**
-
-- You are displaying body copy, descriptions, or captions
-
-**When not to use:**
-
-- To label a section within a Menu, side panel, or above headings. Use Label instead.
-- To establish the structural hierarchy of a page (e.g., Page Title). Use Heading instead.
-- To denote a keyboard shortcut or hotkey. Use KBD instead.
-- For displaying inline or block code samples. Use Code instead.
-- As a specific interaction link. Wrap the text in a link component or anchor tag, ensuring the clickable area is accessible.
-
-### **Best practices**
-
-**Do**
-
-- Use `align="start"` in the majority of cases. Sanity's typographic system prefers start-aligned text. (`'start'` maps to `text-align: start` — left in LTR languages, right in RTL.)
-- Use `muted` or `color="muted"` for secondary/helper text and metadata. `color="muted"` sets a fixed gray-500; `muted` shifts whatever `color` is set to its lighter tint — use it to de-emphasize semantically coloured text (e.g. a dimmed critical label).
-- Use responsive arrays (e.g., `size={[1,2,3]}`) to ensure text is readable across mobile and desktop viewports.
-- Aim for 55-70 characters per line in a multiline block of text for optimal legibility.
-
-**Don’t**
-
-- Don’t center-align long blocks of paragraph text; this disrupts the reading flow and is difficult for users with dyslexia.
-- Don’t rely on color or the `accent` prop to capture attention or convey importance. People with certain visual impairments may not distinguish the change. Pair the text with an icon or badge instead.
-- Don’t italicize or underline to emphasize text. Use Text’s weight prop instead.
-- **In a `Stack`, set `as="p"` for block-level body text.** Text defaults to `as="span"`, which renders inline. Multiple Text components inside a Stack may crowd together or behave unexpectedly without `as="p"` or another block element.
-- Don’t truncate text unless it is completely necessary. Text truncation makes information less available to people which can become a point of friction or confusion.
-
-### Variants
-
-#### Muted
-
-**Which one to use:**
-
-- **For ordinary secondary or helper text** (timestamps, captions, metadata): use `color="muted"`.
-```tsx
-   <Text color="muted">Last edited 2 hours ago</Text>
-```
-- **For de-emphasising text that already has semantic color**: use `muted` boolean.
-```tsx
-   <Text color="critical" muted>Non-critical error note</Text>
-   <Text color="positive" muted>Subtle success note</Text>
-```
-- **Stacking both** (`color="muted" muted`) gives gray-300. Use sparingly.
-
-When `muted={true}` is used alone it resolves to gray-500 — same as `color="muted"`. For plain secondary text, `color="muted"` is clearer and preferred.
-
-> ⚠️ **Muted text at small sizes may fail WCAG AA contrast.** `color="muted"` resolves to gray-500 (#797979), which produces a 4.35:1 contrast ratio against white — below the 4.5:1 AA threshold for text under 18px. This affects `size={0}` (10px) and `size={1}` (13px). For small muted text, use `size={2}` or higher, or add `weight="medium"` to improve legibility.
-
-
-#### Weight
-
-Sets the typographic weight of text.
-
-| **Value** | **Description** | **Purpose** | **Use case(s)** |
-| --- | --- | --- | --- |
-| `"regular"` | Regular font weight (400) | For general body text. The preferred weight for text above `size=0`. | General paragraphs and normal body copy. |
-| `"medium"` | Medium font weight (500) | To create visual separation from general body copy as well as improve general legibility for small text. | The default text treatment in interactive elements. Use semibold for labels in custom interactive UI components. General text treatments using Text’s `size=0`. |
-| `"semibold"` | Semibold font weight (600) | For emphasizing text  above `size=0`. | Emphasizing a term or phrase within paragraphs and normal body copy.  |
-| `"bold"` | Bold font weight (700) | Specifically to emphasize Text components with `size=0 `to aid in legibility. | For emphasized  text treatments using Text’s smallest size. |
-
-#### Size
-
-| **Value** | **Description** | **Purpose** | **Use case(s)** |
-| --- | --- | --- | --- |
-| `0` | Text’s smallest size | To act as a way to deemphasize content and/or accommodate for extreme high-density compositions. | For fine print and legal text (check with local laws to ensure compliance) Situations where text is required in a small space |
-| `1` | Text’s small size | The default size for UI text and UI labels, such as Buttons, MenuItems, and Tabs. | Text or UI labels that are **not** specifically related to content editing. Text that acts as non-critical messaging to the user, such as Toasts and empty states. |
-| `2` | Text’s medium size | The default size for text related to content editing | Text or UI labels that are specifically related to content editing (ex: text fields, selects, etc.). Calls to action where visual emphasis is essential (ex: calling out important steps in a workflow) |
-| `3` | Text’s large size | For adding significant emphasis. Use is not generally advised. | No common use cases. Most uses are better supported by  the Header component. |
-| `4` | Text’s extra large size | For adding extreme emphasis. Use is not generally advised. | No common use cases. Most uses are better supported by  the Header component. |
-
-#### Accent
-
-Accent is deprecated and should be avoided. Use `weight` and/or `size` instead of accent to increase emphasis.
-
-#### Align
-
-| **Value** | **Description** | **Purpose** | **Use case(s)** |
-| --- | --- | --- | --- |
-| `"start"` | Logical start alignment (`text-align: start`) | The default alignment for text in LTR layouts. Equivalent to left in LTR languages, right in RTL. | Body copy, UI labels, and headings in the majority of cases. |
-| `"center"` | Center alignment | Used rarely when the text element's parent is centered. | Empty state copy. Labels within UI elements such as Buttons andText that is left/start aligned. | Acts as the primary alignment for text within Sanity UI within LTR languages. | Displaying body copy for LTR languages. Headers and content for numeric data within table cells in RTL languages. |
-| `"center"` | Text that is center aligned. | Used rarely in situations where the text element’s parent is centered. | Copy within a pure-center content block, such as an empty state. Labels within UI elements, such as Buttons, Tabs, etc. |
-| `"right"` | Text that is right/end aligned. | Acts as the primary alignment for text within Sanity UI within RTL languages. | Displaying body copy for RTL languages. Headers and content for numeric data within table cells in LTR languages. |
-
-#### Lines (truncation)
-
-> **@sanity-labs/ui-poc:** Use the `lines` prop instead of `textOverflow`. Setting `lines={1}` clamps to a single line; `lines={3}` shows three lines then clips. This uses CSS `-webkit-line-clamp` under the hood.
->
-> ```tsx
-> {/* ✗ — textOverflow prop does not exist on @sanity-labs/ui-poc Text */}
-> <Text textOverflow="ellipsis">long text...</Text>
->
-> {/* ✓ — use lines prop */}
-> <Text lines={1}>long text...</Text>
-> ```
->
-> The `lines` prop accepts a responsive array: `lines={[2, null, 1]}`.
-
-Determines whether the Text component truncates as opposed to wrapping. This should be used as a last resort. Some examples where TextOverflow should be used are:
-
-- Text used within a grid of elements where text wrapping would cause irregular sizes or shifts in content.
-- Extremely long strings, like UUIDs, in small areas where the text won’t wrap elegantly and will push the container to unsupported widths.
-- Situations where text is user/machine generated and extreme edge cases may exist.
-
-Before truncating, attempt to shorten the text if possible. The ideal kind of truncation is no truncation. When truncation is necessary, make sure the full text string is available via `Tooltip` component or `title `attribute.
-
-### Accessibility
-
-To ensure content is accessible to all users, including those using assistive technologies:
-
-- **Contrast Compliance:** Ensure that the text color maintains a contrast ratio of at least **4.5:1** against the background for standard text, and **3:1** for large text. Be particularly careful when using `muted` or `accent` props on non-standard backgrounds.
-- **Don't rely on color:** Do not use the `accent` prop as the _only_ way to indicate status (e.g., errors or success). Always pair color with text labels or icons.
-- **Semantic Structure:** While the `Text` component defaults to a `span`, use the `as` prop to render semantically appropriate tags (e.g., `as="p"`) to help screen readers understand the content structure.
-- **Scaling:** Ensure text remains legible when the browser is zoomed up to 200%. Avoid using fixed pixel units if overriding styles manually.
-
-### **Content**
-
-- **Sentence case:** Use sentence case for UI labels and body text (e.g., "Edit profile" not "Edit Profile").
-- **Clear language:** Avoid jargon, acronyms, and complex sentence structures. Aim for an 8th-grade reading level to maximize comprehension.
-- **Conciseness:** Be succinct. Avoid "filling space" with flowery language. Users scan text rather than reading word-for-word.
-- **Actionable:** When Text is used for instructions, frame the content as actionable steps rather than passive descriptions.
+| Inline style | Alternative |
+|--------------|-------------|
+| `style={{ color: '#666' }}` | `muted` |
+| `style={{ fontWeight: 600 }}` | `weight="semibold"` |
+| `style={{ fontWeight: 400 }}` | `weight="regular"` |
+| `style={{ opacity: 0.5 }}` | `muted` |
+| `style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}` | `lineClamp={1}` |
+| `style={{ textAlign: 'center' }}` | `align="center"` |
 
 # Heading
 
-Headings are used to create a logical hierarchy and page structure. They guide the user's eye, group related content, and enable users of assistive technologies to navigate the interface quickly.
+Headings create a logical hierarchy and page structure. They guide the user's eye, group related content, and let users of assistive technologies navigate the interface quickly.
 
-### Basic example
+## Basic example
 
+**Source:** `@sanity-labs/ui-poc`
 ```tsx
 import { Heading } from '@sanity-labs/ui-poc'
 
-<Heading>Title</Heading>
+<Heading size={3}>Page Title</Heading>
 ```
 
-### API
-
-**Note:** This documents the `@sanity-labs/ui-poc` Heading component. It uses a `level` prop (not `as`) to set the semantic heading tag. There is no `as`, `weight`, `muted`, `accent`, or `textOverflow` prop.
-
-⛔ **Always set `level` explicitly. Omitting it silently renders `<h2>` regardless of context.**
-
-`level` defaults to `2`. There is no runtime warning when it is omitted. TypeScript does not require it. A `<Heading>` without a `level` silently produces an `<h2>` even when the page needs an `<h1>`. This is an invisible accessibility violation — incorrect heading hierarchy — with zero feedback at authoring time.
-
-```tsx
-{/* ✗ — silently renders <h2> */}
-<Heading>Page Title</Heading>
-
-{/* ✓ */}
-<Heading level={1}>Page Title</Heading>
-```
-
+## API
 
 | Prop | Type | Default | Description |
 |------|------|---------|-------------|
-| `level` | `1`–`6` | `2` | Semantic heading level — renders `<h1>`–`<h6>`. **Always set this explicitly.** Default is `2` (`<h2>`). |
-| `size` | `0`–`5` or responsive array | `0` | Visual font size from the heading scale, independent of `level`. Defaults to `0` when not set. |
-| `align` | `'start'`, `'center'`, `'end'` or responsive array | — | Text alignment using CSS logical properties (`text-align: start/center/end`). `'start'` is left in LTR, right in RTL. Use with caution — headings should almost always be start-aligned. |
-| `color` | `'default'`, `'muted'`, `'primary'`, `'positive'`, `'caution'`, `'critical'` or responsive array | `'default'` | Text color. Use `color="muted"` where you would use the `muted` prop on `@sanity/ui` Heading. |
-| `lines` | number or responsive array | — | Clamp to N visible lines using `-webkit-line-clamp`. Use instead of inline overflow styles. |
-| `className` | string | — | Additional CSS class names |
-| `style` | React.CSSProperties | — | Inline styles |
+| `as` | `'h1'` \| `'h2'` \| `'h3'` \| `'h4'` \| `'h5'` \| `'h6'` | `'h1'` | Semantic heading element to render. Always set this explicitly. |
+| `size` | `0`–`9` | `2` | Visual font size from the heading scale. Independent of `as`. |
+| `weight` | `'regular'` \| `'medium'` \| `'semibold'` \| `'bold'` | `'bold'` | Font weight |
+| `align` | `'left'` \| `'center'` \| `'right'` \| `'justify'` | — | Text alignment |
+| `muted` | `boolean` | `false` | Reduces text opacity for de-emphasized headings |
+| `trim` | `boolean` | `false` | Applies `text-box-trim` to remove leading/trailing whitespace from the text box |
+| `lineClamp` | `number` | — | Clamp to N visible lines using CSS `-webkit-line-clamp`. Use instead of inline overflow styles. |
+| `margin` | `0`–`9` \| `'auto'` | — | CSS `margin` (spacing scale) |
+| `marginX` | `0`–`9` \| `'auto'` | — | Inline (horizontal) margin |
+| `marginY` | `0`–`9` \| `'auto'` | — | Block (vertical) margin |
+| `marginTop` | `0`–`9` \| `'auto'` | — | Top margin |
+| `marginRight` | `0`–`9` \| `'auto'` | — | Right margin |
+| `marginBottom` | `0`–`9` \| `'auto'` | — | Bottom margin |
+| `marginLeft` | `0`–`9` \| `'auto'` | — | Left margin |
 
-### Usage guidelines
+All props accept responsive arrays (e.g. `size={[1, null, 3]}`).
 
-**When to use:**
+## Usage guidelines
 
-- You need to establish the semantic structure of a page (e.g., Page Title, Section Header).
-- You need to group text and elements into logical sections.
+### When to use
 
-**When not to use:**
+- To establish the semantic structure of a page (page title, section header, subsection).
+- To group text and elements into logical, navigable sections.
 
-- Don't use Heading for large text for a number or a callout that does not define a section. Use the **Text** component with a `size` prop instead.
-- Don't use Heading to emphasize text inside a paragraph. Use **Text** with a `weight="bold"` prop.
+### When not to use
 
-### Best practices
+- For large decorative text that does not define a section. Use **Text** with a `size` prop instead.
+- To emphasize text inside a paragraph. Use **Text** with `weight="bold"`.
 
-**Do**
+## Best practices
 
-- Use a logical hierarchy. Start with H1 for the main page title and descend to H2, H3, etc., based on the depth of the content.
-- Use `size={0}` for headings that exist in the UI chrome (ex: navbars, toolbars, etc.). Sanity's UI aims to take up as small of a footprint as possible. 
-- Use larger heading sizes (1 - 2) for headings related to content. Content should take visual priority over UI chrome.
-- Use the `level` prop (e.g., `level={2}`) to set the semantic heading tag. The component defaults to `level={2}` (`<h2>`) — always set it explicitly to match the content hierarchy. `level` accepts integers `1`–`6`.
-- Start-align headings (left-aligned in LTR languages) for easier reading. This provides a consistent starting edge for the eye.
+### Do
 
-**Don't**
+- Use a logical hierarchy. Start with `as="h1"` for the page title and descend to `as="h2"`, `as="h3"`, etc., based on content depth.
+- Always set `as` explicitly. The component defaults to `<h1>`. A page with multiple `<h1>` elements has a broken heading outline.
+- Use `size` to control visual appearance independently of the semantic level. A sidebar heading can be `as="h2" size={0}` (small text, correct hierarchy).
+- Use `size={0}` or `size={1}` for headings in UI chrome (toolbars, sidebars). Reserve larger sizes for content headings.
+- Left-align headings for easier reading. This gives the eye a consistent starting edge.
 
-- Avoid center-aligning headings–especially when the text is long. This disrupts the reading flow and can be difficult for users with dyslexia.
-- Don't skip heading levels (e.g., jumping from H1 to H3) simply to achieve a specific visual size. Use the `size` prop to adjust visuals while keeping the `level` prop semantically correct.
-- Don't use Headings for visual differentiation. Headings are functional in nature.
-- Don't manually set overflow styling in Heading components, such as `style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}`. Use the `lines` prop instead (`lines={1}` for single-line clamp) or let the text wrap.
-- Don't customize Heading text colors. Use `color` to convey a semantic meaning when appropriate.
+### Don't
 
-### Variants
+- Don't skip heading levels (e.g., jumping from `as="h1"` to `as="h4"`). Use `size` to adjust visuals while keeping the hierarchy correct. Screen readers build a table of contents from headings. A gap signals missing sections and confuses navigation.
+- Don't center-align headings, especially long ones. This disrupts reading flow and is difficult for users with dyslexia.
+- Don't use Heading for visual differentiation alone. Headings are semantic. Use Text with `weight="semibold"` or `size` for visual emphasis that doesn't affect the heading hierarchy.
+- Don't use inline `style` for overflow or truncation. Use `lineClamp={1}` for single-line clamping.
 
-#### Size
+## Variants
 
-| **Value** | **Description** | **Purpose** | **Use case(s)** |
-| --- | --- | --- | --- |
-| `0` | Heading's smallest size | To act as a way to deemphasize content and/or accommodate for extreme high-density compositions. | The default size headings inside UI chrome, such as toolbars and sidebars . |
-| `1` | Heading's small size | The default size sub-groups of content. | Content sub-section titles. |
-| `2` | Heading's medium size | The emphasized size for groups of content. | Contentsection titles |
-| `3` | Heading's large size | For adding titles within high density layouts. | Document titles within the main content window. |
-| `4` | Heading's extra large size | For adding large titles within moderate density layouts. | Emphasized titles within Studio editor content. |
-| `5` | Heading's largest size | For adding large titles within low density layouts. | Document titles within Canvas editor content. |
+### Size
 
-#### Align
+| Value | Description | Use case |
+|-------|------------|----------|
+| `0` | Smallest | UI chrome headings — toolbars, sidebars, compact panels |
+| `1` | Small | Content sub-section titles |
+| `2` | Medium (default) | Standard section headings |
+| `3` | Large | Document titles in high-density layouts |
+| `4` | Extra large | Document titles in moderate-density layouts |
+| `5` | Largest named size | Document titles in low-density layouts (e.g., Canvas) |
+| `6`–`9` | Display sizes | Reserved for large display text. Rarely used. |
 
-Sets the Heading's horizontal alignment. **Use with caution. **Headings should almost always be left/start aligned. In certain cases on mobile devices `align="center"` may be preferable.
+### Weight
 
-#### Lines (truncation)
+| Value | Description |
+|-------|------------|
+| `'bold'` (default) | Standard heading weight. Used for sizes 0–2. |
+| `'semibold'` | Slightly lighter. Useful for dense UI chrome. |
+| `'medium'` | De-emphasized. Pair with larger sizes for display headings. |
+| `'regular'` | Lightest. Used at sizes 3+ for display-style headings. |
 
-> **@sanity-labs/ui-poc:** Use the `lines` prop instead of `textOverflow`. `lines={1}` clamps to one line using CSS `-webkit-line-clamp`. Accepts a responsive array.
->
-> ```tsx
-> {/* ✗ — textOverflow prop does not exist on @sanity-labs/ui-poc Heading */}
-> <Heading level={2} textOverflow="ellipsis">Long title...</Heading>
->
-> {/* ✓ — use lines prop */}
-> <Heading level={2} lines={1}>Long title...</Heading>
-> ```
+### Align
 
-Determines whether the Heading component truncates as opposed to wrapping. This should be used as a last resort. Some examples where truncation should be used are:
+Sets horizontal text alignment. Headings should almost always be left-aligned. Use `align="center"` only in rare cases like empty states or mobile layouts.
 
-- Titles used within a grid of elements where text wrapping would cause irregular sizes or shifts in content.
-- Situations where text is user/machine generated and extreme edge cases may exist.
+### Line clamp (truncation)
 
-Before truncating, attempt to shorten the text if possible. The ideal kind of truncation is no truncation. When truncation is necessary, make sure the full text string is available via `Tooltip` component or `title` attribute.
+```tsx
+{/* Single-line clamp with ellipsis */}
+<Heading as="h1" lineClamp={1}>Very long title that will be truncated...</Heading>
 
-### Accessibility
+{/* Two-line clamp */}
+<Heading as="h2" lineClamp={2}>Title that may wrap to two lines before truncating</Heading>
+```
 
-- **Navigation and orientation. **Use Heading to create explicit waypoints within an interface. Screen reader users rely on headings to navigate complex interfaces. Headings address common orientation issues in Sanity Studio.
-- **Semantic structure.** Always set the `level` prop to render `<h1>`–`<h6>`. The default `level={2}` renders `<h2>`. Use `level={1}` for the page title, `level={2}` for section headings, etc. Unlike `@sanity/ui`'s Heading, there is no `as` prop — `level` is the only way to control the rendered element.
-- **`level` must always be set explicitly — no exceptions.** The default `level={2}` renders `<h2>`. Omitting `level` is a silent accessibility violation: the page may have duplicate `<h2>` elements, a missing `<h1>`, or a broken heading outline. TypeScript does not warn. No console error fires. A screen reader user navigating by headings will encounter a broken structure with zero indication.
-- **Logical order.** Heading levels must descend in sequence (H1 → H2 → H3). Do not skip levels (e.g. H1 to H4). Screen reader users navigate by heading level — a gap breaks their mental model.
+Truncation is a last resort. When using `lineClamp`, make the full text available via a `Tooltip` or `title` attribute. Use cases:
+
+- Titles in a grid where wrapping would cause irregular row heights.
+- User-generated or machine-generated text with unpredictable length.
+
+### Trim
+
+`trim` applies CSS `text-box-trim` to remove extra whitespace above and below the text box. Use it when precise vertical alignment with adjacent elements matters (e.g., aligning a heading baseline with an icon or badge).
+
+```tsx
+<Heading as="h2" size={1} trim>Section Title</Heading>
+```
+
+### Muted
+
+`muted` reduces the heading's visual prominence. Use it for secondary headings that need to be present for structure but should not compete with the primary heading for attention.
+
+```tsx
+<Heading as="h3" muted>Additional details</Heading>
+```
+
+## Accessibility
+
+- **Always set `as` explicitly.** The default is `<h1>`. A page with multiple `<h1>` elements or a missing `<h1>` has a broken heading outline. Screen reader users navigate by heading level — the outline must be correct.
+- **Logical order.** Heading levels must descend in sequence (h1 → h2 → h3). Do not skip levels. Screen reader users build a mental model from heading levels — a gap breaks that model.
+- **One `<h1>` per page.** Use `as="h1"` for the page title only. All other headings should be `as="h2"` or deeper.
 - **Color contrast.** `muted` headings must maintain **3:1** contrast against the background for large text (24px+ regular or 19px+ bold) and **4.5:1** for smaller text (WCAG 1.4.3 AA).
-- **Zoom and reflow.** Heading sizes must remain legible at 400% zoom / 320px viewport width (WCAG 1.4.10 AA). Long headings should wrap, not clip. When using `lines={1}`, verify clipped headings still make sense in context. Spacing tokens use `rem` and scale with user font-size settings (WCAG 1.4.12 AA).
+- **Zoom and reflow.** Headings must remain legible at 400% zoom / 320px viewport width (WCAG 1.4.10 AA). Long headings should wrap, not clip. When using `lineClamp`, verify the clipped text still makes sense. Spacing tokens use `rem` and scale with user font-size settings (WCAG 1.4.12 AA).
 
-### **Content**
+## Content
 
-- **Concise:** Keep headings short and glanceable. Avoid overly long titles that wrap to multiple lines if possible.
-- **Sentence case:** Use sentence case for headings (e.g., "Page settings" rather than "Page Settings") to maintain a conversational tone and improve scanability.
-- **No punctuation:** Do not use punctuation (periods) at the end of headings unless the heading is a direct question.
-- **Descriptive:** Headings should clearly describe the content of the section they introduce.
+- **Concise.** Keep headings short and glanceable.
+- **Sentence case.** Use sentence case (e.g., "Page settings" not "Page Settings").
+- **No terminal punctuation.** Do not end headings with a period unless the heading is a question.
+- **Descriptive.** Headings should clearly describe the content of the section they introduce.
 
+## Related components
 
-## Inline style alternatives
+- **Text** — Body copy and UI text, not semantic headings
+- **Label** — Form field labels and small UI annotations
 
-Most inline styles are not needed for Flex. Use the alternatives below when considering an inline style.
+## For agents
+
+**Note:** This documents the `@sanity-labs/ui-poc` Heading component. It uses an `as` prop (`'h1'`–`'h6'`) to set the semantic heading tag. There is no `level`, `color`, `accent`, or `textOverflow` prop.
+
+⛔ **Always set `as` explicitly. The default is `<h1>` — which is correct only for the page title.**
+
+A `<Heading>` without `as` renders `<h1>`. If every heading on the page omits `as`, the page has multiple `<h1>` elements and a broken heading outline. TypeScript does not require `as`. No runtime warning fires.
+
+```tsx
+{/* ✗ — renders <h1>; wrong if this isn't the page title */}
+<Heading>Section Title</Heading>
+
+{/* ✓ — explicit level */}
+<Heading as="h2">Section Title</Heading>
+```
+
+### Inline style alternatives
 
 | Inline style | Alternative |
-|--------------|-----------------|
-| `<Heading style={{ color: #670000 }} ... >` | `<Heading color='critical' ... >` |
-| `<Heading style={{ color: scheme === 'dark' ? '#e3e4e8' : '#252837' }}> ... >` | Use `<Heading ... >` (Heading manages color scheme internally) |
-| `<Heading style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} ... >` | `<Heading lines={1} ...>`
+|--------------|-------------|
+| `style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}` | `lineClamp={1}` |
+| `style={{ fontWeight: 600 }}` | `weight="semibold"` |
+| `style={{ fontWeight: 400 }}` | `weight="regular"` |
+| `style={{ opacity: 0.5 }}` | `muted` |
 
 # Tooltip
-
-
 
 **Description** The Tooltip is a floating text label that displays information when a user hovers, focuses, or taps on an element. Its purpose is to provide helpful, non-essential context to a UI element. It succinctly describes the function of an element (like an icon-only button) or enhances baseline understanding without cluttering the interface.
 
@@ -6457,13 +6458,22 @@ import { TrashIcon } from '@sanity/icons'
 </Tooltip>
 ```
 
-> ⛔ **Tooltip requires its child to forward refs.** If the child component does not use `React.forwardRef`, the tooltip will not appear — **no error is thrown and no warning is logged.** This is the #1 cause of "tooltip doesn't show up" issues. Use a native HTML element or a Sanity UI component as the direct child. If wrapping a custom component, it must use `React.forwardRef`. See `silent-failures.md` #12.
+> ⛔ **Tooltip requires its child to forward refs.** If the child component does not use `React.forwardRef`, the tooltip will not appear — **the browser throws no error and logs no warning.** This is the #1 cause of "tooltip doesn't show up" issues. Use a native HTML element or a Sanity UI component as the direct child. If wrapping a custom component, it must use `React.forwardRef`. See `silent-failures.md` #12.
 
-### **API Documentation**
+### API documentation
 
-_Refer to TypeDocs in Tooltip.tsx_
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `content` | `ReactNode` | — | Content shown inside the tooltip |
+| `portal` | `boolean` | `false` | Renders in a React portal |
+| `placement` | `'top'` \| `'bottom'` \| `'left'` \| `'right'` | `'bottom'` | Position relative to the trigger |
+| `arrow` | `boolean` | `false` | Shows a visual arrow |
+| `animate` | `boolean` | `false` | Enables enter/exit animation (respects `prefers-reduced-motion`) |
+| `delay` | `{ open?: number, close?: number }` | — | Delay in milliseconds before showing/hiding |
+| `disabled` | `boolean` | `false` | Prevents the tooltip from appearing |
+| `children` | `ReactElement` | — | The trigger element — **must forward refs** |
 
-### **When to Use / When Not to Use**
+### Usage guidelines
 
 - **Use when:** You need to explain the function of an icon-only button (e.g., a "Trash" icon meaning "Delete").
 - **Use when:** You need to provide supplementary information that enhances the understanding of a feature but is not critical for the task.
@@ -6471,52 +6481,45 @@ _Refer to TypeDocs in Tooltip.tsx_
 - **Do not use when:** You are restating text that is already visible on the screen. This creates redundancy and cognitive noise.
 - **Do not use when:** The element is disabled. Disabled elements cannot receive focus, making the tooltip inaccessible to keyboard users.
 
-### **Usage Dos and Don’ts**
+### Best practices
 
-- **Do** use the `arrow` prop to visually link the tooltip to small triggers like icons, helping users identify which element is being described.
+- **Do** use the `arrow` prop to visually link the tooltip to small triggers like icons, helping users identify which element it describes.
 - **Do** use `delay` to prevent tooltips from flickering open/closed as the user moves their mouse rapidly across the screen (hover intent).
-- **Don’t** put interactive content like links or buttons inside a Tooltip. If you need interactive content, use a **Popover** instead.
-- **Don’t** use lengthy text. Tooltips are for quick scanning; if the text is long, consider if it belongs in a modal or helper text.
+- **Don't** put interactive content like links or buttons inside a Tooltip. If you need interactive content, use a **Popover** instead.
+- **Don't** use lengthy text. Tooltips are for quick scanning; if the text is long, consider if it belongs in a modal or helper text.
 
-### **Variants & Examples**
+### Variants
 
 **1. Basic Tooltip** A simple text label for an icon button.
 
-`<Tooltip content={<Text>Edit Profile</Text>}>`
-
-`  <Button icon={EditIcon} mode="ghost" />`
-
-`</Tooltip>`
+```tsx
+<Tooltip content={<Text>Edit Profile</Text>}>
+  <Button icon={EditIcon} mode="ghost" />
+</Tooltip>
+```
 
 **2. With Arrow and Animation** Provides a smoother visual transition and clearer connection to the trigger.
 
-`<Tooltip`
-
-`  arrow`
-
-`  animate`
-
-`  content={<Box padding={2}><Text>Helpful information</Text></Box>}`
-
-`>`
-
-`  <Button text="Hover me" />`
-
-`</Tooltip>`
+```tsx
+<Tooltip
+  arrow
+  animate
+  content={<Box padding={2}><Text>Helpful information</Text></Box>}
+>
+  <Button text="Hover me" />
+</Tooltip>
+```
 
 **3. Delayed Interaction** Adds a 500ms delay before opening to prevent accidental triggers.
 
-`<Tooltip`
-
-`  delay={{ open: 500, close: 0 }}`
-
-`  content={<Text>Delayed tip</Text>}`
-
-`>`
-
-`  <Button icon={InfoIcon} />`
-
-`</Tooltip>`
+```tsx
+<Tooltip
+  delay={{ open: 500, close: 0 }}
+  content={<Text>Delayed tip</Text>}
+>
+  <Button icon={InfoIcon} />
+</Tooltip>
+```
 
 ### Accessibility
 
@@ -6525,23 +6528,26 @@ _Refer to TypeDocs in Tooltip.tsx_
 - **Tab behavior.** The tooltip is not a Tab stop. When the user presses Tab, focus moves to the next focusable element and the tooltip closes. The tooltip should close on Tab away from the trigger (per the APG Tooltip pattern).
 - **Disabled elements.** Never attach a tooltip to a disabled button (`<button disabled>`). Disabled elements leave the tab order. Keyboard users will never reach the tooltip. Place the tooltip on a wrapper element instead, or provide context through nearby text.
 - **Reduced motion.** The `animate` prop respects the user's `prefers-reduced-motion` setting. When reduced motion is on, the tooltip appears and hides with no transition.
-- **Screen readers.** Tooltip content must not repeat the trigger's `aria-label`. If the button is labeled "Settings," the tooltip should add context or be omitted.
-- **Child must forward refs.** Tooltip attaches to its child via a ref. If the child is a custom component, it must use `React.forwardRef`. Without ref forwarding, the tooltip fails to position and does not appear. This is silent — no error is thrown.
+- **Screen readers.** Tooltip content must not repeat the trigger's `aria-label`. If you label the button "Settings," the tooltip should add context or be omitted.
+- **Child must forward refs.** Tooltip attaches to its child via a ref. If the child is a custom component, it must use `React.forwardRef`. Without ref forwarding, the tooltip fails to position and does not appear. The browser throws no error.
 
-### **Content Guidelines**
+### Content guidelines
 
 - **Concise:** Limit text to a maximum of 60–75 characters where possible. Tooltips should be succinct .
 - **Action-Oriented:** Start with a verb if describing an action (e.g., "Edit profile" rather than "Profile editor") .
 - **Sentence Case:** Use sentence case for tooltip labels (e.g., "Save to board" not "Save To Board") .
 - **No Punctuation:** Avoid periods at the end of fragments. Only use punctuation if the tooltip contains full sentences .
 
+### Related components
+
+- **Popover** — Floating panel for interactive content
+- **Text** — Persistent inline description text
+
 # Button
-
-
 
 Used to trigger an action–like submitting a form, opening a dialog, or performing a command.
 
-### Basic example
+## Basic example
 
 **Source:** `@sanity/ui`
 ```tsx
@@ -6550,28 +6556,81 @@ import { Button } from '@sanity/ui'
 <Button text="Add document" />
 ```
 
+## API documentation
 
-> ⛔ **`tone="primary"` fails WCAG AA contrast — do not use it.** The primary tone produces white text on `#556bfc` at a 4.29:1 contrast ratio. WCAG AA requires 4.5:1 for text under 18px. This applies to Button, Badge, and any component using `tone="primary"`. For primary actions, use `mode="default" tone="default"` instead. No runtime warning or TypeScript error prevents this — the button renders and looks intentional, but ships an accessibility violation every time.
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `text` | `string` | — | Visible label |
+| `icon` | `ComponentType` | — | Leading icon (component reference) |
+| `iconRight` | `ComponentType` | — | Trailing icon |
+| `mode` | `'default'` \| `'ghost'` \| `'bleed'` | `'default'` | Visual weight — default (solid), ghost (outlined), bleed (no chrome) |
+| `tone` | `'default'` \| `'positive'` \| `'caution'` \| `'critical'` | `'default'` | Semantic color. Do not use `'primary'` — fails WCAG AA |
+| `type` | `'button'` \| `'submit'` \| `'reset'` | `'button'` | HTML button type |
+| `selected` | `boolean` | `false` | Toggle state (`data-selected`). Does NOT set `aria-pressed` — you must add it |
+| `disabled` | `boolean` | `false` | Disables interaction. Removes from tab order |
+| `loading` | `boolean` | `false` | Shows a loading spinner |
+| `fontSize` | `0`–`4` | — | Font size from the type scale |
+| `padding` | `0`–`9` | — | Inner padding from the spacing scale |
+| `as` | `'a'` \| `'button'` | `'button'` | HTML element to render |
 
-### API documentation
+## Usage guidelines
 
-_Refer to TypeDocs in Button.tsx_
-
-### Usage guidelines
-
-**When to use:**
+### When to use
 
 - To trigger an action within the application (e.g., "Publish", "Delete", "Save").
 - To submit data in a form context. In such cases, set Button to `type="submit"`.
 
-**When not to use:**
+### When not to use
 
 - To navigate the user to a new view or URL within  a line of text or paragraph. Use **Link** instead. Users of assistive technology expect buttons to perform actions and links to navigate.
 - To switch between different views on a screen. Use **Tab** instead. The Tab component family has several `aria` tags that make navigation accessible for people relying on assistive technology.
 - To toggle a boolean form value (on/off). Use **Switch** or **Checkbox** instead. Button `selected` is for action toggles (bold, show panel), not form state.
-- 
-
 Button does not accept `width` or flex-child props. See the "Inline style overrides" section for canonical workarounds.
+
+For custom interactive surfaces like navigation items (icon + label + trailing badge), see the [Sidebar navigation pattern](../patterns/navigation.md) and the [Menu docs](menu.md).
+
+## Best practices
+
+### Do
+
+- Use the `tone="critical"` when an action is destructive, such as delete actions.
+- Ensure buttons have a logical tab order in the document flow (left to right, top to bottom).
+- Bias towards using text labels in buttons to aid in comprehension.
+- Limit the number of primary buttons on the screen. Display one primary action per logical section (example: actions in a toolbar, or a card).
+- Add tooltips to icon-icon buttons. Wrap the button in a tooltip, and use `aria-label` – `<Tooltip text="Text"><Button aria-label="Text" icon={...} />`
+- Set `iconRight` to `chevron-down` when using `Button` in `MenuButton`
+- When using `selected` for toggle buttons, always pass `aria-pressed={selected}`. Sanity UI does not set this for you.
+- Use `mode="bleed"` for toggle buttons. The light resting state makes the selected state more visible.
+
+### Don't
+
+- Don't rely on color alone to convey the button's meaning (e.g., an error state should not just be red; use icons or text).
+- Don't use vague labels. Avoid terms like "Click here"; use descriptive labels that explain the action.
+- Don't disable buttons as a blocking function, such as disabling a submit button until all required fields are filled. People may not immediately understand what's causing the button to be disabled. Instead, allow buttons to be pressed and provide appropriate feedback in response.
+- Don't hide buttons that represent critical actions. Actions that represent primary actions should be visible at all times.
+- Don't overuse icons and text together in buttons. Only use when it doesn't prevent scannability–typically in situations where 3 or less buttons are grouped together.
+- Don't use `tone="primary"` — it fails WCAG AA contrast (4.29:1). For primary actions use `mode="default"` `tone="default"`.
+
+## States
+
+| State | Description | Use case |
+|-------|------------|----------|
+| `enabled` | Default resting state | Standard interactive button |
+| `hovered` | Mouse over the button | Visual feedback on pointer hover |
+| `pressed` | Active press | Visual feedback during click |
+| `focused` | Keyboard focus visible | Focus ring shown on Tab navigation |
+| `disabled` | Non-interactive | Action is not available |
+| `selected` | Toggle is active | `aria-pressed="true"` toggle buttons |
+| `loading` | Shows spinner | Long-running action in progress |
+
+## Related components
+
+- **MenuItem** — For actions inside dropdown menus
+- **Switch** — For boolean form toggles
+
+## For agents
+
+> ⛔ **`tone="primary"` fails WCAG AA contrast — do not use it.** The primary tone produces white text on `#556bfc` at a 4.29:1 contrast ratio. WCAG AA requires 4.5:1 for text under 18px. This applies to Button, Badge, and any component using `tone="primary"`. For primary actions, use `mode="default" tone="default"` instead. No runtime warning or TypeScript error prevents this — the button renders and looks intentional, but ships an accessibility violation every time.
 
 ### Full-width button
 
@@ -6586,36 +6645,6 @@ Button has no `fullWidth` or `width` prop. To make a button span full width (com
   <Button text="Save document" style={{ flex: 1 }} />
 </Box>
 ```
-
-For custom interactive surfaces like navigation items (icon + label + trailing badge), see `patterns-navigation.md` and `menu.md`.
-
-### Best practices
-
-**Do**
-
-- Use the `tone="critical"` when an action is destructive, such as delete actions.
-- Ensure buttons have a logical tab order in the document flow (left to right, top to bottom).
-- Bias towards using text labels in buttons to aid in comprehension.
-- Limit the number of primary buttons on the screen. Display one primary action per logical section (example: actions in a toolbar, or a card).
-- Add tooltips to icon-icon buttons. Wrap the button in a tooltip, and use `aria-label` – `<Tooltip text="Text"><Button aria-label="Text" icon={...} />`
-- Set `iconRight` to `chevron-down` when using `Button` in `MenuButton`
-- When using `selected` for toggle buttons, always pass `aria-pressed={selected}`. Sanity UI does not set this for you.
-- Use `mode="bleed"` for toggle buttons. The light resting state makes the selected state more visible.
-
-**Don't**
-
-- Don't rely on color alone to convey the button's meaning (e.g., an error state should not just be red; use icons or text).
-- Don't use vague labels. Avoid terms like "Click here"; use descriptive labels that explain the action.
-- Don't disable buttons as a blocking function, such as disabling a submit button until all required fields are filled. People may not immediately understand what's causing the button to be disabled. Instead, allow buttons to be pressed and provide appropriate feedback in response.
-- Don't hide buttons that represent critical actions. Actions that represent primary actions should be visible at all times.
-- Don't overuse icons and text together in buttons. Only use when it doesn't prevent scannability–typically in situations where 3 or less buttons are grouped together.
-- Don't use `tone="primary"` — it fails WCAG AA contrast (4.29:1). For primary actions use `mode="default"` `tone="default"`.
-
-### States
-
-| **Value** | **Description** | **Purpose** | **Use case(s)** |
-| --- | --- | --- | --- |
-| `"enabled"` | Button's standard state (default) | To represent
 
 # TextInput
 
@@ -6638,14 +6667,25 @@ import { SearchIcon } from '@sanity/icons'
     id="search"
     icon={SearchIcon}
     placeholder="Search documents..."
-    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQuery(e.currentTarget.value)}
+    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQuery(e.target.value)}
   />
 </Stack>
 ```
 
 ### API documentation
 
-_Refer to TypeDocs in TextInput.tsx_
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `id` | `string` | — | Links to `Label htmlFor` for accessibility |
+| `type` | `'text'` \| `'email'` \| `'password'` \| `'url'` \| `'tel'` \| `'search'` \| `'number'` | `'text'` | HTML input type |
+| `value` | `string` | — | Controlled value |
+| `defaultValue` | `string` | — | Uncontrolled initial value |
+| `placeholder` | `string` | — | Placeholder text (not a label substitute) |
+| `icon` | `ComponentType` | — | Leading icon |
+| `iconRight` | `ComponentType` | — | Trailing icon |
+| `onChange` | `event` | — | Change handler — use `event.target.value` |
+| `disabled` | `boolean` | `false` | Disables interaction |
+| `readOnly` | `boolean` | `false` | Prevents value change |
 
 ### Usage guidelines
 
@@ -6662,7 +6702,7 @@ _Refer to TypeDocs in TextInput.tsx_
 ### Content
 
 - **Placeholder text (P6).** Placeholder text shows the format or a brief hint, not the field name. Write "Search by title or ID" — not "Search." It must not replace a visible label.
-- **Labels are required.** Every TextInput must have a visible label above or beside it. Use `<Label htmlFor="...">` or `aria-label`. A placeholder alone is not a label (see accessibility-standards.md §3).
+- **Labels are required.** Every TextInput must have a visible label above or beside it. Use `<Label htmlFor="...">` or `aria-label`. A placeholder alone is not a label (see the [Accessibility foundation](../foundations/accessibility.md) §3).
 - **Error messages (P3).** Inline error text appears below the input. Name the problem in plain words. Tell the user what to do. Example: "Title is required. Enter a title to continue." Do not show codes or jargon.
 - **Casing (P8).** Use sentence case for labels, placeholder text, and error messages.
 - **Keep placeholder text short (P6).** One phrase that fits inside the input at its default width with no clipping.
@@ -6674,7 +6714,12 @@ _Refer to TypeDocs in TextInput.tsx_
 - **Label association.** Every TextInput must have a `<label>` via `for`/`id` or wrapping, or an `aria-label`. A `placeholder` is not a label (WCAG 4.1.2 A).
 - **Error state.** When invalid, the input must have an associated error message. Use `aria-describedby` to link the input to the error text.
 - **Keyboard interaction.** TextInput is focusable via `Tab`. Standard text editing keys apply.
-- `onChange`** uses **`currentTarget`**.** Use `event.currentTarget.value` to read the input value. This follows the React `SyntheticEvent` pattern. `event.target` may require a type cast to `HTMLInputElement`.
+
+### Related components
+
+- **TextArea** — Multi-line text entry
+- **Select** — Choosing from a fixed list of options
+- **Label** — Always pair with TextInput for accessibility
 
 # Toast
 
@@ -6708,35 +6753,24 @@ function SaveButton() {
 
 `ToastProvider` must be **inside** `ThemeProvider`. The nesting order matters.
 
-`// main.tsx`
+```tsx
+// main.tsx
+import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+import { ThemeProvider, studioTheme, ToastProvider } from '@sanity/ui'
+import App from './App'
+import './reduced-motion.css'
 
-`import { StrictMode } from 'react'`
-
-`import { createRoot } from 'react-dom/client'`
-
-`import { ThemeProvider, studioTheme, ToastProvider } from '@sanity/ui'`
-
-`import App from './App'`
-
-`import './reduced-motion.css'`
-
-`createRoot(document.getElementById('root')!).render(`
-
-`  <StrictMode>`
-
-`    <ThemeProvider theme={studioTheme}>`
-
-`      <ToastProvider>`
-
-`        <App />`
-
-`      </ToastProvider>`
-
-`    </ThemeProvider>`
-
-`  </StrictMode>,`
-
-`)`
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <ThemeProvider theme={studioTheme}>
+      <ToastProvider>
+        <App />
+      </ToastProvider>
+    </ThemeProvider>
+  </StrictMode>,
+)
+```
 
 
 
@@ -6746,29 +6780,23 @@ function SaveButton() {
 
 Call `useToast()` inside any component to get the `toast` object. Call `toast.push()` to show a toast.
 
-`import { useToast, Button } from '@sanity/ui'`
+```tsx
+import { useToast, Button } from '@sanity/ui'
 
-`function PublishButton() {`
+function PublishButton() {
+  const toast = useToast()
 
-`  const toast = useToast()`
+  const handlePublish = () => {
+    // ... perform the action ...
+    toast.push({
+      status: 'success',
+      title: 'Document published',
+    })
+  }
 
-`  const handlePublish = () => {`
-
-`    // ... perform the action ...`
-
-`    toast.push({`
-
-`      status: 'success',`
-
-`      title: 'Document published',`
-
-`    })`
-
-`  }`
-
-`  return <Button text="Publish" onClick={handlePublish} tone="default" />`
-
-`}`
+  return <Button text="Publish" onClick={handlePublish} tone="default" />
+}
+```
 
 
 
@@ -6795,93 +6823,69 @@ Call `useToast()` inside any component to get the `toast` object. Call `toast.pu
 
 ### Success toast
 
-`toast.push({`
-
-`  status: 'success',`
-
-`  title: 'Document published',`
-
-`})`
+```tsx
+toast.push({
+  status: 'success',
+  title: 'Document published',
+})
+```
 
 ### Error toast with description
 
-`toast.push({`
-
-`  status: 'error',`
-
-`  title: 'Upload failed',`
-
-`  description: 'The file exceeds the 10 MB limit. Try a smaller file.',`
-
-`})`
+```tsx
+toast.push({
+  status: 'error',
+  title: 'Upload failed',
+  description: 'The file exceeds the 10 MB limit. Try a smaller file.',
+})
+```
 
 ### Warning toast
 
-`toast.push({`
-
-`  status: 'warning',`
-
-`  title: 'Unsaved changes',`
-
-`  description: 'Save your work before leaving this page.',`
-
-`})`
+```tsx
+toast.push({
+  status: 'warning',
+  title: 'Unsaved changes',
+  description: 'Save your work before leaving this page.',
+})
+```
 
 ### Persistent toast (no auto-dismiss)
 
-`toast.push({`
-
-`  status: 'error',`
-
-`  title: 'Connection lost',`
-
-`  description: 'Changes will not be saved until the connection is restored.',`
-
-`  closable: true,`
-
-`  duration: 0,`
-
-`})`
+```tsx
+toast.push({
+  status: 'error',
+  title: 'Connection lost',
+  description: 'Changes will not be saved until the connection is restored.',
+  closable: true,
+  duration: 0,
+})
+```
 
 ### Toast after a long-running action
 
 Fire a toast when an action takes over 3 seconds. The user may have moved on.
 
-`const handleExport = async () => {`
-
-`  setLoading(true)`
-
-`  try {`
-
-`    await exportData()`
-
-`    toast.push({`
-
-`      status: 'success',`
-
-`      title: '3 items exported',`
-
-`    })`
-
-`  } catch (err) {`
-
-`    toast.push({`
-
-`      status: 'error',`
-
-`      title: 'Export failed',`
-
-`      description: err.message,`
-
-`    })`
-
-`  } finally {`
-
-`    setLoading(false)`
-
-`  }`
-
-`}`
+```tsx
+const handleExport = async () => {
+  setLoading(true)
+  try {
+    await exportData()
+    toast.push({
+      status: 'success',
+      title: '3 items exported',
+    })
+  } catch (err) {
+    toast.push({
+      status: 'error',
+      title: 'Export failed',
+      description: err.message,
+    })
+  } finally {
+    setLoading(false)
+  }
+}
+```
 
 
 
@@ -6917,158 +6921,99 @@ Fire a toast when an action takes over 3 seconds. The user may have moved on.
 - **Live region.** `ToastProvider` renders a container with `aria-live`. Success and info toasts use `aria-live="polite"`. Error toasts use `aria-live="assertive"`. Screen readers announce the text when it appears (WCAG 4.1.3 AA).
 - **Do not rely on color alone.** Each `status` value pairs a tone with an icon. The icon is added by the component. If you build a custom toast layout, pair `tone="critical"` with `ErrorOutlineIcon` and `tone="positive"` with `CheckmarkCircleIcon` (WCAG 1.4.1 A).
 - **Auto-dismiss timing.** Toasts auto-dismiss after 5 seconds by default. For error toasts that require user attention, set `duration: 0` to keep the toast visible until the user closes it. All auto-dismissing toasts must stay visible long enough to be read — do not set `duration` below 3000ms.
-- **Known Sanity UI issue.** `ToastProvider` renders a `<ul>` element with `list-style: none`. WebKit strips list semantics from unstyled lists. VoiceOver may not announce the container as a list. This is a library-level issue. See `accessibility-standards.md` §9.
+- **Known Sanity UI issue.** `ToastProvider` renders a `<ul>` element with `list-style: none`. WebKit strips list semantics from unstyled lists. VoiceOver may not announce the container as a list. This is a library-level issue. See the [Accessibility foundation](../foundations/accessibility.md) §9.
 
 ## Common mistakes
 
 ### Missing ToastProvider
 
-`/* ✗ useToast() throws — no ToastProvider in the tree */`
+```tsx
+/* ✗ useToast() throws — no ToastProvider in the tree */
+<ThemeProvider theme={studioTheme}>
+  <App /> {/* App calls useToast() */}
+</ThemeProvider>
 
-`<ThemeProvider theme={studioTheme}>`
-
-`  <App /> {/* App calls useToast() */}`
-
-`</ThemeProvider>`
-
-`/* ✓ ToastProvider wraps the app inside ThemeProvider */`
-
-`<ThemeProvider theme={studioTheme}>`
-
-`  <ToastProvider>`
-
-`    <App />`
-
-`  </ToastProvider>`
-
-`</ThemeProvider>`
+/* ✓ ToastProvider wraps the app inside ThemeProvider */
+<ThemeProvider theme={studioTheme}>
+  <ToastProvider>
+    <App />
+  </ToastProvider>
+</ThemeProvider>
+```
 
 ### ToastProvider outside ThemeProvider
 
-`/* ✗ Wrong order — ToastProvider has no theme context */`
+```tsx
+/* ✗ Wrong order — ToastProvider has no theme context */
+<ToastProvider>
+  <ThemeProvider theme={studioTheme}>
+    <App />
+  </ThemeProvider>
+</ToastProvider>
 
-`<ToastProvider>`
-
-`  <ThemeProvider theme={studioTheme}>`
-
-`    <App />`
-
-`  </ThemeProvider>`
-
-`</ToastProvider>`
-
-`/* ✓ Correct order */`
-
-`<ThemeProvider theme={studioTheme}>`
-
-`  <ToastProvider>`
-
-`    <App />`
-
-`  </ToastProvider>`
-
-`</ThemeProvider>`
+/* ✓ Correct order */
+<ThemeProvider theme={studioTheme}>
+  <ToastProvider>
+    <App />
+  </ToastProvider>
+</ThemeProvider>
+```
 
 ### Vague toast messages
 
-`/* ✗ Vague — user does not know what happened */`
+```tsx
+/* ✗ Vague — user does not know what happened */
+toast.push({ status: 'success', title: 'Success!' })
+toast.push({ status: 'error', title: 'Something went wrong' })
 
-`toast.push({ status: 'success', title: 'Success!' })`
+/* ✓ Specific — names the action and the result */
+toast.push({ status: 'success', title: 'Document published' })
+toast.push({ status: 'error', title: 'Image upload failed. File exceeds 10 MB.' })
+```
 
-`toast.push({ status: 'error', title: 'Something went wrong' })`
+### Related components
 
-`/* ✓ Specific — names the action and the result */`
-
-`toast.push({ status: 'success', title: 'Document published' })`
-
-`toast.push({ status: 'error', title: 'Image upload failed. File exceeds 10 MB.' })`
+- **Dialog** — For messages that require user action
+- **Badge** — Persistent inline status indicator
 
 # Card
 
 Container for content that requires a distinct visual surface — a background, optional border, and semantic tone color.
 
-**Note:** This documents the `@sanity-labs/ui-poc` Card component. Import it from `@sanity-labs/ui-poc`, **not** from `@sanity/ui`:
-
-### Basic example
+## Basic example
 
 ```tsx
 import { Card } from '@sanity-labs/ui-poc'
 
-<Card tone="positive" density="medium">
+<Card density="regular">
   This is a card.
 </Card>
-
 ```
 
-The API is significantly different from `@sanity/ui`'s Card. There is no `padding`, `radius`, `shadow`, `scheme`, `selected`, `pressed`, `muted`, or individual `borderTop/Right/Bottom/Left` prop.
-
-### API
+## API
 
 | Prop | Type | Default | Description |
 |------|------|---------|-------------|
 | `as` | React element type | `'div'` | HTML element to render (e.g. `as="article"`, `as="section"`) |
-| `tone` | `'default'`, `'neutral'`, `'primary'`, `'suggest'`, `'positive'`, `'caution'`, `'critical'` | `'default'` | Controls background and border color |
-| `border` | boolean | `true` | Toggles the border. On by default. |
-| `density` | `'tight'`, `'medium'`, `'loose'` | `'medium'` | Controls padding and border-radius together |
-| `inverted` | boolean | `false` | Inverts the tone to use the dark color scheme |
-| `className` | string | — | Additional CSS class names |
-| `style` | React.CSSProperties | — | Inline styles |
+| `display` | `'block'` \| `'inline-block'` \| `'none'` | — | CSS `display` property |
+| `density` | `'compact'` \| `'regular'` \| `'loose'` | `'regular'` | Composite prop that sets padding and border-radius together |
+| `margin` | `0`–`9` \| `'auto'` | — | CSS `margin` (spacing scale) |
+| `marginX` | `0`–`9` \| `'auto'` | — | Inline (horizontal) margin |
+| `marginY` | `0`–`9` \| `'auto'` | — | Block (vertical) margin |
+| `marginTop` | `0`–`9` \| `'auto'` | — | Top margin |
+| `marginRight` | `0`–`9` \| `'auto'` | — | Right margin |
+| `marginBottom` | `0`–`9` \| `'auto'` | — | Bottom margin |
+| `marginLeft` | `0`–`9` \| `'auto'` | — | Left margin |
 
-#### Density
+All props accept responsive arrays (e.g. `density={['compact', null, 'regular']}`).
 
-`density` replaces the separate `padding` and `radius` props from the previous API. Choose based on the visual weight of the surrounding layout:
-
-| Value | Padding | Radius | Pixels | Use when |
-|-------|---------|--------|--------|----------|
-| `'tight'` | space-2 | radius-2 | **8px padding, 3px radius** | High-density lists, compact items, small cards |
-| `'medium'` | space-3 | radius-3 | **12px padding, 7px radius** | Standard content cards — the default for most use cases |
-| `'loose'` | space-4 | radius-4 | **20px padding, 11px radius** | Low-density layouts, prominent featured cards |
-
-#### Why density couples padding and radius
-
-`density` reflects the visual *weight* of a card at a given information density. At high density (tight spacing), a smaller radius matches the proportions. At low density, a larger radius fits the more spacious layout. Decoupling them frequently produces visual imbalance. If you need precise independent control, apply padding to a `Box` inside the Card and use `density="tight"` with `border={false}` on the Card itself.
-
-#### Inverted
-
-> ⛔ **`inverted` is for content cards only — never for structural layout regions.**
->
-> Sanity UI interfaces maintain a consistent light theme for all structural elements. Do not use `inverted` on navigation sidebars, headers, toolbars, inspector panels, or any persistent UI shell region. Dark structural regions are not part of the design system and are not supported.
->
-> `inverted` is intended exclusively for **content-level emphasis** within a light-themed layout — for example, an inline error callout, a feature highlight card, or a high-contrast status block embedded inside a content area.
-
-`inverted={true}` switches a Card to a dark color scheme for the current `tone`. Each tone has a defined dark variant (e.g. `tone="critical"` inverted renders a dark red background with light text). Use sparingly and only within content, not structure.
-
-### Card does not accept layout props
-
- ⛔ **Card silently ignores all flex-child and layout props. TypeScript does not error. No console warning fires. The props have zero effect.**
-
- The following props are all silently ignored when placed on Card:
- `flexGrow`, `flexShrink`, `flexBasis`, `minWidth`, `maxWidth`, `width`, `height`, `minHeight`, `overflow`, `overflowX`, `overflowY`, `position`, `inset`, `top`, `right`, `bottom`, `left`
-
- This is the most commonly broken Card pattern — reported in 30/30 iterations of agent testing.
-
- To apply layout properties alongside a Card surface, wrap the Card in a `Box` or `Flex`:
-
- ```tsx
- {/* ✗ — flexGrow={1} on Card silently does nothing. Layout breaks. No warning. */}
- <Card flexGrow={1}>...</Card>
-
- {/* ✗ — minWidth="0" on Card silently does nothing. Text overflows. No warning. */}
- <Card minWidth="0">...</Card>
-
- {/* ✓ — Box handles all layout; Card handles only the visual surface */}
- <Box flexGrow={1} minWidth="0" overflowY="auto">
-   <Card>...</Card>
- </Box>
- ```
-
-**Rule of thumb:** Card owns its appearance (`tone`, `border`, `density`, `inverted`). Box or Flex owns its position and size in the layout.
+## Usage guidelines
 
 ### When to use
 
 - Group related content on a distinct background surface
-- Show semantic status (error, warning, success) via `tone`
-- Invert a section to dark with `inverted={true}`
+- Create visual separation between content regions
+- Wrap content that needs consistent internal padding and rounded corners
 
 ### When not to use
 
@@ -7076,54 +7021,40 @@ The API is significantly different from `@sanity/ui`'s Card. There is no `paddin
 - Structural UI regions (sidebars, toolbars, scroll containers) → use Box or Flex
 - Clickable/tappable areas → use Button for full keyboard accessibility
 
-### Dos and Don'ts
+### Best practices
 
 **Do**
-- Use `tone` to communicate semantic status (`'critical'` for errors, `'caution'` for warnings, `'positive'` for success)
-- Always pair a toned Card with an icon — do not rely on color alone
-- Use `as="article"` or `as="section"` to improve document structure where appropriate
-- Use `density` to match the surrounding layout density rather than overriding with inline style
+
+- Use `density` to match the surrounding layout. `compact` for dense lists, `regular` for standard cards, `loose` for featured content.
+- Use `as="article"` or `as="section"` to improve document structure where appropriate.
+- Wrap Card in a `Box` or `Flex` to control layout sizing — Card handles appearance, the wrapper handles position.
 
 **Don't**
-- Don't use Card for structural UI regions (toolbars, sidebars, nav headers) — use Box
-- Don't nest cards; use Box/Flex/Stack for internal layout within a card
-- Don't add `onClick` to Card; use Button for interactive actions
-- Don't use inline `style` for padding or border-radius — use `density` instead
 
-### Tone values
+- Don't use Card for structural UI regions (toolbars, sidebars, nav headers) — use Box.
+- Don't nest cards. Use Box/Flex/Stack for internal layout within a card.
+- Don't add `onClick` to Card. Use Button for interactive actions.
+- Don't use inline `style` for padding or border-radius — use `density` instead.
 
-| Value | Light background | Background token | Use case |
-|-------|-----------------|-----------------|----------|
-| `'default'` | gray-50 | `var(--gray-50)` | General use, no semantic emphasis |
-| `'neutral'` | gray-100 | `var(--gray-100)` | Visual separation, "pinned" or "highlighted" card |
-| `'primary'` | blue-50 | `var(--blue-50)` | Branded or educational content |
-| `'suggest'` | purple-50 | `var(--purple-50)` | AI-generated suggestions |
-| `'positive'` | green-50 | `var(--green-50)` | Success, completion, healthy status |
-| `'caution'` | yellow-50 | `var(--yellow-50)` | Needs attention, non-blocking warning |
-| `'critical'` | red-50 | `var(--red-50)` | Error, failure, blocking issue |
+## Variants
 
-With `inverted={true}`, each tone uses a dark variant (e.g. `critical` inverted = red-900 bg + red-100 text).
+### Density
 
-### CSS custom properties and Card context
+`density` sets both padding and border-radius as a single value. Choose based on the visual weight of the surrounding layout:
 
-Card writes CSS custom properties onto its DOM subtree. Descendants can reference them for consistent styling:
+| Value | Padding | Radius | Pixels | Use when |
+|-------|---------|--------|--------|----------|
+| `'compact'` | space-3 | radius-2 | **12px padding, 3px radius** | High-density lists, compact items, table rows |
+| `'regular'` | space-4 | radius-3 | **20px padding, 7px radius** | Standard content cards — the default |
+| `'loose'` | space-5 | radius-4 | **32px padding, 11px radius** | Low-density layouts, featured cards, hero content |
 
-| Variable | Description |
-|----------|-------------|
-| `--card-bg` | Background color of the card |
-| `--card-border-color` | Border color of the card |
-| `--card-color` | Text color (set in inverted mode; inherits otherwise) |
+`density` accepts a responsive array: `density={['compact', null, 'regular']}` uses `compact` at the smallest breakpoint and `regular` at the third.
 
-> **These variables are only available inside a `Card` ancestor.** Using them in a `Box` or custom element with no `Card` ancestor produces undefined values and no visual effect.
->
-> If you need the color context without Card's visible surface, use `Card` with `border={false}`:
-> ```tsx
-> <Card border={false}>
->   {/* --card-bg, --card-border-color, --card-color are available here */}
-> </Card>
-> ```
+#### Why density couples padding and radius
 
-### Accessibility
+`density` reflects the visual *weight* of a card at a given information density. At high density (compact spacing), a smaller radius matches the proportions. At low density, a larger radius fits the more spacious layout. Decoupling them often produces visual imbalance. If you need independent control, apply padding to a `Box` inside the Card and use `density="compact"` on the Card itself.
+
+## Accessibility
 
 - **Semantic elements.** Use `as` to choose the correct HTML element:
   - `as="article"` — self-contained content (no accessible name required)
@@ -7131,15 +7062,45 @@ Card writes CSS custom properties onto its DOM subtree. Descendants can referenc
   - `as="aside"` — supplementary content; add `aria-label` when the role is not clear from context
 - **Not a button.** Card has no keyboard activation, focus management, or ARIA role. Do not use `as="button"` — use the Button component for interactive actions.
 - **Clickable cards.** If a card must be clickable, use a stretched link inside the card rather than adding `onClick` to the Card itself.
-- **Tone and color.** Always pair a semantic tone with an icon or text label — never rely on color alone (WCAG 1.4.1 A).
-- **Contrast.** Verify that any custom text inside a card maintains 4.5:1 contrast against the card's tone background (WCAG 1.4.3 AA).
 - **Heading hierarchy.** Heading levels inside a Card must follow the page hierarchy — do not skip levels (WCAG 1.3.1 A).
 
-### Content guidelines
+## Content guidelines
 
-- Limit card content to a single topic
-- Heading levels inside a card must respect the overall page outline
-- Content should be logically related; split different topics into separate cards
+- Limit card content to a single topic.
+- Heading levels inside a card must respect the overall page outline.
+- Content should be logically related. Split different topics into separate cards.
+
+## Related components
+
+- **Box** — Structural container without a visual surface
+- **Flex** — Layout container without a visual surface
+
+## For agents
+
+**Note:** This documents the `@sanity-labs/ui-poc` Card component. Import it from `@sanity-labs/ui-poc`, **not** from `@sanity/ui`.
+
+The API is different from `@sanity/ui`'s Card. There is no `tone`, `border`, `inverted`, `padding`, `radius`, `shadow`, `scheme`, `selected`, `pressed`, `muted`, or individual `borderTop/Right/Bottom/Left` prop.
+
+### Card does not accept layout props
+
+⛔ **Card silently ignores all flex-child and layout props. TypeScript does not error. No console warning fires. The props have zero effect.**
+
+The following props are silently ignored when placed on Card:
+`flexGrow`, `flexShrink`, `flexBasis`, `minWidth`, `maxWidth`, `width`, `height`, `minHeight`, `overflow`, `overflowX`, `overflowY`, `position`, `inset`, `top`, `right`, `bottom`, `left`
+
+To apply layout properties alongside a Card surface, wrap the Card in a `Box` or `Flex`:
+
+```tsx
+{/* ✗ — flexGrow={1} on Card silently does nothing */}
+<Card flexGrow={1}>...</Card>
+
+{/* ✓ — Box handles layout; Card handles the surface */}
+<Box flexGrow={1} minWidth="0" overflowY="auto">
+  <Card>...</Card>
+</Box>
+```
+
+**Rule of thumb:** Card owns its appearance (`density`). Box or Flex owns its position and size in the layout. Card accepts margin props for spacing between siblings.
 
 # Menu
 
@@ -7168,31 +7129,61 @@ import { Menu, MenuItem, MenuDivider } from '@sanity/ui'
 
 **Purpose** Menus are used to present a list of actions or options to the user in a temporary surface, saving screen real estate. They are typically triggered by a button and are best suited for secondary actions, settings, or command lists.
 
-### API Documentation
+### API documentation
 
 #### Menu
 
 The container for menu items.
 
-_Refer to TypeDocs in Menu.tsx_
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `children` | `ReactNode` | — | Menu items, dividers, and groups |
+| `space` | `0`–`9` | `1` | Vertical spacing between items |
 
-#### **MenuGroup**
+#### MenuButton
+
+A compound component that wires a trigger button to a menu popover.
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `id` | `string` | — | **Required.** Connects trigger to menu for ARIA |
+| `button` | `ReactElement` | — | The trigger element (typically a Button) |
+| `menu` | `ReactElement` | — | The Menu content |
+| `popover` | `object` | — | Popover options — set `{ portal: true }` inside `overflow: hidden` containers |
+
+#### MenuGroup
 
 A nested menu trigger.
 
-_Refer to TypeDocs in MenuGroup.tsx_
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `children` | `ReactNode` | — | Nested menu items rendered in a submenu |
+| `text` | `ReactNode` | — | Label for the group trigger |
+| `icon` | `ComponentType` | — | Leading icon for the group trigger |
 
-#### **MenuItem**
-
-An individual action within the menu.
-
-_Refer to TypeDocs in MenuItem.tsx_
-
-#### **MenuDivider**
+#### MenuItem
 
 An individual action within the menu.
 
-_Refer to TypeDocs in MenuDivider.tsx_
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `text` | `ReactNode` | — | Label content — accepts JSX for composed layouts |
+| `icon` | `ComponentType` | — | Leading icon (component reference, not JSX element) |
+| `iconRight` | `ComponentType` | — | Trailing icon |
+| `tone` | `'default'` \| `'positive'` \| `'caution'` \| `'critical'` | `'default'` | Semantic color |
+| `selected` | `boolean` | `false` | Visual selected state (`data-selected`) |
+| `disabled` | `boolean` | `false` | Disables interaction |
+| `hotkeys` | `string[]` | — | Keyboard shortcut hint labels |
+| `as` | `'a'` \| `'button'` | `'button'` | HTML element to render |
+| `onClick` | `() => void` | — | Click handler |
+
+#### MenuDivider
+
+A visual separator between groups of menu items.
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| (none) | — | — | Renders an `<hr>` separator. No props. |
 
 ### **Usage guidelines**
 
@@ -7232,9 +7223,9 @@ _Refer to TypeDocs in MenuDivider.tsx_
 
 **Don’t**
 
-- Use caution when nesting `MenuGroup`s more than 2 levels deep. Deeply nested menus are difficult to navigate and prone to closing accidentally.
-- Don’t put complex forms or interactive inputs inside a `MenuItem`. The Menu is designed for simple "one-click" actions or boolean toggles.
-- Don’t use the `hotkeys` for keyboard shortcuts when the MenuItem’s purpose is navigational.
+- Don't nest `MenuGroup`s more than 2 levels deep. Deeply nested menus are difficult to navigate and prone to closing accidentally. Flatten the structure or use a disclosure panel for complex option trees.
+- Don't put complex forms or interactive inputs inside a `MenuItem`. The Menu is designed for simple "one-click" actions or boolean toggles. Use a Popover or Dialog for form inputs that need focus management and validation.
+- Don't use the `hotkeys` for keyboard shortcuts when the MenuItem's purpose is navigational. Hotkeys communicate action shortcuts. For navigation, the destination label is the only signal users need.
 
 ### **Variants**
 
@@ -7242,7 +7233,11 @@ _Refer to TypeDocs in MenuDivider.tsx_
 
 ##### Spacing
 
+No variants. Menu renders its children as-is.
+
 #### MenuGroup
+
+No standalone variants. MenuGroup triggers a nested submenu.
 
 #### MenuItem
 
@@ -7254,7 +7249,7 @@ Used as a visual indicator alongside the menu item label. Pass a component refer
 >
 > Use one of these patterns instead:
 > - **`icon` + `text` prop (no children):** `<MenuItem icon={EditIcon} text="Edit" />`. To include trailing content, pass a `Flex` as the `text` value: `text={<Flex alignItems="center" justifyContent="space-between" gap={2}><Text size={1}>Guides</Text><Badge tone="default">12</Badge></Flex>}`.
-> - **Everything in `children` (no `icon` prop):** Render the icon yourself inside a `Flex` in the children. See `patterns-navigation.md` for full examples.
+> - **Everything in `children` (no `icon` prop):** Render the icon yourself inside a `Flex` in the children. See the [Sidebar navigation pattern](../patterns/navigation.md) for full examples.
 
 ##### IconRight
 
@@ -7289,6 +7284,7 @@ Used exclusively for communicating what navigation action the user should expect
 - **Accessible names.** Each MenuItem gets its accessible name from its visible text content. If a MenuItem uses only an icon, add `aria-label`.
 - **Focus management.** The menu acts as a focus trap while open. Tab closes the menu to preserve document flow. Escape closes the menu and returns focus to the trigger.
 - **Color independence.** MenuItems with `tone="critical"` must pair with an icon (e.g. `ErrorOutlineIcon`). Do not rely on the red color alone to convey the destructive meaning (WCAG 1.4.1 A).
+
 - **Selected state contrast.** When a MenuItem is `selected`, the default theme applies a primary blue background (`#556bfc`) with white text. This produces a 4.29:1 contrast ratio — below the 4.5:1 AA threshold for standard-size text (WCAG 1.4.3 AA). For navigation menus where one item stays selected, avoid using the `selected` prop on text-bearing MenuItems. Mark the active item with a bold label or a left border accent instead.
 - **MenuButton trigger names.** When the MenuButton trigger is icon-only, the trigger Button must have `aria-label`. The Menu component handles its own ARIA roles, but the trigger button does not inherit a name from the menu content.
 - `MenuButton`** requires an **`id`** prop.** The `id` connects the trigger button to the menu for ARIA. Omitting it causes no console error, but screen readers cannot link the trigger to its popup.
@@ -7302,13 +7298,18 @@ Used exclusively for communicating what navigation action the user should expect
 - **Predictable Grouping:** Place destructive actions (like Delete) at the bottom of the list, ideally separated by a `MenuDivider` to prevent accidental clicks.
 - **Consistent Icons:** If you use icons for some items in a group, try to use icons for all items in that group to maintain visual alignment.
 
+### Related components
+
+- **Button** — For inline actions outside a dropdown
+- **Dialog** — For confirmations that require user input
+
 # Popover
 
 
 
-**Description** The Popover is a floating container used to display content on top of other UI elements. It is positioned relative to a reference element (usually a button or an input) and serves as a foundational primitive for building complex interactive components like menus, date pickers, and dropdowns,.
+**Description** The Popover is a floating container used to display content on top of other UI elements. It positions itself next to a trigger element (a button or an input). It is the foundation for menus, date pickers, and dropdowns.
 
-**Purpose** The Popover's primary purpose is to present secondary information or lightweight tasks without cluttering the main interface or forcing the user to leave the current context. It manages its own positioning, collision detection (flipping/shifting), and stacking context (z-index),.
+**Purpose** The Popover's primary purpose is to present secondary information or lightweight tasks without cluttering the main interface or forcing the user to leave the current context. It manages its own positioning, collision detection (flipping and shifting), and stacking context (z-index).
 
 **Source:** `@sanity/ui`
 ```tsx
@@ -7337,23 +7338,39 @@ function Example() {
 }
 ```
 
-### **API Documentation**
+### API documentation
 
-### **When to Use / When Not to Use**
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `content` | `ReactNode` | — | Content rendered inside the floating panel |
+| `open` | `boolean` | `false` | Controls visibility |
+| `portal` | `boolean` | `false` | Renders in a React portal — required inside `overflow: hidden` containers |
+| `placement` | `'top'` \| `'bottom'` \| `'left'` \| `'right'` (+ `-start` / `-end` variants) | `'bottom'` | Position relative to the trigger |
+| `fallbackPlacements` | `Placement[]` | — | Alternate positions when the preferred placement doesn't fit |
+| `arrow` | `boolean` | `false` | Shows a visual arrow connecting the popover to the trigger |
+| `animate` | `boolean` | `false` | Enables enter/exit animation |
+| `padding` | `0`–`9` | — | Inner padding from the spacing scale |
+| `radius` | `0`–`6` \| `'full'` | — | Border radius |
+| `scheme` | `'light'` \| `'dark'` | — | Color scheme override |
+| `tone` | `'default'` \| `'positive'` \| `'caution'` \| `'critical'` | `'default'` | Semantic color |
+| `children` | `ReactElement` | — | The trigger element — must accept a ref |
+| `onClickOutside` | `() => void` | — | Called when clicking outside the popover |
+
+### Usage guidelines
 
 - **Use when:** You need to display a list of actions (menus), a date picker, or additional details related to a specific element on the screen.
 - **Use when:** You need to conserve screen real estate by hiding secondary controls until requested.
 - **Do not use when:** You need to display critical error information. Use inline form validation or banners instead to ensure visibility.
 - **Do not use when:** The content is complex or requires a significant amount of user attention/input. Use a **Dialog** or **Modal** instead.
 
-### **Usage Dos and Don’ts**
+### Best practices
 
 - **Do** use `portal={true}` (or let it default) if the popover is inside a container with `overflow: hidden`, ensuring the popover isn't clipped.
 - **Do** use `matchReferenceWidth` for inputs like "Select" or "Autocomplete" dropdowns to maintain visual alignment with the field.
 - **Don’t** overuse the `arrow` prop. It is helpful for tooltips or tutorials but often unnecessary for standard dropdown menus.
 - **Don’t** place critical actions solely inside a popover if they block the user's primary workflow.
 
-### **Variants & Examples**
+### Variants
 
 **1. Basic Popover** A standard popover triggered by a button.
 
@@ -7418,11 +7435,17 @@ function Example() {
 - **Accessible name for content.** The popover content must have an accessible name. Use `role="dialog"` with `aria-label` or `aria-labelledby` when the popover contains interactive content. Use `role="menu"` when the popover contains menu items.
 - **Reduced motion.** The `animate` prop respects the user's `prefers-reduced-motion` setting.
 
-### **Content Guidelines**
+### Content guidelines
 
 - **Concise:** Keep content brief. Popovers are for quick interactions, not long-form reading.
 - **Action-Oriented:** If the popover contains a menu, use verbs for labels (e.g., "Edit," "Delete").
 - **Sentence Case:** Use sentence case for any text headers or descriptions inside the popover (e.g., "Sort by date" not "Sort By Date").
+
+### Related components
+
+- **Dialog** — Modal overlay that blocks interaction with the page
+- **Tooltip** — Hover-only, text-only floating label
+- **Menu** — Action list inside a floating panel
 
 # Select
 
@@ -7442,7 +7465,7 @@ import { Select, Stack, Label } from '@sanity/ui'
   <Label htmlFor="category">Category</Label>
   <Select
     id="category"
-    onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setCategory(e.currentTarget.value)}
+    onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setCategory(e.target.value)}
   >
     <option value="starter">Starter</option>
     <option value="main">Main</option>
@@ -7453,7 +7476,15 @@ import { Select, Stack, Label } from '@sanity/ui'
 
 ### API documentation
 
-_Refer to TypeDocs in Select.tsx_
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `id` | `string` | — | Links to `Label htmlFor` for accessibility |
+| `value` | `string` | — | Controlled value |
+| `defaultValue` | `string` | — | Uncontrolled initial value |
+| `onChange` | `event` | — | Change handler  |
+| `disabled` | `boolean` | `false` | Disables interaction |
+| `readOnly` | `boolean` | `false` | Prevents value change |
+| `children` | `ReactNode` | — | `<option>` elements |
 
 > ⛔ **Always wrap `Select` in `Stack space={1}` with a `Label`. A bare Select has no accessible name — this is an axe `select-name` critical violation (WCAG 4.1.2 A). There are no exceptions.**
 
@@ -7471,12 +7502,10 @@ _Refer to TypeDocs in Select.tsx_
 
 ### `onChange` event handling
 
-`Select` wraps the native `change` event. Always read the value from `event.currentTarget` and cast explicitly:
-
 ```tsx
 <Select
   onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
-    setCategory(e.currentTarget.value)
+    setCategory(e.target.value)
   }}
 >
   <option value="">All categories</option>
@@ -7498,7 +7527,7 @@ _Refer to TypeDocs in Select.tsx_
     id="status-filter"
     value={status}
     onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
-      setStatus(e.currentTarget.value)
+      setStatus(e.target.value)
     }
   >
     <option value="">All statuses</option>
@@ -7529,7 +7558,7 @@ _Refer to TypeDocs in Select.tsx_
     id="category-select"
     value={category}
     onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
-      setCategory(e.currentTarget.value)
+      setCategory(e.target.value)
     }
   >
     <option value="">All</option>
@@ -7543,6 +7572,12 @@ _Refer to TypeDocs in Select.tsx_
 - **No multi-select variant.** Use a composed `Checkbox` list for multiple selections.
 - **No custom styled dropdown.** The panel appearance is controlled by the OS. For a fully custom dropdown, use `MenuButton` with `MenuItem` options.
 - **Visual alignment with TextInput.** Subtle height and padding differences may appear across browsers. Wrap both in a `Stack space={2}` for consistent rhythm.
+
+### Related components
+
+- **TextInput** — Free text entry for a single line
+- **Switch** — Binary on/off toggle
+- **Menu** — Action list, not a form input
 
 # Table
 
@@ -7710,6 +7745,11 @@ Wrap the table in `<Box overflow="auto">` and set a `min-width` on the table in 
 - `style-overrides.md` — Full list of CSS properties that have prop equivalents
 - `silent-failures.md` #9 — `--card-border-color` outside Card
 
+### Related components
+
+- **Stack** — Simple vertical list with Card items for non-tabular data
+- **Grid** — Card-based layout for non-tabular content across rows and columns
+
 # Switch
 
 A toggle control for binary on/off settings. Renders a styled checkbox input with accessible labelling.
@@ -7726,14 +7766,21 @@ import { Switch, Stack, Label } from '@sanity/ui'
 import { Flex } from '@sanity-labs/ui-poc'
 
 <Flex alignItems="center" gap={3}>
-  <Switch id="published" checked={isPublished} onChange={(e) => setPublished(e.currentTarget.checked)} />
+  <Switch id="published" checked={isPublished} onChange={(e) => setPublished(e.target.checked)} />
   <Label htmlFor="published">Published</Label>
 </Flex>
 ```
 
 ### API documentation
 
-_Refer to TypeDocs in Switch.tsx_
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `id` | `string` | — | Links to `Label htmlFor` for accessibility |
+| `checked` | `boolean` | — | Controlled checked state |
+| `defaultChecked` | `boolean` | — | Uncontrolled initial state |
+| `onChange` | `event` | — | Change handler — use `event.target.checked` (boolean) |
+| `disabled` | `boolean` | `false` | Disables interaction |
+| `indeterminate` | `boolean` | `false` | Visual indeterminate state |
 
 ### Usage guidelines
 
@@ -7746,18 +7793,16 @@ _Refer to TypeDocs in Switch.tsx_
 
 ### `onChange` event handling
 
-`Switch` fires a `React.ChangeEvent<HTMLInputElement>`. Read the new boolean state from `event.currentTarget.checked`:
-
 ```tsx
 <Switch
   checked={isEnabled}
   onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-    setIsEnabled(e.currentTarget.checked)
+    setIsEnabled(e.target.checked)
   }}
 />
 ```
 
-`currentTarget.checked` is `true` when the switch is on and `false` when off — it reflects the *new* state after the toggle, not the previous state.
+`target.checked` is `true` when the switch is on and `false` when off — it reflects the *new* state after the toggle, not the previous state.
 
 > **Do not** use a functional updater like `() => setVal(v => !v)` unless you specifically want to ignore the event value. Reading `checked` directly from the event is cleaner and more explicit.
 
@@ -7769,7 +7814,7 @@ _Refer to TypeDocs in Switch.tsx_
     id="show-deprecated"
     checked={showDeprecated}
     onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-      setShowDeprecated(e.currentTarget.checked)
+      setShowDeprecated(e.target.checked)
     }
   />
   <Label htmlFor="show-deprecated">Show deprecated entries</Label>
@@ -7788,12 +7833,17 @@ _Refer to TypeDocs in Switch.tsx_
 - Avoid negations: prefer "Show muted" over "Hide unmuted".
 - The label should describe the *on* state.
 
+### Related components
+
+- **Checkbox** — Boolean input within a form that requires explicit submission
+- **Select** — Choosing from more than two options
+- **Button** — Use `selected` for toggle actions, not form state
+
 # Badge
 
 A small label used to communicate status, category, count, or other metadata inline.
 
 ### Basic example
-
 
 **Source:** `@sanity/ui`
 ```tsx
@@ -7804,7 +7854,11 @@ import { Badge } from '@sanity/ui'
 
 ### API documentation
 
-_Refer to TypeDocs in Badge.tsx_
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `tone` | `'default'` \| `'positive'` \| `'caution'` \| `'critical'` \| `'primary'` | `'default'` | Semantic color |
+| `fontSize` | `number` | — | Font size override. Use with care — below 12px may fail contrast |
+| `children` | `ReactNode` | — | Badge label text |
 
 ### Usage guidelines
 
@@ -7838,33 +7892,6 @@ Badge accepts the same tone values as Card and Button:
 
 > ⚠️ **`tone="primary"` may fail WCAG AA contrast at small sizes.** The primary blue (`#556bfc`) with white text produces a 4.29:1 contrast ratio — below the 4.5:1 AA threshold for text under 18px. For small badges (`fontSize` below default), prefer `tone="default"` with a text label. See `button.md` for the same constraint on Button.
 
-### `icon` prop
-
-Badge accepts an optional `icon` prop for a leading icon. Pass the **component reference** — not a JSX element:
-
-```tsx
-{/* ✗ — JSX element, not a component reference */}
-<Badge tone="positive" icon={<CheckmarkCircleIcon />}>Published</Badge>
-
-{/* ✓ — pass the component itself (no angle brackets, no JSX) */}
-<Badge tone="positive" icon={CheckmarkCircleIcon}>Published</Badge>
-```
-
-The `icon` prop accepts an icon component directly:
-
-The TypeScript type for `icon` is `React.ComponentType<{}>` — a component reference, not a rendered JSX element.
-
-```tsx
-import { CheckmarkCircleIcon, WarningOutlineIcon, ErrorOutlineIcon, ClockIcon } from '@sanity/icons'
-
-<Badge tone="positive" icon={CheckmarkCircleIcon}>Published</Badge>
-<Badge tone="caution" icon={ClockIcon}>In Review</Badge>
-<Badge tone="critical" icon={ErrorOutlineIcon}>Rejected</Badge>
-<Badge tone="critical" icon={WarningOutlineIcon}>Deprecated</Badge>
-```
-
-> **Always pair a toned Badge with a matching icon.** Color alone is not sufficient to communicate meaning (WCAG 1.4.1 A).
-
 ### HTTP method badges
 
 A common pattern in API documentation interfaces:
@@ -7881,10 +7908,29 @@ const METHOD_TONES = {
 <Badge tone={METHOD_TONES[method]}>{method}</Badge>
 ```
 
+### Best practices
+
+**Do**
+
+- Pair every toned Badge with a text label that conveys the same meaning. Color alone is not enough (WCAG 1.4.1 A).
+- Keep labels to 1–3 words. Badges are for scanning, not reading.
+- Use `tone="default"` for neutral metadata (counts, categories) and semantic tones for status (positive, caution, critical).
+
+**Don't**
+
+- Don't use Badge for actions. Use Button instead — badges are non-interactive labels.
+- Don't use `tone="primary"` at small font sizes. The contrast ratio (4.29:1) fails WCAG AA for text under 18px. Use `tone="default"` instead.
+- Don't place more than 3 badges in a single row. Group related statuses or use a table for dense data.
+
 ### Accessibility
 
 - **Color alone is insufficient.** Always pair a toned Badge with a text label that communicates the same meaning. Do not use tone color as the only signal.
 - **`fontSize` prop.** Badge accepts a `fontSize` prop for size adjustment. Use with care — badge text below 12px may fail contrast requirements.
+
+### Related components
+
+- **Text** — Inline semantic text with color, without badge chrome
+- **Button** — For triggering actions, not labelling status
 
 # TextArea
 
@@ -7906,14 +7952,23 @@ import { TextArea, Stack, Label } from '@sanity/ui'
     id="description"
     rows={6}
     placeholder="Write a description..."
-    onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setDescription(e.currentTarget.value)}
+    onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setDescription(e.target.value)}
   />
 </Stack>
 ```
 
 ### API documentation
 
-_Refer to TypeDocs in TextArea.tsx_
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `id` | `string` | — | Links to `Label htmlFor` for accessibility |
+| `rows` | `number` | — | Visible height in lines of text |
+| `value` | `string` | — | Controlled value |
+| `defaultValue` | `string` | — | Uncontrolled initial value |
+| `placeholder` | `string` | — | Placeholder text |
+| `onChange` | `event` | — | Change handler — use `event.target.value` |
+| `disabled` | `boolean` | `false` | Disables interaction |
+| `readOnly` | `boolean` | `false` | Prevents value change |
 
 ### Usage guidelines
 
@@ -7965,14 +8020,12 @@ For technical content (response schemas, code templates, configuration), apply a
 
 ### `onChange` event handling
 
-Same pattern as `TextInput` — use `event.currentTarget.value` and cast explicitly:
-
 ```tsx
 <TextArea
   rows={6}
   value={body}
   onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setBody(e.currentTarget.value)
+    setBody(e.target.value)
   }}
 />
 ```
@@ -7987,7 +8040,7 @@ Same pattern as `TextInput` — use `event.currentTarget.value` and cast explici
     rows={8}
     value={body}
     onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-      setBody(e.currentTarget.value)
+      setBody(e.target.value)
     }
     placeholder="Write guide content here..."
   />
@@ -7999,3 +8052,8 @@ Same pattern as `TextInput` — use `event.currentTarget.value` and cast explici
 - **Label association.** Every TextArea must have a `<Label>` via `htmlFor`/`id` or an `aria-label`.
 - **Keyboard.** Natively keyboard-accessible — `Tab` to focus, standard text editing keys apply.
 - **Resize.** The default resize handle is accessible via pointer. If you disable resize, ensure the default `rows` is generous enough for expected content.
+
+### Related components
+
+- **TextInput** — Single-line text entry
+- **Text** — Read-only text display
