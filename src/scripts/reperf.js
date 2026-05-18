@@ -7,7 +7,7 @@ import { existsSync } from "node:fs";
 import { validateProject, killDevServer } from "../evaluation/screenshot.js";
 import { measurePerformance } from "../evaluation/performance.js";
 import { generateReport } from "../reporting/report.js";
-import { isSourceFile } from "../evaluation/analyze.js";
+import { isSourceFile } from "../evaluation/parse-files.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..", "..");

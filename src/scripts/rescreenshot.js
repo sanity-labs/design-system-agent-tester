@@ -3,7 +3,8 @@ import { resolve, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readdir, stat, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { attemptScreenshot } from "../evaluation/screenshot.js";
+import { validateProject, killDevServer } from "../evaluation/validate.js";
+import { captureScreenshots } from "../evaluation/screenshot.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..", "..");
@@ -178,11 +179,19 @@ async function main() {
       const startTime = Date.now();
 
       try {
-        const screenshotPath = await attemptScreenshot(
-          projectDir,
-          iterDir,
-          iterLabel,
-        );
+        const validation = await validateProject(projectDir, iterLabel);
+        let screenshotPath = null;
+        try {
+          if (validation.serverUrl) {
+            screenshotPath = await captureScreenshots(
+              validation.serverUrl,
+              iterDir,
+              iterLabel,
+            );
+          }
+        } finally {
+          killDevServer(validation.devServer);
+        }
 
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
 

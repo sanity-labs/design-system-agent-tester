@@ -10,7 +10,8 @@ import {
   analyzeFeedback,
   analyzeComponents,
   analyzeAccessibility,
-  analyzePerformance,
+  analyzeLighthouse,
+  analyzeReactProfile,
   analyzeComponentUsage,
   analyzeInlineStyles,
   analyzeSemanticHtml,
@@ -327,7 +328,7 @@ describe("analyzeComponents", () => {
     const iters = [
       {
         iteration: 1,
-        designSystemComponents: ["Button", "Card", "icon:AddIcon", "icon:CloseIcon"],
+        componentImports: ["Button", "Card", "icon:AddIcon", "icon:CloseIcon"],
       },
     ];
     const result = analyzeComponents(iters);
@@ -339,8 +340,8 @@ describe("analyzeComponents", () => {
 
   it("deduplicates components across iterations", () => {
     const iters = [
-      { iteration: 1, designSystemComponents: ["Button", "Card"] },
-      { iteration: 2, designSystemComponents: ["Card", "TextInput"] },
+      { iteration: 1, componentImports: ["Button", "Card"] },
+      { iteration: 2, componentImports: ["Card", "TextInput"] },
     ];
     const result = analyzeComponents(iters);
     expect(result.totalUniqueElements).toBe(3);
@@ -349,9 +350,9 @@ describe("analyzeComponents", () => {
 
   it("computes frequency of each component across iterations", () => {
     const iters = [
-      { iteration: 1, designSystemComponents: ["Button", "Card"] },
-      { iteration: 2, designSystemComponents: ["Card"] },
-      { iteration: 3, designSystemComponents: ["Button", "Card"] },
+      { iteration: 1, componentImports: ["Button", "Card"] },
+      { iteration: 2, componentImports: ["Card"] },
+      { iteration: 3, componentImports: ["Button", "Card"] },
     ];
     const result = analyzeComponents(iters);
     expect(result.frequency.Card).toBe(3);
@@ -360,8 +361,8 @@ describe("analyzeComponents", () => {
 
   it("computes averageComponentsPerIteration", () => {
     const iters = [
-      { iteration: 1, designSystemComponents: ["Button", "Card"] },
-      { iteration: 2, designSystemComponents: ["TextInput"] },
+      { iteration: 1, componentImports: ["Button", "Card"] },
+      { iteration: 2, componentImports: ["TextInput"] },
     ];
     const result = analyzeComponents(iters);
     // (2 + 1) / 2 = 1.5
@@ -448,11 +449,11 @@ describe("analyzeAccessibility", () => {
 });
 
 // ---------------------------------------------------------------------------
-// analyzePerformance
+// analyzeLighthouse
 // ---------------------------------------------------------------------------
-describe("analyzePerformance", () => {
-  it("returns nulls when no iterations have perf results", () => {
-    const result = analyzePerformance([
+describe("analyzeLighthouse", () => {
+  it("returns nulls when no iterations have lighthouse results", () => {
+    const result = analyzeLighthouse([
       { iteration: 1 },
       { iteration: 2 },
     ]);
@@ -462,9 +463,9 @@ describe("analyzePerformance", () => {
     expect(result.perIteration).toEqual([]);
   });
 
-  it("skips iterations with perf error", () => {
-    const result = analyzePerformance([
-      { iteration: 1, perfResults: { error: "timeout" } },
+  it("skips iterations whose lighthouse run errored", () => {
+    const result = analyzeLighthouse([
+      { iteration: 1, lighthouseResults: { error: "timeout" } },
     ]);
     expect(result.iterationsWithResults).toBe(0);
   });
@@ -473,7 +474,7 @@ describe("analyzePerformance", () => {
     const iters = [
       {
         iteration: 1,
-        perfResults: {
+        lighthouseResults: {
           fcpMs: 100,
           lcpMs: 200,
           tbtMs: 50,
@@ -485,7 +486,7 @@ describe("analyzePerformance", () => {
       },
       {
         iteration: 2,
-        perfResults: {
+        lighthouseResults: {
           fcpMs: 200,
           lcpMs: 400,
           tbtMs: 100,
@@ -496,7 +497,7 @@ describe("analyzePerformance", () => {
         },
       },
     ];
-    const result = analyzePerformance(iters);
+    const result = analyzeLighthouse(iters);
     expect(result.iterationsWithResults).toBe(2);
     expect(result.avgFcpMs).toBe(150);
     expect(result.avgLcpMs).toBe(300);
@@ -504,22 +505,38 @@ describe("analyzePerformance", () => {
     expect(result.avgPerformanceScore).toBe(0.8);
     expect(result.perIteration).toHaveLength(2);
   });
+});
 
-  it("includes react profiler data when present", () => {
+// ---------------------------------------------------------------------------
+// analyzeReactProfile
+// ---------------------------------------------------------------------------
+describe("analyzeReactProfile", () => {
+  it("returns nulls when no iterations have react profile data", () => {
+    const result = analyzeReactProfile([{ iteration: 1 }]);
+    expect(result.iterationsWithResults).toBe(0);
+    expect(result.avgMountMs).toBeNull();
+    expect(result.avgCommitCount).toBeNull();
+    expect(result.perIteration).toEqual([]);
+  });
+
+  it("computes averages across iterations with react profile data", () => {
     const iters = [
       {
         iteration: 1,
-        perfResults: {
-          fcpMs: 100,
-          lcpMs: 200,
-          reactProfile: { mountMs: 12, commitCount: 5, avgUpdateMs: 3 },
-        },
+        reactProfile: { mountMs: 12, commitCount: 5, avgUpdateMs: 3, maxUpdateMs: 7 },
+      },
+      {
+        iteration: 2,
+        reactProfile: { mountMs: 20, commitCount: 3, avgUpdateMs: 5, maxUpdateMs: 9 },
       },
     ];
-    const result = analyzePerformance(iters);
-    expect(result.reactMountMs).toBe(12);
-    expect(result.avgReactCommitCount).toBe(5);
-    expect(result.avgReactUpdateMs).toBe(3);
+    const result = analyzeReactProfile(iters);
+    expect(result.iterationsWithResults).toBe(2);
+    expect(result.avgMountMs).toBe(16);
+    expect(result.avgCommitCount).toBe(4);
+    expect(result.avgUpdateMs).toBe(4);
+    expect(result.avgMaxUpdateMs).toBe(8);
+    expect(result.perIteration).toHaveLength(2);
   });
 });
 

@@ -1,21 +1,17 @@
-import { writeFile, mkdir, mkdtemp, appendFile } from "node:fs/promises";
+import { writeFile, mkdtemp, appendFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import dsConfig from "../config/load.js";
 
-
-import {
-  validateProject,
-  killDevServer,
-  captureScreenshot,
-} from "../evaluation/screenshot.js";
-import { measurePerformance } from "../evaluation/performance.js";
-import {
-  parseFiles,
-  parseFeedback,
-  extractInlineStyles,
-} from "../evaluation/analyze.js";
+import { validateProject, killDevServer } from "../evaluation/validate.js";
+import { captureScreenshots } from "../evaluation/screenshot.js";
+import { countDomElements } from "../evaluation/dom-count.js";
+import { analyzeSemanticHtml } from "../evaluation/semantic-html.js";
+import { measureLighthouse } from "../evaluation/lighthouse.js";
+import { measureReactProfile } from "../evaluation/react-profile.js";
+import { parseFiles } from "../evaluation/parse-files.js";
+import { parseFeedback } from "../evaluation/parse-feedback.js";
 import { runAccessibilityTests } from "../evaluation/accessibility.js";
 
 import {
@@ -292,12 +288,20 @@ export async function runAgent({
 
       try {
         if (validation.success) {
-          // Page rendered! Take the screenshot from the running server.
+          // Page rendered! Run every measurement against the running server.
           console.log(`[${iterLabel}] ✓ Page renders successfully`);
 
-          const screenshotPath = await captureScreenshot(
+          const screenshotPath = await captureScreenshots(
             validation.serverUrl,
             iterDir,
+            iterLabel,
+          );
+          const domElementCount = await countDomElements(
+            validation.serverUrl,
+            iterLabel,
+          );
+          const semanticHtml = await analyzeSemanticHtml(
+            validation.serverUrl,
             iterLabel,
           );
 
@@ -310,17 +314,31 @@ export async function runAgent({
             );
           }
 
-          // Run performance measurements against the live dev server
-          let perfResults = null;
+          // Lighthouse performance audit
+          let lighthouseResults = null;
           try {
-            perfResults = await measurePerformance({
+            lighthouseResults = await measureLighthouse({
               serverUrl: validation.serverUrl,
               iterDir,
               iterLabel,
             });
           } catch (err) {
             console.warn(
-              `[${iterLabel}] ⚠ Perf measurement failed: ${err.message}`,
+              `[${iterLabel}] ⚠ Lighthouse measurement failed: ${err.message}`,
+            );
+          }
+
+          // React Profiler — separate run with its own browser
+          let reactProfile = null;
+          try {
+            reactProfile = await measureReactProfile({
+              serverUrl: validation.serverUrl,
+              iterDir,
+              iterLabel,
+            });
+          } catch (err) {
+            console.warn(
+              `[${iterLabel}] ⚠ React profile failed: ${err.message}`,
             );
           }
 
@@ -349,9 +367,10 @@ export async function runAgent({
             fixLog,
             feedback,
             a11yResults,
-            perfResults,
-            domElementCount: validation.domElementCount,
-            semanticHtml: validation.semanticHtml,
+            lighthouseResults,
+            reactProfile,
+            domElementCount,
+            semanticHtml,
           });
           return result;
         }
@@ -463,11 +482,21 @@ export async function runAgent({
     );
     const lastValidation = await validateProject(projectDir, iterLabel);
     let screenshotPath = null;
+    let lastDomElementCount = null;
+    let lastSemanticHtml = null;
     try {
       if (lastValidation.serverUrl) {
-        screenshotPath = await captureScreenshot(
+        screenshotPath = await captureScreenshots(
           lastValidation.serverUrl,
           iterDir,
+          iterLabel,
+        );
+        lastDomElementCount = await countDomElements(
+          lastValidation.serverUrl,
+          iterLabel,
+        );
+        lastSemanticHtml = await analyzeSemanticHtml(
+          lastValidation.serverUrl,
           iterLabel,
         );
       }
@@ -494,13 +523,14 @@ export async function runAgent({
       fixLog,
       feedback,
       a11yResults: null,
-      perfResults: null,
-      domElementCount: lastValidation.domElementCount,
-      semanticHtml: lastValidation.semanticHtml,
+      lighthouseResults: null,
+      reactProfile: null,
+      domElementCount: lastDomElementCount,
+      semanticHtml: lastSemanticHtml,
     });
   }
 
-// No screenshots requested or no package.json — just return metrics
+  // No screenshots requested or no package.json — just return metrics
   return buildResult({
     files,
     model,
@@ -512,7 +542,8 @@ export async function runAgent({
     fixLog,
     feedback,
     a11yResults: null,
-    perfResults: null,
+    lighthouseResults: null,
+    reactProfile: null,
     domElementCount: null,
     semanticHtml: null,
   });

@@ -7,12 +7,10 @@
 import { writeFile, mkdir, rm, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { existsSync } from "node:fs";
-import {
-  extractComponentImports,
-  extractInlineStyles,
-  extractComponentUsageCounts,
-  isSourceFile,
-} from "../evaluation/analyze.js";
+import { extractComponentImports } from "../evaluation/extract-component-imports.js";
+import { extractInlineStyles } from "../evaluation/extract-inline-styles.js";
+import { extractComponentUsageCounts } from "../evaluation/count-component-usage.js";
+import { isSourceFile } from "../evaluation/parse-files.js";
 import {
   buildSystemPrompt,
   buildFixSystemPrompt,
@@ -151,7 +149,8 @@ export async function buildResult({
   fixLog,
   feedback,
   a11yResults,
-  perfResults,
+  lighthouseResults,
+  reactProfile,
   domElementCount,
   semanticHtml,
   runner,
@@ -191,8 +190,6 @@ export async function buildResult({
     fileCount: files.length,
     filePaths: files.map((f) => f.path),
     componentImports: componentImportsArray,
-    // Legacy field name preserved for compatibility with existing report code.
-    designSystemComponents: componentImportsArray,
     inlineStyles,
     semanticHtml,
     componentUsage,
@@ -203,7 +200,8 @@ export async function buildResult({
     fixLog,
     feedback,
     a11yResults,
-    perfResults,
+    lighthouseResults,
+    reactProfile,
     domElementCount: domElementCount || null,
   };
   await writeFile(
@@ -219,7 +217,6 @@ export async function buildResult({
     fileCount: files.length,
     files: sourceContents,
     componentImports: componentImportsArray,
-    designSystemComponents: componentImportsArray,
     inlineStyles,
     semanticHtml,
     componentUsage,
@@ -230,7 +227,8 @@ export async function buildResult({
     fixLog,
     feedback,
     a11yResults,
-    perfResults,
+    lighthouseResults,
+    reactProfile,
     domElementCount: domElementCount || null,
   };
 }

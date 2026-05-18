@@ -1,6 +1,8 @@
 import { writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import dsConfig from "../config/load.js";
+import { extractMetrics, renderMetricsTable } from "./aggregate.js";
+import { renderSummary } from "./summarize.js";
 
 /**
  * Generate a report from all test results.
@@ -64,8 +66,9 @@ export async function generateReport(allResults, outputDir, promptText = null) {
     const visualDiff =
       iterations.find((r) => r._visualDiff)?._visualDiff || null;
 
-    // 10. Performance analysis
-    const perfAnalysis = analyzePerformance(validIterations);
+    // 10. Performance analysis (Lighthouse + React Profiler kept separate)
+    const lighthouseAnalysis = analyzeLighthouse(validIterations);
+    const reactProfileAnalysis = analyzeReactProfile(validIterations);
 
     // 11. Inline style analysis
     const inlineStyleAnalysis = analyzeInlineStyles(validIterations);
@@ -114,7 +117,7 @@ export async function generateReport(allResults, outputDir, promptText = null) {
         all: locs,
       },
       codeVariance: varianceAnalysis,
-      designSystemComponents: componentAnalysis,
+      componentImports: componentAnalysis,
       screenshots,
       fixAttempts: {
         average: round(avgFixes),
@@ -145,7 +148,8 @@ export async function generateReport(allResults, outputDir, promptText = null) {
         iterationsCompared: 0,
         description: "No visual diff data available",
       },
-      performance: perfAnalysis,
+      lighthouse: lighthouseAnalysis,
+      reactProfile: reactProfileAnalysis,
       inlineStyles: inlineStyleAnalysis,
       componentUsageCounts: componentUsageAnalysis,
 
@@ -165,9 +169,29 @@ export async function generateReport(allResults, outputDir, promptText = null) {
   await writeFile(jsonPath, JSON.stringify(report, null, 2), "utf-8");
   console.log(`JSON report written to: ${jsonPath}`);
 
+  // Render the summarize.js layout for THIS run only and prepend it to
+  // the markdown report. Scoped to a single run so the tables can't pull
+  // in labels (e.g. retired test names) from past runs sitting in
+  // `output/`.
+  const runName = `${basename(dirname(outputDir))}/${basename(outputDir)}`;
+  const promptKeys = Object.keys(report.prompts);
+  let summarySection = "";
+  if (promptKeys.length > 0) {
+    try {
+      const summaryMd = renderSummary(
+        [{ name: runName, report }],
+        promptKeys,
+        outputDir,
+      );
+      summarySection = summaryMd + "\n---\n\n";
+    } catch (err) {
+      console.warn(`Failed to render run summary: ${err.message}`);
+    }
+  }
+
   // Write human-readable markdown report
   const mdPath = resolve(outputDir, "report.md");
-  const markdown = renderMarkdown(report);
+  const markdown = summarySection + renderMarkdown(report);
   await writeFile(mdPath, markdown, "utf-8");
   console.log(`Markdown report written to: ${mdPath}`);
 
@@ -311,7 +335,7 @@ export function analyzeComponents(iterations) {
   const perIteration = [];
 
   for (const iter of iterations) {
-    const comps = iter.designSystemComponents || [];
+    const comps = iter.componentImports || [];
     perIteration.push({
       iteration: iter.iteration,
       count: comps.length,
@@ -326,7 +350,7 @@ export function analyzeComponents(iterations) {
   const frequency = {};
   for (const comp of allComponents) {
     frequency[comp] = iterations.filter((iter) =>
-      (iter.designSystemComponents || []).includes(comp),
+      (iter.componentImports || []).includes(comp),
     ).length;
   }
 
@@ -431,6 +455,17 @@ function renderMarkdown(report) {
     md += `> ${report.promptText.split("\n").join("\n> ")}\n\n`;
   }
 
+  // ─── TL;DR: headline metrics across all tests ──────────────────
+  const labels = Object.keys(report.prompts);
+  if (labels.length > 0) {
+    const aggregatesByLabel = Object.fromEntries(
+      labels.map((label) => [label, extractMetrics(report.prompts[label])]),
+    );
+    md += `## 📊 Summary\n\n`;
+    md += renderMetricsTable(labels, aggregatesByLabel);
+    md += `\n`;
+  }
+
   for (const [promptKey, data] of Object.entries(report.prompts)) {
     md += `---\n\n`;
     md += `## Prompt: \`${promptKey}\`\n\n`;
@@ -513,7 +548,7 @@ function renderMarkdown(report) {
 
     // Components
     md += `### 🧩 ${dsConfig.name} Components\n\n`;
-    const c = data.designSystemComponents;
+    const c = data.componentImports;
     md += `| Metric | Value |\n|--------|-------|\n`;
     md += `| Unique UI components | ${c.uniqueUIComponents} |\n`;
     md += `| Unique icons | ${c.uniqueIcons} |\n`;
@@ -628,72 +663,60 @@ function renderMarkdown(report) {
       md += `No accessibility results collected for this prompt.\n\n`;
     }
 
-    // Performance
-    md += `### ⚡ Performance\n\n`;
-    const perf = data.performance;
-    if (perf && perf.iterationsWithResults > 0) {
+    // Lighthouse
+    md += `### ⚡ Lighthouse\n\n`;
+    const lh = data.lighthouse;
+    if (lh && lh.iterationsWithResults > 0) {
       md += `| Metric | Value |\n|--------|-------|\n`;
-      md += `| Iterations measured | ${perf.iterationsWithResults}/${data.successfulIterations} |\n`;
-      md += `| Lighthouse runs / iteration | ${perf.runsPerIteration} |\n`;
-      if (perf.avgFcpMs !== null) {
-        md += `| Avg FCP | ${perf.avgFcpMs}ms |\n`;
-      }
-      if (perf.avgLcpMs !== null) {
-        md += `| Avg LCP | ${perf.avgLcpMs}ms |\n`;
-      }
-      if (perf.avgTbtMs !== null) {
-        md += `| Avg TBT (Total Blocking Time) | ${perf.avgTbtMs}ms |\n`;
-      }
-      if (perf.avgTtiMs !== null) {
-        md += `| Avg TTI (Time to Interactive) | ${perf.avgTtiMs}ms |\n`;
-      }
-      if (perf.avgSpeedIndex !== null) {
-        md += `| Avg Speed Index | ${perf.avgSpeedIndex}ms |\n`;
-      }
-      if (perf.avgPerformanceScore !== null) {
-        md += `| Avg Lighthouse score | ${perf.avgPerformanceScore} |\n`;
-      }
-      if (perf.reactMountMs !== null) {
-        md += `| Avg React initial mount | ${perf.reactMountMs}ms |\n`;
-      }
-      if (perf.avgReactCommitCount !== null) {
-        md += `| Avg React commit count | ${perf.avgReactCommitCount} |\n`;
-      }
-      if (perf.avgReactUpdateMs !== null) {
-        md += `| Avg React update time | ${perf.avgReactUpdateMs}ms |\n`;
-      }
+      md += `| Iterations measured | ${lh.iterationsWithResults}/${data.successfulIterations} |\n`;
+      md += `| Lighthouse runs / iteration | ${lh.runsPerIteration} |\n`;
+      if (lh.avgFcpMs !== null) md += `| Avg FCP | ${lh.avgFcpMs}ms |\n`;
+      if (lh.avgLcpMs !== null) md += `| Avg LCP | ${lh.avgLcpMs}ms |\n`;
+      if (lh.avgTbtMs !== null) md += `| Avg TBT (Total Blocking Time) | ${lh.avgTbtMs}ms |\n`;
+      if (lh.avgTtiMs !== null) md += `| Avg TTI (Time to Interactive) | ${lh.avgTtiMs}ms |\n`;
+      if (lh.avgSpeedIndex !== null) md += `| Avg Speed Index | ${lh.avgSpeedIndex}ms |\n`;
+      if (lh.avgPerformanceScore !== null) md += `| Avg Lighthouse score | ${lh.avgPerformanceScore} |\n`;
       md += `\n`;
 
-      if (perf.perIteration.length > 0) {
-        const hasReact = perf.perIteration.some((p) => p.reactMountMs !== null);
-        if (hasReact) {
-          md += `| Iteration | FCP (ms) | TBT (ms) | Score | React mount (ms) | React commits | React avg update (ms) |\n`;
-          md += `|-----------|----------|----------|-------|------------------|---------------|----------------------|\n`;
-          for (const p of perf.perIteration) {
-            const fcp    = p.fcpMs            ?? "N/A";
-            const tbt    = p.tbtMs            ?? "N/A";
-            const score  = p.performanceScore ?? "N/A";
-            const mount  = p.reactMountMs     ?? "N/A";
-            const count  = p.reactCommitCount ?? "N/A";
-            const update = p.reactAvgUpdateMs ?? "N/A";
-            md += `| ${p.iteration} | ${fcp} | ${tbt} | ${score} | ${mount} | ${count} | ${update} |\n`;
-          }
-        } else {
-          md += `| Iteration | FCP (ms) | LCP (ms) | TBT (ms) | TTI (ms) | Score |\n`;
-          md += `|-----------|----------|----------|----------|----------|-------|\n`;
-          for (const p of perf.perIteration) {
-            const fcp   = p.fcpMs            ?? "N/A";
-            const lcp   = p.lcpMs            ?? "N/A";
-            const tbt   = p.tbtMs            ?? "N/A";
-            const tti   = p.ttiMs            ?? "N/A";
-            const score = p.performanceScore ?? "N/A";
-            md += `| ${p.iteration} | ${fcp} | ${lcp} | ${tbt} | ${tti} | ${score} |\n`;
-          }
+      if (lh.perIteration.length > 0) {
+        md += `| Iteration | FCP (ms) | LCP (ms) | TBT (ms) | TTI (ms) | Score |\n`;
+        md += `|-----------|----------|----------|----------|----------|-------|\n`;
+        for (const p of lh.perIteration) {
+          const fcp   = p.fcpMs            ?? "N/A";
+          const lcp   = p.lcpMs            ?? "N/A";
+          const tbt   = p.tbtMs            ?? "N/A";
+          const tti   = p.ttiMs            ?? "N/A";
+          const score = p.performanceScore ?? "N/A";
+          md += `| ${p.iteration} | ${fcp} | ${lcp} | ${tbt} | ${tti} | ${score} |\n`;
         }
         md += `\n`;
       }
     } else {
-      md += `No performance data collected for this prompt.\n\n`;
+      md += `No Lighthouse data collected for this prompt.\n\n`;
+    }
+
+    // React Profiler
+    md += `### ⚛️ React Profiler\n\n`;
+    const rp = data.reactProfile;
+    if (rp && rp.iterationsWithResults > 0) {
+      md += `| Metric | Value |\n|--------|-------|\n`;
+      md += `| Iterations measured | ${rp.iterationsWithResults}/${data.successfulIterations} |\n`;
+      if (rp.avgMountMs !== null) md += `| Avg initial mount | ${rp.avgMountMs}ms |\n`;
+      if (rp.avgCommitCount !== null) md += `| Avg commit count | ${rp.avgCommitCount} |\n`;
+      if (rp.avgUpdateMs !== null) md += `| Avg update commit | ${rp.avgUpdateMs}ms |\n`;
+      if (rp.avgMaxUpdateMs !== null) md += `| Avg slowest update | ${rp.avgMaxUpdateMs}ms |\n`;
+      md += `\n`;
+
+      if (rp.perIteration.length > 0) {
+        md += `| Iteration | Mount (ms) | Commits | Avg update (ms) | Max update (ms) |\n`;
+        md += `|-----------|-----------|---------|-----------------|-----------------|\n`;
+        for (const p of rp.perIteration) {
+          md += `| ${p.iteration} | ${p.mountMs ?? "N/A"} | ${p.commitCount ?? "N/A"} | ${p.avgUpdateMs ?? "N/A"} | ${p.maxUpdateMs ?? "N/A"} |\n`;
+        }
+        md += `\n`;
+      }
+    } else {
+      md += `No React Profiler data collected for this prompt.\n\n`;
     }
 
     // Component Usage Counts
@@ -916,11 +939,11 @@ function renderMarkdown(report) {
 // --- Utility functions ---
 
 /**
- * Analyze performance results across iterations.
+ * Aggregate Lighthouse results across iterations.
  */
-export function analyzePerformance(iterations) {
+export function analyzeLighthouse(iterations) {
   const withResults = iterations.filter(
-    (r) => r.perfResults && !r.perfResults.error,
+    (r) => r.lighthouseResults && !r.lighthouseResults.error,
   );
 
   if (withResults.length === 0) {
@@ -934,53 +957,80 @@ export function analyzePerformance(iterations) {
       avgSpeedIndex: null,
       avgPerformanceScore: null,
       runsPerIteration: 0,
-      reactMountMs: null,
-      avgReactCommitCount: null,
-      avgReactUpdateMs: null,
       perIteration: [],
     };
   }
 
-  const fcpValues   = withResults.map((r) => r.perfResults.fcpMs).filter((v) => v !== null);
-  const lcpValues   = withResults.map((r) => r.perfResults.lcpMs).filter((v) => v !== null);
-  const tbtValues   = withResults.map((r) => r.perfResults.tbtMs).filter((v) => v !== null);
-  const ttiValues   = withResults.map((r) => r.perfResults.ttiMs).filter((v) => v !== null);
-  const siValues    = withResults.map((r) => r.perfResults.speedIndex).filter((v) => v !== null);
-  const scoreValues = withResults.map((r) => r.perfResults.performanceScore).filter((v) => v !== null);
-
-  // React Profiler — only present when the page used a dev-mode React build.
-  const reactMountValues      = withResults.map((r) => r.perfResults.reactProfile?.mountMs).filter((v) => v != null);
-  const reactCommitCounts     = withResults.map((r) => r.perfResults.reactProfile?.commitCount).filter((v) => v != null);
-  const reactAvgUpdateValues  = withResults.map((r) => r.perfResults.reactProfile?.avgUpdateMs).filter((v) => v != null);
+  const fcpValues   = withResults.map((r) => r.lighthouseResults.fcpMs).filter((v) => v !== null);
+  const lcpValues   = withResults.map((r) => r.lighthouseResults.lcpMs).filter((v) => v !== null);
+  const tbtValues   = withResults.map((r) => r.lighthouseResults.tbtMs).filter((v) => v !== null);
+  const ttiValues   = withResults.map((r) => r.lighthouseResults.ttiMs).filter((v) => v !== null);
+  const siValues    = withResults.map((r) => r.lighthouseResults.speedIndex).filter((v) => v !== null);
+  const scoreValues = withResults.map((r) => r.lighthouseResults.performanceScore).filter((v) => v !== null);
 
   const perIteration = withResults.map((r) => ({
     iteration:        r.iteration,
-    fcpMs:            r.perfResults.fcpMs,
-    lcpMs:            r.perfResults.lcpMs,
-    tbtMs:            r.perfResults.tbtMs ?? null,
-    ttiMs:            r.perfResults.ttiMs ?? null,
-    speedIndex:       r.perfResults.speedIndex ?? null,
-    performanceScore: r.perfResults.performanceScore ?? null,
-    runCount:         r.perfResults.runs ?? 0,
-    reactMountMs:     r.perfResults.reactProfile?.mountMs ?? null,
-    reactCommitCount: r.perfResults.reactProfile?.commitCount ?? null,
-    reactAvgUpdateMs: r.perfResults.reactProfile?.avgUpdateMs ?? null,
-    reactMaxUpdateMs: r.perfResults.reactProfile?.maxUpdateMs ?? null,
+    fcpMs:            r.lighthouseResults.fcpMs,
+    lcpMs:            r.lighthouseResults.lcpMs,
+    tbtMs:            r.lighthouseResults.tbtMs ?? null,
+    ttiMs:            r.lighthouseResults.ttiMs ?? null,
+    speedIndex:       r.lighthouseResults.speedIndex ?? null,
+    performanceScore: r.lighthouseResults.performanceScore ?? null,
+    runCount:         r.lighthouseResults.runs ?? 0,
   }));
 
   return {
     iterationsWithResults: withResults.length,
     totalIterations:       iterations.length,
-    avgFcpMs:              fcpValues.length        > 0 ? round(mean(fcpValues))           : null,
-    avgLcpMs:              lcpValues.length        > 0 ? round(mean(lcpValues))           : null,
-    avgTbtMs:              tbtValues.length        > 0 ? round(mean(tbtValues))           : null,
-    avgTtiMs:              ttiValues.length        > 0 ? round(mean(ttiValues))           : null,
-    avgSpeedIndex:         siValues.length         > 0 ? round(mean(siValues))            : null,
-    avgPerformanceScore:   scoreValues.length      > 0 ? round(mean(scoreValues))         : null,
-    runsPerIteration:      withResults[0]?.perfResults?.runs ?? 0,
-    reactMountMs:          reactMountValues.length > 0 ? round(mean(reactMountValues))    : null,
-    avgReactCommitCount:   reactCommitCounts.length > 0 ? round(mean(reactCommitCounts))  : null,
-    avgReactUpdateMs:      reactAvgUpdateValues.length > 0 ? round(mean(reactAvgUpdateValues)) : null,
+    avgFcpMs:              fcpValues.length   > 0 ? round(mean(fcpValues))   : null,
+    avgLcpMs:              lcpValues.length   > 0 ? round(mean(lcpValues))   : null,
+    avgTbtMs:              tbtValues.length   > 0 ? round(mean(tbtValues))   : null,
+    avgTtiMs:              ttiValues.length   > 0 ? round(mean(ttiValues))   : null,
+    avgSpeedIndex:         siValues.length    > 0 ? round(mean(siValues))    : null,
+    avgPerformanceScore:   scoreValues.length > 0 ? round(mean(scoreValues)) : null,
+    runsPerIteration:      withResults[0]?.lighthouseResults?.runs ?? 0,
+    perIteration,
+  };
+}
+
+/**
+ * Aggregate React Profiler results across iterations.
+ */
+export function analyzeReactProfile(iterations) {
+  const withResults = iterations.filter((r) => r.reactProfile);
+
+  if (withResults.length === 0) {
+    return {
+      iterationsWithResults: 0,
+      totalIterations: iterations.length,
+      avgMountMs: null,
+      avgCommitCount: null,
+      avgUpdateMs: null,
+      avgMaxUpdateMs: null,
+      perIteration: [],
+    };
+  }
+
+  const mountValues     = withResults.map((r) => r.reactProfile.mountMs).filter((v) => v != null);
+  const commitCounts    = withResults.map((r) => r.reactProfile.commitCount).filter((v) => v != null);
+  const avgUpdateValues = withResults.map((r) => r.reactProfile.avgUpdateMs).filter((v) => v != null);
+  const maxUpdateValues = withResults.map((r) => r.reactProfile.maxUpdateMs).filter((v) => v != null);
+
+  const perIteration = withResults.map((r) => ({
+    iteration:    r.iteration,
+    mountMs:      r.reactProfile.mountMs ?? null,
+    commitCount:  r.reactProfile.commitCount ?? null,
+    avgUpdateMs:  r.reactProfile.avgUpdateMs ?? null,
+    maxUpdateMs:  r.reactProfile.maxUpdateMs ?? null,
+  }));
+
+  return {
+    iterationsWithResults: withResults.length,
+    totalIterations:       iterations.length,
+    avgMountMs:            mountValues.length     > 0 ? round(mean(mountValues))     : null,
+    avgCommitCount:        commitCounts.length    > 0 ? round(mean(commitCounts))    : null,
+    avgUpdateMs:           avgUpdateValues.length > 0 ? round(mean(avgUpdateValues)) : null,
+    avgMaxUpdateMs:        maxUpdateValues.length > 0 ? round(mean(maxUpdateValues)) : null,
     perIteration,
   };
 }

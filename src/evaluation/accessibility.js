@@ -1,6 +1,17 @@
+/**
+ * Accessibility audit (axe-core).
+ *
+ * Data point: WCAG accessibility violations detected by axe-core. Runs
+ * one scan in light mode and one in dark mode (via
+ * `prefers-color-scheme: dark` media emulation), then merges the results.
+ *
+ * Self-contained: opens its own browser instance.
+ */
+
 import { resolve } from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
+import { launchBrowser, waitForRenderedContent } from "./puppeteer-helpers.js";
 
 const require = createRequire(import.meta.url);
 
@@ -46,12 +57,7 @@ export async function runAccessibilityTests({ serverUrl, iterDir, iterLabel }) {
       return skipAll(`Failed to load axe-core: ${err.message}`, iterLabel, iterDir);
     }
 
-    // Launch browser
-    const puppeteer = await import("puppeteer");
-    browser = await puppeteer.default.launch({
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
-    });
+    browser = await launchBrowser();
 
     const page = await browser.newPage();
     await page.setViewport({ width: 1440, height: 900 });
@@ -63,7 +69,7 @@ export async function runAccessibilityTests({ serverUrl, iterDir, iterLabel }) {
       return skipAll(`Page failed to load: ${err.message}`, iterLabel, iterDir);
     }
 
-    await waitForRenderedContent(page, iterLabel);
+    await waitForRenderedContent(page, { iterLabel });
 
     // Inject axe-core
     try {
@@ -245,40 +251,4 @@ async function safeWriteResults(iterDir, results) {
   } catch {
     // Ignore write errors — don't let them mask test results
   }
-}
-
-/**
- * Wait for the page to render meaningful content.
- */
-async function waitForRenderedContent(page, iterLabel) {
-  const MAX_WAIT_MS = 15_000;
-  const POLL_INTERVAL_MS = 500;
-  const start = Date.now();
-
-  while (Date.now() - start < MAX_WAIT_MS) {
-    const hasContent = await page.evaluate(() => {
-      const roots = [
-        document.getElementById("root"),
-        document.getElementById("app"),
-        document.getElementById("__next"),
-      ].filter(Boolean);
-      const container = roots[0] || document.body;
-      const allElements = container.querySelectorAll("*");
-      let visibleCount = 0;
-      for (const el of allElements) {
-        const rect = el.getBoundingClientRect();
-        if (rect.width > 0 && rect.height > 0) visibleCount++;
-        if (visibleCount >= 5) return true;
-      }
-      return false;
-    });
-
-    if (hasContent) return true;
-    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
-  }
-
-  console.warn(
-    `[${iterLabel}] Page may not have rendered meaningful content within ${MAX_WAIT_MS}ms`,
-  );
-  return false;
 }

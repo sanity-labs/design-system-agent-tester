@@ -10,13 +10,9 @@ import {
   rm,
 } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import {
-  parseFiles,
-  extractSanityUIComponents,
-  isSourceFile,
-} from "../evaluation/analyze.js";
-import { attemptScreenshot } from "../evaluation/screenshot.js";
-import { runAccessibilityTests } from "../evaluation/accessibility.js";
+import { parseFiles } from "../evaluation/parse-files.js";
+import { validateProject, killDevServer } from "../evaluation/validate.js";
+import { captureScreenshots } from "../evaluation/screenshot.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..", "..");
@@ -203,13 +199,23 @@ async function rebuildIteration({
     (sum, f) => sum + f.content.split("\n").length,
     0,
   );
-  const sanityUIComponents = extractSanityUIComponents(files);
 
   // Take screenshot
   let screenshotPath = null;
   if (!skipScreenshot && files.some((f) => f.path === "package.json")) {
     console.log(`[${iterLabel}] Starting screenshot pipeline...`);
-    screenshotPath = await attemptScreenshot(projectDir, iterDir, iterLabel);
+    const validation = await validateProject(projectDir, iterLabel);
+    try {
+      if (validation.serverUrl) {
+        screenshotPath = await captureScreenshots(
+          validation.serverUrl,
+          iterDir,
+          iterLabel,
+        );
+      }
+    } finally {
+      killDevServer(validation.devServer);
+    }
 
     if (screenshotPath) {
       console.log(`[${iterLabel}] Screenshot saved: ${screenshotPath}`);
@@ -236,7 +242,6 @@ async function rebuildIteration({
   meta.linesOfCode = linesOfCode;
   meta.fileCount = files.length;
   meta.filePaths = files.map((f) => f.path);
-  meta.sanityUIComponents = [...sanityUIComponents];
   meta.screenshotPath = screenshotPath;
   meta.rebuiltAt = new Date().toISOString();
 
@@ -247,7 +252,6 @@ async function rebuildIteration({
     fileCount: files.length,
     linesOfCode,
     screenshotPath,
-    components: sanityUIComponents.size,
   };
 }
 
@@ -324,7 +328,7 @@ async function main() {
         if (result.success) {
           totalSucceeded++;
           console.log(
-            `[${iterLabel}] ✓ Done in ${elapsed}s — ${result.fileCount} files, ${result.linesOfCode} LOC, ${result.components} components${result.screenshotPath ? ", screenshot ✓" : ""}\n`,
+            `[${iterLabel}] ✓ Done in ${elapsed}s — ${result.fileCount} files, ${result.linesOfCode} LOC${result.screenshotPath ? ", screenshot ✓" : ""}\n`,
           );
         } else {
           totalNoFiles++;
