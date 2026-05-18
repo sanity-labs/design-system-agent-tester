@@ -1,11 +1,11 @@
 import { parseArgs } from "node:util";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readFile, mkdir } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { mkdir } from "node:fs/promises";
 import { generateReport } from "./reporting/report.js";
 import { computeVisualDiff } from "./evaluation/visual-diff.js";
 import { generateAppPrompt, STATIC_PROMPT } from "./config/prompt-generator.js";
+import { TESTS, TEST_LABELS, buildUserPrompt } from "./config/prompts.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
@@ -91,14 +91,8 @@ const { values } = parseArgs({
   },
 });
 
-const PROMPTS = {
-  control: resolve(ROOT, "prompts", "PROMPT-CONTROL.md"),
-  training: resolve(ROOT, "prompts", "PROMPT-WITH-TRAINING.md"),
-  "training-mcp": resolve(ROOT, "prompts", "PROMPT-WITH-TRAINING-MCP.md"),
-};
-
 /**
- * Resolve the brief that replaces [ADD PROMPT HERE] in both prompt files.
+ * Resolve the interface brief used by every variant in the current run.
  *
  * When --agent-prompt is false (default): returns the static fallback string.
  * When --agent-prompt is true: calls the Anthropic API to generate a fresh
@@ -117,18 +111,6 @@ async function resolvePromptBrief(useAgentPrompt, model) {
   const brief = await generateAppPrompt({ model });
   console.log(`\n--- Generated interface brief ---\n${brief}\n---\n`);
   return brief;
-}
-
-/**
- * Inject the resolved brief into a raw prompt file's content by replacing
- * the [ADD PROMPT HERE] placeholder.
- *
- * @param {string} fileContent  - Raw content read from the prompt .md file
- * @param {string} brief        - The resolved brief text
- * @returns {string}
- */
-function injectBrief(fileContent, brief) {
-  return fileContent.replace(/\[ADD PROMPT HERE\]/g, brief);
 }
 
 /**
@@ -151,14 +133,7 @@ async function main() {
     parseInt(values.concurrency, 10) || Math.min(iterations, 2);
   const takeScreenshots = values.screenshot;
   const maxFixes = parseInt(values["max-fixes"], 10);
-  const useMcp = !values["no-mcp"];
-
-
-  // When MCP is enabled, swap the training prompt for the MCP variant
-  if (useMcp && PROMPTS["training-mcp"]) {
-    PROMPTS.training = PROMPTS["training-mcp"];
-  }
-
+  const mcpEnabled = !values["no-mcp"];
   const useAgentPrompt = values["agent-prompt"];
 
   if (isNaN(maxFixes) || maxFixes < 0) {
@@ -184,17 +159,25 @@ async function main() {
       ? await import("./pipeline/runner-cli.js")
       : await import("./pipeline/runner-api.js");
 
-  // Determine which prompts to run
-  let promptKeys;
-  if (promptArg === "both") {
-    promptKeys = ["control", "training"];
-  } else if (PROMPTS[promptArg]) {
-    promptKeys = [promptArg];
+  // Determine which tests to run.
+  //   --prompt all  (or `both`)    — run every test
+  //   --prompt LABEL                — run one test by label
+  //   --prompt LABEL1,LABEL2        — run a comma-separated subset
+  let testLabels;
+  const promptValue = promptArg.trim();
+  if (promptValue === "all" || promptValue === "both") {
+    testLabels = [...TEST_LABELS];
   } else {
-    console.error(
-      `Error: --prompt must be "control", "training", or "both". Got "${promptArg}"`,
-    );
-    process.exit(1);
+    const parts = promptValue.split(",").map((s) => s.trim()).filter(Boolean);
+    const unknown = parts.filter((p) => !TEST_LABELS.includes(p));
+    if (parts.length === 0 || unknown.length > 0) {
+      const valid = [...TEST_LABELS, "all"].join(", ");
+      console.error(
+        `Error: --prompt must be one of: ${valid} (or a comma-separated subset). Got "${promptArg}"`,
+      );
+      process.exit(1);
+    }
+    testLabels = parts;
   }
 
   // Create a timestamped run directory: output/2025-03-18/14.30/
@@ -214,26 +197,24 @@ async function main() {
   console.log(`Max fixes:    ${maxFixes}`);
   console.log(`Concurrency:  ${maxConcurrency}`);
   console.log(`Screenshots:  ${takeScreenshots}`);
-  console.log(`MCP:          ${useMcp}`);
-
+  console.log(`MCP:          ${mcpEnabled}`);
   console.log(`Agent prompt: ${useAgentPrompt}`);
-  console.log(`Prompts:      ${promptKeys.join(", ")}`);
+  console.log(`Tests:        ${testLabels.join(", ")}`);
   console.log(`Output:       ${runDir}`);
   console.log(`Brief:        ${promptBrief.split("\n")[0]}${promptBrief.includes("\n") ? " …" : ""}`);
   console.log("");
 
   const allResults = {};
 
-  for (const key of promptKeys) {
-    const promptPath = PROMPTS[key];
-    const rawContent = await readFile(promptPath, "utf-8");
-    const promptContent = injectBrief(rawContent, promptBrief);
+  for (const label of testLabels) {
+    const test = TESTS.find((t) => t.label === label);
+    const promptContent = buildUserPrompt(label, promptBrief);
 
     console.log(
-      `\n--- Running "${key}" prompt (${iterations} iterations) ---\n`,
+      `\n--- Running "${label}" test (${iterations} iterations) ---\n`,
     );
 
-    const outputDir = resolve(runDir, key);
+    const outputDir = resolve(runDir, label);
     await mkdir(outputDir, { recursive: true });
 
     const results = [];
@@ -245,7 +226,7 @@ async function main() {
     async function runNext() {
       if (queue.length === 0) return;
       const idx = queue.shift();
-      const iterLabel = `${key}-iter-${idx + 1}`;
+      const iterLabel = `${label}-iter-${idx + 1}`;
       const iterDir = resolve(outputDir, `iteration-${idx + 1}`);
       await mkdir(iterDir, { recursive: true });
 
@@ -261,10 +242,10 @@ async function main() {
             model,
             iterDir,
             iterLabel,
+            testLabel: label,
             takeScreenshots,
             maxFixes,
-            useMcp,
-
+            useMcp: mcpEnabled && test.requiresMcp,
           });
 
           const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
@@ -303,10 +284,11 @@ async function main() {
       results[idx] = {
         iteration: idx + 1,
         elapsedSeconds: parseFloat(elapsed),
+        testLabel: label,
         error: lastError.message,
         linesOfCode: 0,
         files: [],
-        sanityUIComponents: [],
+        componentImports: [],
       };
     }
 
@@ -326,29 +308,29 @@ async function main() {
 
     await processQueue();
 
-    allResults[key] = results;
+    allResults[label] = results;
   }
 
-  // Visual diff: compare screenshots within each prompt
+  // Visual diff: compare screenshots within each test
   if (takeScreenshots) {
     console.log("\n\n=== Computing Visual Diffs ===\n");
 
-    for (const [key, iterations] of Object.entries(allResults)) {
+    for (const [label, iterations] of Object.entries(allResults)) {
       const validIterations = iterations.filter(
         (r) => !r.error && r.screenshotPath,
       );
 
       if (validIterations.length < 2) {
         console.log(
-          `[${key}] Skipping visual diff (need ≥2 screenshots, have ${validIterations.length})`,
+          `[${label}] Skipping visual diff (need ≥2 screenshots, have ${validIterations.length})`,
         );
         continue;
       }
 
       console.log(
-        `[${key}] Comparing ${validIterations.length} screenshots...`,
+        `[${label}] Comparing ${validIterations.length} screenshots...`,
       );
-      const promptOutputDir = resolve(runDir, key);
+      const promptOutputDir = resolve(runDir, label);
 
       try {
         const visualDiff = await computeVisualDiff(
@@ -362,10 +344,10 @@ async function main() {
         }
 
         console.log(
-          `[${key}] Visual diff complete: avg ${visualDiff.averageDiffPercent}% difference across ${visualDiff.pairwiseDiffs.length} pair(s)`,
+          `[${label}] Visual diff complete: avg ${visualDiff.averageDiffPercent}% difference across ${visualDiff.pairwiseDiffs.length} pair(s)`,
         );
       } catch (err) {
-        console.warn(`[${key}] Visual diff failed: ${err.message}`);
+        console.warn(`[${label}] Visual diff failed: ${err.message}`);
       }
     }
   }

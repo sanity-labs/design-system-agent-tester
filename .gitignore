@@ -4,3 +4,8 @@ output/
 dist
 .env
 claude.md
+.claude
+
+agent-tester.config.js
+prompts
+TODO.md

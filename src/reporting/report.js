@@ -1,6 +1,6 @@
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import dsConfig from "../config/design-system.js";
+import dsConfig from "../config/load.js";
 
 /**
  * Generate a report from all test results.

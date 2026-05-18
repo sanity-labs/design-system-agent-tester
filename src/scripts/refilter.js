@@ -2,12 +2,12 @@
 /**
  * refilter.js — Regenerate a report for a specific run, excluding contaminated
  * iterations where agents imported Box/Flex/Grid/Text/Heading/Card from @sanity/ui
- * instead of ui-poc.
+ * instead of the design system.
  *
  * Usage:
  *   node src/refilter.js
  *
- * Hardcoded for: output/2026-04-15-11.24, training only, exclude iterations 1, 2, 20.
+ * Hardcoded for: output/2026-04-15-11.24, variant only, exclude iterations 1, 2, 20.
  */
 
 import { readFile, writeFile } from "node:fs/promises";
@@ -23,7 +23,7 @@ const ROOT = resolve(__dirname, "..", "..");
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 const RUN_DIR        = resolve(ROOT, "output/2026-04-15-11.24");
-const PROMPT         = "training";
+const PROMPT         = "variant";
 const EXCLUDE        = new Set([1, 2, 20]);
 const TOTAL_ITERS    = 30;
 

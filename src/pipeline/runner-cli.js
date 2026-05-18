@@ -2,6 +2,7 @@ import { writeFile, mkdir, mkdtemp, appendFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
+import dsConfig from "../config/load.js";
 
 
 import {
@@ -18,10 +19,8 @@ import {
 import { runAccessibilityTests } from "../evaluation/accessibility.js";
 
 import {
-  SYSTEM_PROMPT,
-  FIX_SYSTEM_PROMPT,
-  DS_COMPONENTS,
-  enforceUiPocImports,
+  getSystemPrompt,
+  getFixSystemPrompt,
   writeProjectFiles,
   readProjectFiles,
   buildCurrentFilesText,
@@ -172,6 +171,8 @@ async function invokeClaudeCli({
  * @param {string} opts.iterDir - Directory for this iteration's output
  * @param {string} opts.iterLabel - Label for logging
  * @param {boolean} opts.takeScreenshots - Whether to take screenshots
+ * @param {string}  opts.testLabel - Which test is being run
+ * @param {boolean} opts.useMcp - Whether to enable MCP tool use for generation
  * @returns {Promise<object>} Result metrics
  */
 export async function runAgent({
@@ -179,23 +180,25 @@ export async function runAgent({
   model,
   iterDir,
   iterLabel,
+  testLabel,
   takeScreenshots,
   maxFixes = 5,
   maxGenerationRetries = 3,
-  useMcp,
+  useMcp = false,
 }) {
+  const systemPrompt = getSystemPrompt(testLabel);
+  const fixSystemPrompt = getFixSystemPrompt(testLabel);
   // Save the fully-resolved prompt for this iteration so it can be inspected
   // later to confirm every iteration received the same brief.
   await writeFile(resolve(iterDir, "_prompt.txt"), promptContent, "utf-8");
 
-  // useMcp flag from CLI: true = auto-detect, false = force off
-  const needsMcp = useMcp === false ? false : /mcp/i.test(promptContent);
-  const mcpTools = needsMcp ? ["mcp__sanity-ui"] : null;
+  const needsMcp = Boolean(useMcp);
+  const mcpTools = needsMcp ? [dsConfig.mcp.toolPrefix] : null;
   // MCP calls need more time since the model makes tool calls before generating code
   const generationTimeout = needsMcp ? 600_000 : 300_000;
 
   if (needsMcp) {
-    console.log(`[${iterLabel}] MCP tools enabled (prompt references MCP)`);
+    console.log(`[${iterLabel}] MCP tools enabled`);
   }
 
   // --- Step 1: Initial generation (with retries if no files are produced) ---
@@ -215,7 +218,7 @@ export async function runAgent({
     }
 
     fullText = await invokeClaudeCli({
-      systemPrompt: SYSTEM_PROMPT,
+      systemPrompt,
       userPrompt: promptContent,
       model,
       iterLabel,
@@ -270,15 +273,7 @@ export async function runAgent({
   const projectDir = resolve(iterDir, "project");
   await writeProjectFiles(projectDir, files);
 
-  // If the prompt references @sanity-labs/design-system, enforce correct imports
-  // mechanically. The model's training prior for @sanity/ui is too strong
-  // for prompt instructions alone to override reliably.
-  if (promptContent.includes("@sanity-labs/ui-poc")) {
-    const patched = enforceUiPocImports(files, iterLabel);
-    if (patched) {
-      await writeProjectFiles(projectDir, files);
-    }
-  }
+
 
   // Track fix attempts
   let fixAttempts = 0;
@@ -348,6 +343,7 @@ export async function runAgent({
             model,
             iterDir,
             iterLabel,
+            testLabel,
             screenshotPath,
             fixAttempts,
             fixLog,
@@ -402,7 +398,7 @@ export async function runAgent({
         // Ask Claude to fix the errors
         console.log(`[${iterLabel}] Asking Claude CLI to fix errors...`);
         const fixText = await invokeClaudeCli({
-          systemPrompt: FIX_SYSTEM_PROMPT,
+          systemPrompt: fixSystemPrompt,
           userPrompt: fixPrompt,
           model,
           iterLabel: `${iterLabel}/fix-${fixAttempts}`,
@@ -450,19 +446,7 @@ export async function runAgent({
           }
         }
 
-        // Re-enforce @sanity-labs/design-system after every fix cycle — the model
-        // frequently "fixes" errors by removing design-system and reverting to @sanity/ui
-        if (promptContent.includes("@sanity-labs/ui-poc")) {
-          const rePatched = enforceUiPocImports(files, iterLabel);
-          if (rePatched) {
-            await appendFile(
-              agentLogPath,
-              `=== POST-FIX ENFORCEMENT [${new Date().toISOString()}] ===\n` +
-                `Re-applied @sanity-labs/ui-poc imports after fix attempt ${fixAttempts}\n\n`,
-              "utf-8",
-            );
-          }
-        }
+
 
         // Rewrite the full project directory
         await writeProjectFiles(projectDir, files);
@@ -504,6 +488,7 @@ export async function runAgent({
       model,
       iterDir,
       iterLabel,
+      testLabel,
       screenshotPath,
       fixAttempts,
       fixLog,
@@ -521,6 +506,7 @@ export async function runAgent({
     model,
     iterDir,
     iterLabel,
+    testLabel,
     screenshotPath: null,
     fixAttempts,
     fixLog,

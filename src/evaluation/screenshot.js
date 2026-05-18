@@ -2,6 +2,7 @@ import { resolve, dirname } from "node:path";
 import { writeFile, appendFile } from "node:fs/promises";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
+import dsConfig from "../config/load.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -483,12 +484,12 @@ async function waitForRenderedContent(page, iterLabel) {
   const POLL_INTERVAL_MS = 500;
   const start = Date.now();
 
+  const rootSelector = dsConfig.appRootSelectors.join(", ");
+
   while (Date.now() - start < MAX_WAIT_MS) {
-    const hasContent = await page.evaluate(() => {
-      // Check common React/app root containers
-      const roots = document.querySelectorAll(
-        "#root, #app, [data-sanity], #__next, [data-ui]",
-      );
+    const hasContent = await page.evaluate((selector) => {
+      // Check common React/app root containers (from config).
+      const roots = document.querySelectorAll(selector);
       for (const root of roots) {
         if (root.children.length > 0 && root.offsetHeight > 0) {
           return true;
@@ -509,7 +510,7 @@ async function waitForRenderedContent(page, iterLabel) {
       }
 
       return false;
-    });
+    }, rootSelector);
 
     if (hasContent) {
       const elapsed = Date.now() - start;

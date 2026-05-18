@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { runAccessibilityTests } from "../evaluation/accessibility.js";
-import { createSanityUiMcpClient } from "./mcp-client.js";
+import { createMcpClient } from "./mcp-client.js";
 import {
   writeFile,
   mkdir,
@@ -19,10 +19,8 @@ import {
   extractInlineStyles,
 } from "../evaluation/analyze.js";
 import {
-  SYSTEM_PROMPT,
-  FIX_SYSTEM_PROMPT,
-  DS_COMPONENTS,
-  enforceUiPocImports,
+  getSystemPrompt,
+  getFixSystemPrompt,
   writeProjectFiles,
   readProjectFiles,
   buildCurrentFilesText,
@@ -76,11 +74,11 @@ async function callAnthropicWithRetry(client, params, label = "") {
 /**
  * Simple single-shot generation (no MCP tools).
  */
-async function generateSimple({ client, model, promptContent }) {
+async function generateSimple({ client, model, promptContent, systemPrompt }) {
   const response = await callAnthropicWithRetry(client, {
     model,
     max_tokens: 32000,
-    system: SYSTEM_PROMPT,
+    system: systemPrompt,
     messages: [{ role: "user", content: promptContent }],
   });
 
@@ -109,13 +107,14 @@ async function generateWithMcp({
   client,
   model,
   promptContent,
+  baseSystemPrompt,
   iterDir,
   iterLabel,
 }) {
   let mcpClient;
   try {
-    console.log(`[${iterLabel}] Starting Sanity UI MCP server...`);
-    mcpClient = await createSanityUiMcpClient();
+    console.log(`[${iterLabel}] Starting MCP server...`);
+    mcpClient = await createMcpClient();
 
     const mcpTools = mcpClient.getToolsForAnthropic();
     const mcpInstructions = mcpClient.getInstructions() || "";
@@ -125,7 +124,7 @@ async function generateWithMcp({
     );
 
     // Build system prompt with MCP instructions appended.
-    const systemPrompt = SYSTEM_PROMPT + "\n\n" + mcpInstructions;
+    const systemPrompt = baseSystemPrompt + "\n\n" + mcpInstructions;
 
     // Conversation messages — we'll append tool results as the loop progresses
     const messages = [{ role: "user", content: promptContent }];
@@ -304,6 +303,8 @@ async function generateWithMcp({
  * @param {string} opts.iterDir - Directory for this iteration's output
  * @param {string} opts.iterLabel - Label for logging
  * @param {boolean} opts.takeScreenshots - Whether to take screenshots
+ * @param {string}  opts.testLabel - Which test is being run
+ * @param {boolean} opts.useMcp - Whether to enable MCP tool use for generation
  * @returns {Promise<object>} Result metrics
  */
 export async function runAgent({
@@ -311,11 +312,14 @@ export async function runAgent({
   model,
   iterDir,
   iterLabel,
+  testLabel,
   takeScreenshots,
   maxFixes = 5,
   maxGenerationRetries = 3,
-  useMcp,
+  useMcp = false,
 }) {
+  const systemPrompt = getSystemPrompt(testLabel);
+  const fixSystemPrompt = getFixSystemPrompt(testLabel);
   // Sonnet 4.6 generation can take 2-3 minutes per call. The default SDK
   // timeout is 10 min with 2 retries (30 min worst-case per call). Increase
   // the per-request timeout to 15 min and reduce retries to 1 so a slow
@@ -325,8 +329,7 @@ export async function runAgent({
     maxRetries: 1,
   });
 
-  // useMcp flag from CLI: true = auto-detect, false = force off
-  const needsMcp = useMcp === false ? false : /mcp/i.test(promptContent);
+  const needsMcp = Boolean(useMcp);
 
   // Save the fully-resolved prompt for this iteration so it can be inspected
   // later to confirm every iteration received the same brief.
@@ -358,6 +361,7 @@ export async function runAgent({
         client,
         model,
         promptContent,
+        baseSystemPrompt: systemPrompt,
         iterDir,
         iterLabel,
       });
@@ -366,6 +370,7 @@ export async function runAgent({
         client,
         model,
         promptContent,
+        systemPrompt,
       });
     }
 
@@ -419,15 +424,7 @@ export async function runAgent({
   const projectDir = resolve(iterDir, "project");
   await writeProjectFiles(projectDir, files);
 
-  // If the prompt references @sanity-labs/design-system, enforce correct imports
-  // mechanically. The model's training prior for @sanity/ui is too strong
-  // for prompt instructions alone to override reliably.
-  if (promptContent.includes("@sanity-labs/ui-poc")) {
-    const patched = enforceUiPocImports(files, iterLabel);
-    if (patched) {
-      await writeProjectFiles(projectDir, files);
-    }
-  }
+
 
   // Track fix attempts
   let fixAttempts = 0;
@@ -498,6 +495,7 @@ export async function runAgent({
             model,
             iterDir,
             iterLabel,
+            testLabel,
             screenshotPath,
             totalInputTokens,
             totalOutputTokens,
@@ -559,7 +557,7 @@ export async function runAgent({
           {
             model,
             max_tokens: 32000,
-            system: FIX_SYSTEM_PROMPT,
+            system: fixSystemPrompt,
             messages: [
               {
                 role: "user",
@@ -620,19 +618,7 @@ export async function runAgent({
           }
         }
 
-        // Re-enforce @sanity-labs/design-system after every fix cycle — the model
-        // frequently "fixes" errors by removing design-system and reverting to @sanity/ui
-        if (promptContent.includes("@sanity-labs/ui-poc")) {
-          const rePatched = enforceUiPocImports(files, iterLabel);
-          if (rePatched) {
-            await appendFile(
-              agentLogPath,
-              `=== POST-FIX ENFORCEMENT [${new Date().toISOString()}] ===\n` +
-                `Re-applied @sanity-labs/design-system imports after fix attempt ${fixAttempts}\n\n`,
-              "utf-8",
-            );
-          }
-        }
+
 
         // Rewrite the full project directory
         await writeProjectFiles(projectDir, files);
@@ -675,6 +661,7 @@ export async function runAgent({
       model,
       iterDir,
       iterLabel,
+      testLabel,
       screenshotPath,
       totalInputTokens,
       totalOutputTokens,
@@ -695,6 +682,7 @@ export async function runAgent({
     model,
     iterDir,
     iterLabel,
+    testLabel,
     screenshotPath: null,
     totalInputTokens,
     totalOutputTokens,

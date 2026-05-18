@@ -112,7 +112,7 @@ async function discoverIterations(promptDir) {
  */
 async function reconstructResults(runDir) {
   const allResults = {};
-  const prompts = ["control", "training"];
+  const prompts = ["control", "variant"];
 
   for (const key of prompts) {
     const promptDir = resolve(runDir, key);
@@ -176,7 +176,7 @@ async function reconstructResults(runDir) {
  */
 async function processRun(runName, skipReport) {
   const runDir = resolve(OUTPUT_ROOT, runName);
-  const prompts = ["control", "training"];
+  const prompts = ["control", "variant"];
 
   let diffCount = 0;
 

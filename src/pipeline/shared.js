@@ -1,174 +1,37 @@
 /**
  * Shared utilities used by both the API runner and CLI runner.
- * Extracted to eliminate duplication between runner.js and runner-cli.js.
+ *
+ * Per-test knobs (packages, prompts, MCP flag) are passed in via function
+ * arguments — this file does not bake in a specific test.
  */
+import { writeFile, mkdir, rm, readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import { existsSync } from "node:fs";
 import {
-  writeFile,
-  mkdir,
-  rm,
-  readFile,
-} from "node:fs/promises";
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-import { existsSync, readFileSync } from "node:fs";
-import {
-  extractSanityUIComponents as extractDesignSystemComponents,
+  extractComponentImports,
   extractInlineStyles,
   extractComponentUsageCounts,
   isSourceFile,
 } from "../evaluation/analyze.js";
-import dsConfig from "../config/design-system.js";
+import {
+  buildSystemPrompt,
+  buildFixSystemPrompt,
+  getTest,
+} from "../config/prompts.js";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const PROJECT_ROOT = resolve(__dirname, "..", "..");
+// ─── Prompt accessors ────────────────────────────────────────────────
 
-export const SYSTEM_PROMPT = readFileSync(resolve(PROJECT_ROOT, "prompts", "system.md"), "utf-8").trim();
-export const FIX_SYSTEM_PROMPT = readFileSync(resolve(PROJECT_ROOT, "prompts", "system-fix.md"), "utf-8").trim();
-
-
-/**
- * Components that belong in the design system package, NOT the legacy UI package.
- */
-export const DS_COMPONENTS = dsConfig.packages.designSystem.components;
-
-
-
-/**
- * Mechanically enforce @sanity-labs/design-system usage in generated files.
- * Returns true if any file was modified.
- *
- * This exists because the model's training prior for @sanity/ui is too
- * strong for prompt-only instructions to override reliably — even when
- * stated in the system prompt and repeated 47 times in the user prompt.
- */
-export function enforceUiPocImports(files, iterLabel) {
-  let patched = false;
-
-  // --- 1. Patch package.json ---
-  const pkgFile = files.find((f) => f.path === "package.json");
-  if (pkgFile) {
-    try {
-      const pkg = JSON.parse(pkgFile.content);
-      const deps = pkg.dependencies || {};
-      let pkgChanged = false;
-
-      // Ensure enforced deps are listed
-      for (const [dep, version] of Object.entries(dsConfig.enforcedDeps)) {
-        if (!deps[dep]) {
-          deps[dep] = version;
-          pkgChanged = true;
-        }
-      }
-
-      // Ensure React 19 (ui-poc peer dep)
-      if (deps["react"] && !deps["react"].includes("19")) {
-        deps["react"] = dsConfig.reactVersion;
-        pkgChanged = true;
-      }
-      if (deps["react-dom"] && !deps["react-dom"].includes("19")) {
-        deps["react-dom"] = dsConfig.reactVersion;
-        pkgChanged = true;
-      }
-
-      // Upgrade @types/react* to v19 too
-      const devDeps = pkg.devDependencies || {};
-      if (devDeps["@types/react"] && !devDeps["@types/react"].includes("19")) {
-        devDeps["@types/react"] = "^19";
-        pkgChanged = true;
-      }
-      if (devDeps["@types/react-dom"] && !devDeps["@types/react-dom"].includes("19")) {
-        devDeps["@types/react-dom"] = "^19";
-        pkgChanged = true;
-      }
-
-      if (pkgChanged) {
-        pkg.dependencies = deps;
-        pkg.devDependencies = devDeps;
-        pkgFile.content = JSON.stringify(pkg, null, 2) + "\n";
-        patched = true;
-      }
-    } catch {
-      // Malformed package.json — skip
-    }
-  }
-
-  // --- 2. Rewrite imports in source files ---
-  // Build a regex that matches: import { Box, Flex, ... } from '<legacy pkg>'
-  // where at least one of the DS_COMPONENTS is in the import list.
-  const pocSet = new Set(DS_COMPONENTS);
-
-  for (const file of files) {
-    if (!/\.(tsx?|jsx?|mjs)$/.test(file.path)) continue;
-
-    let content = file.content;
-    let fileChanged = false;
-
-    // Match all import statements from the legacy UI package
-    const legacyPkgEscaped = dsConfig.packages.legacy.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const importRe = new RegExp(`import\\s*\\{([^}]+)\\}\\s*from\\s*['"]${legacyPkgEscaped}['"]`, 'g');
-    const replacements = [];
-
-    let match;
-    while ((match = importRe.exec(content)) !== null) {
-      const names = match[1].split(",").map((n) => n.trim()).filter(Boolean);
-      const forPoc = names.filter((n) => pocSet.has(n));
-      const forSanity = names.filter((n) => !pocSet.has(n));
-
-      if (forPoc.length === 0) continue; // Nothing to move
-
-      const newStatements = [];
-      if (forPoc.length > 0) {
-        newStatements.push(
-          `import { ${forPoc.join(", ")} } from '${dsConfig.packages.designSystem.name}'`,
-        );
-      }
-      if (forSanity.length > 0) {
-        newStatements.push(
-          `import { ${forSanity.join(", ")} } from '${dsConfig.packages.legacy.name}'`,
-        );
-      }
-
-      replacements.push({
-        original: match[0],
-        replacement: newStatements.join("\n"),
-      });
-    }
-
-    for (const { original, replacement } of replacements) {
-      content = content.replace(original, replacement);
-      fileChanged = true;
-    }
-
-    // --- 3. Ensure styles.css import in main.tsx / main.tsx ---
-    if (/main\.(tsx?|jsx?)$/.test(file.path)) {
-      if (!content.includes(dsConfig.packages.designSystem.cssImport)) {
-        // Add after the last import statement
-        const lastImportIdx = content.lastIndexOf("\nimport ");
-        if (lastImportIdx !== -1) {
-          const eol = content.indexOf("\n", lastImportIdx + 1);
-          content =
-            content.slice(0, eol + 1) +
-            `import '${dsConfig.packages.designSystem.cssImport}'\n` +
-            content.slice(eol + 1);
-          fileChanged = true;
-        }
-      }
-    }
-
-    if (fileChanged) {
-      file.content = content;
-      patched = true;
-    }
-  }
-
-  if (patched) {
-    console.log(
-      `[${iterLabel}] Post-processed files to enforce ${dsConfig.name} imports`,
-    );
-  }
-
-  return patched;
+/** Returns the system prompt for a given test label. */
+export function getSystemPrompt(testLabel) {
+  return buildSystemPrompt(testLabel);
 }
+
+/** Returns the fix-cycle system prompt for a given test label. */
+export function getFixSystemPrompt(testLabel) {
+  return buildFixSystemPrompt(testLabel);
+}
+
+// ─── File I/O ────────────────────────────────────────────────────────
 
 /**
  * Write all files to the project directory (clean slate).
@@ -180,10 +43,7 @@ export async function writeProjectFiles(projectDir, files) {
     if (existsSync(projectDir)) {
       const entries = await readdir(projectDir);
       for (const entry of entries) {
-        if (
-          entry !== "node_modules" &&
-          entry !== "package-lock.json"
-        ) {
+        if (entry !== "node_modules" && entry !== "package-lock.json") {
           await rm(resolve(projectDir, entry), {
             recursive: true,
             force: true,
@@ -274,12 +134,16 @@ export function buildFixPrompt(currentFilesText, consoleErrors, fatalError) {
 
 /**
  * Build the final result object and save metadata.
+ *
+ * `testLabel` is recorded in the metadata so downstream tools know which
+ * test produced this iteration.
  */
 export async function buildResult({
   files,
   model,
   iterDir,
   iterLabel,
+  testLabel,
   screenshotPath,
   totalInputTokens,
   totalOutputTokens,
@@ -297,7 +161,18 @@ export async function buildResult({
     0,
   );
 
-  const designSystemComponents = extractDesignSystemComponents(files);
+  // For component extraction, gather all named package references defined
+  // by this test (whatever the test author called them — e.g. `ui`, `ds`,
+  // `icons`). Anything with a `.name` field is treated as a package whose
+  // imports should be tracked.
+  const test = testLabel ? getTest(testLabel) : null;
+  const packageNames = test
+    ? Object.values(test.packages || {})
+        .map((p) => p?.name)
+        .filter((n) => typeof n === "string" && n.length > 0)
+    : [];
+
+  const componentImports = extractComponentImports(files, packageNames);
   const inlineStyles = extractInlineStyles(files);
   const componentUsage = extractComponentUsageCounts(files);
 
@@ -305,14 +180,19 @@ export async function buildResult({
     .filter((f) => isSourceFile(f.path))
     .map((f) => ({ path: f.path, content: f.content }));
 
+  const componentImportsArray = [...componentImports];
+
   const meta = {
     runner,
     model,
     iterLabel,
+    testLabel: testLabel ?? null,
     linesOfCode,
     fileCount: files.length,
     filePaths: files.map((f) => f.path),
-    designSystemComponents: [...designSystemComponents],
+    componentImports: componentImportsArray,
+    // Legacy field name preserved for compatibility with existing report code.
+    designSystemComponents: componentImportsArray,
     inlineStyles,
     semanticHtml,
     componentUsage,
@@ -334,10 +214,12 @@ export async function buildResult({
 
   return {
     model,
+    testLabel: testLabel ?? null,
     linesOfCode,
     fileCount: files.length,
     files: sourceContents,
-    designSystemComponents: [...designSystemComponents],
+    componentImports: componentImportsArray,
+    designSystemComponents: componentImportsArray,
     inlineStyles,
     semanticHtml,
     componentUsage,

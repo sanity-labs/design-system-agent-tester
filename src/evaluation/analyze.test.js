@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   parseFiles,
+  extractComponentImports,
   extractDesignSystemComponents,
   extractSanityUIComponents,
   extractComponentUsageCounts,
@@ -158,9 +159,12 @@ describe("parseFiles", () => {
 });
 
 // ---------------------------------------------------------------------------
-// extractDesignSystemComponents / extractSanityUIComponents
+// extractComponentImports
 // ---------------------------------------------------------------------------
-describe("extractDesignSystemComponents", () => {
+
+const TEST_PACKAGE_NAMES = ["@sanity/ui", "@sanity/icons"];
+
+describe("extractComponentImports", () => {
   it("extracts component names from @sanity/ui imports", () => {
     const files = [
       {
@@ -169,7 +173,7 @@ describe("extractDesignSystemComponents", () => {
       },
     ];
 
-    const result = extractDesignSystemComponents(files);
+    const result = extractComponentImports(files, TEST_PACKAGE_NAMES);
 
     expect(result).toBeInstanceOf(Set);
     expect(result).toContain("Button");
@@ -178,7 +182,7 @@ describe("extractDesignSystemComponents", () => {
     expect(result.size).toBe(3);
   });
 
-  it("extracts icon names from @sanity/icons with icon: prefix", () => {
+  it("extracts named imports from any listed package (no prefix)", () => {
     const files = [
       {
         path: "src/App.tsx",
@@ -186,14 +190,14 @@ describe("extractDesignSystemComponents", () => {
       },
     ];
 
-    const result = extractDesignSystemComponents(files);
+    const result = extractComponentImports(files, TEST_PACKAGE_NAMES);
 
-    expect(result).toContain("icon:AddIcon");
-    expect(result).toContain("icon:EditIcon");
+    expect(result).toContain("AddIcon");
+    expect(result).toContain("EditIcon");
     expect(result.size).toBe(2);
   });
 
-  it("handles both @sanity/ui and @sanity/icons in the same file", () => {
+  it("collects imports from multiple listed packages in the same file", () => {
     const files = [
       {
         path: "src/Toolbar.jsx",
@@ -204,12 +208,46 @@ describe("extractDesignSystemComponents", () => {
       },
     ];
 
-    const result = extractDesignSystemComponents(files);
+    const result = extractComponentImports(files, TEST_PACKAGE_NAMES);
 
     expect(result).toContain("Button");
     expect(result).toContain("Flex");
-    expect(result).toContain("icon:TrashIcon");
+    expect(result).toContain("TrashIcon");
     expect(result.size).toBe(3);
+  });
+
+  it("ignores imports from packages not in the list", () => {
+    const files = [
+      {
+        path: "src/App.tsx",
+        content: `import { Box } from '@some-other/library'`,
+      },
+    ];
+
+    const result = extractComponentImports(files, TEST_PACKAGE_NAMES);
+    expect(result.size).toBe(0);
+  });
+
+  it("returns an empty set when packageNames is empty", () => {
+    const files = [
+      {
+        path: "src/App.tsx",
+        content: `import { Button } from '@sanity/ui'`,
+      },
+    ];
+    const result = extractComponentImports(files, []);
+    expect(result.size).toBe(0);
+  });
+
+  it("returns an empty set when packageNames is missing", () => {
+    const files = [
+      {
+        path: "src/App.tsx",
+        content: `import { Button } from '@sanity/ui'`,
+      },
+    ];
+    const result = extractComponentImports(files);
+    expect(result.size).toBe(0);
   });
 
   it("returns a Set (deduplicates across files)", () => {
@@ -224,7 +262,7 @@ describe("extractDesignSystemComponents", () => {
       },
     ];
 
-    const result = extractDesignSystemComponents(files);
+    const result = extractComponentImports(files, TEST_PACKAGE_NAMES);
 
     expect(result.size).toBe(2);
     expect(result).toContain("Button");
@@ -243,7 +281,7 @@ describe("extractDesignSystemComponents", () => {
       },
     ];
 
-    const result = extractDesignSystemComponents(files);
+    const result = extractComponentImports(files, TEST_PACKAGE_NAMES);
     expect(result.size).toBe(0);
   });
 
@@ -258,7 +296,7 @@ describe("extractDesignSystemComponents", () => {
       },
     ];
 
-    const result = extractDesignSystemComponents(files);
+    const result = extractComponentImports(files, TEST_PACKAGE_NAMES);
 
     expect(result).toContain("Button");
     expect(result).toContain("Dialog");
@@ -274,7 +312,7 @@ describe("extractDesignSystemComponents", () => {
       },
     ];
 
-    const result = extractDesignSystemComponents(files);
+    const result = extractComponentImports(files, TEST_PACKAGE_NAMES);
 
     expect(result).toContain("Button");
     expect(result).toContain("Card");
@@ -290,18 +328,19 @@ describe("extractDesignSystemComponents", () => {
       },
     ];
 
-    const result = extractDesignSystemComponents(files);
+    const result = extractComponentImports(files, TEST_PACKAGE_NAMES);
     expect(result).toContain("Stack");
   });
 
   it("returns empty set for empty file list", () => {
-    const result = extractDesignSystemComponents([]);
+    const result = extractComponentImports([], TEST_PACKAGE_NAMES);
     expect(result).toBeInstanceOf(Set);
     expect(result.size).toBe(0);
   });
 
-  it("is aliased as extractSanityUIComponents", () => {
-    expect(extractSanityUIComponents).toBe(extractDesignSystemComponents);
+  it("is exposed under legacy aliases for backwards compatibility", () => {
+    expect(extractDesignSystemComponents).toBe(extractComponentImports);
+    expect(extractSanityUIComponents).toBe(extractComponentImports);
   });
 });
 

@@ -25,7 +25,7 @@ const { values } = parseArgs({
   allowPositionals: false,
 });
 
-const VALID_PROMPTS = ["control", "training", "both"];
+const VALID_PROMPTS = ["control", "variant", "both"];
 if (!VALID_PROMPTS.includes(values.prompt)) {
   console.error(`--prompt must be one of: ${VALID_PROMPTS.join(", ")}`);
   process.exit(1);
@@ -273,7 +273,7 @@ async function main() {
   const runDir       = await resolveRunDir(values.output);
   const maxConc      = Math.max(1, parseInt(values.concurrency, 10) || 1);
   const promptArg    = values.prompt;
-  const targetKeys   = promptArg === "both" ? ["control", "training"] : [promptArg];
+  const targetKeys   = promptArg === "both" ? ["control", "variant"] : [promptArg];
 
   console.log("=== Re-Perf (Lighthouse) ===");
   console.log(`Run dir:     ${runDir}`);
@@ -350,7 +350,7 @@ async function main() {
     .catch(() => []);
 
   const knownPrompts = allPromptDirs.filter((d) =>
-    ["control", "training"].includes(d),
+    ["control", "variant"].includes(d),
   );
 
   const allResults = {};

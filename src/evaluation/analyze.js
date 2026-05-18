@@ -1,5 +1,4 @@
 import { extname } from "node:path";
-import dsConfig from "../config/design-system.js";
 
 /**
  * Parse ---FILE: path--- / ---END FILE--- blocks from the agent output.
@@ -40,25 +39,31 @@ export function parseFiles(text) {
 }
 
 /**
- * Extract unique Sanity UI component names from source files.
- * Returns a Set of component names. Icons are prefixed with "icon:".
+ * Extract unique imported component names from a set of source files,
+ * scanning imports from any of the listed packages.
+ *
+ * @param {Array<{path:string,content:string}>} files
+ * @param {string[]} [packageNames]
+ *        Package names whose named imports should be collected. Returns an
+ *        empty Set if `packageNames` is empty or omitted.
+ * @returns {Set<string>}
  */
-export function extractDesignSystemComponents(files) {
+export function extractComponentImports(files, packageNames) {
   const components = new Set();
+  if (!Array.isArray(packageNames) || packageNames.length === 0) {
+    return components;
+  }
 
-  // Build regex patterns from config so they stay in sync with the design system.
   const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const legacyPkg = escRe(dsConfig.packages.legacy.name);
-  const iconsPkg = escRe(dsConfig.packages.icons.name);
+  const pattern = packageNames.map(escRe).join("|");
+  const importRegex = new RegExp(
+    `import\\s*\\{([^}]+)\\}\\s*from\\s*['"](?:${pattern})['"]`,
+    "g",
+  );
 
   for (const file of files) {
     if (!isSourceFile(file.path)) continue;
 
-    // Match imports from the legacy UI package
-    const importRegex = new RegExp(
-      `import\\s*\\{([^}]+)\\}\\s*from\\s*['"]${legacyPkg}['"]`,
-      "g",
-    );
     let match;
     while ((match = importRegex.exec(file.content)) !== null) {
       const names = match[1].split(",").map((s) =>
@@ -71,30 +76,17 @@ export function extractDesignSystemComponents(files) {
         if (name) components.add(name);
       }
     }
-
-    // Also check for the icons package
-    const iconRegex = new RegExp(
-      `import\\s*\\{([^}]+)\\}\\s*from\\s*['"]${iconsPkg}['"]`,
-      "g",
-    );
-    while ((match = iconRegex.exec(file.content)) !== null) {
-      const names = match[1].split(",").map((s) =>
-        s
-          .trim()
-          .split(/\s+as\s+/)[0]
-          .trim(),
-      );
-      for (const name of names) {
-        if (name) components.add(`icon:${name}`);
-      }
-    }
+    importRegex.lastIndex = 0;
   }
 
   return components;
 }
 
-// Backward compatibility
-export const extractSanityUIComponents = extractDesignSystemComponents;
+// Backwards-compatible aliases. These accept the same `packages` shape
+// older callers passed in, but their behaviour is now defined by the
+// generic `extractComponentImports` above.
+export const extractDesignSystemComponents = extractComponentImports;
+export const extractSanityUIComponents = extractComponentImports;
 
 /**
  * Count actual JSX usage instances of each component across source files.

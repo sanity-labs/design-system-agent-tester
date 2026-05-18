@@ -9,7 +9,7 @@
  *   --output,  -o  Directory containing run folders to scan  (default: ./output)
  *   --count,   -n  Number of most-recent runs to include     (default: all)
  *   --from,    -f  Include runs at-or-after this folder name (e.g. 2026-04-14/13.00)
- *   --prompt,  -p  Prompt filter: control | training | both  (default: both)
+ *   --prompt,  -p  Prompt filter: control | variant | both  (default: both)
  *   --save,    -s  Write output to a file instead of stdout
  *   --help,    -h  Print this help message
  *
@@ -20,8 +20,8 @@
  *   # All runs since a specific date, save to file
  *   node src/summarize.js --from 2026-04-14/14.20 --save
  *
- *   # Training prompt only, last 8 runs
- *   node src/summarize.js --prompt training --count 8
+ *   # Variant prompt only, last 8 runs
+ *   node src/summarize.js --prompt variant --count 8
  *
  *   # Scan a different output directory
  *   node src/summarize.js --output /path/to/other/output --count 10
@@ -62,14 +62,14 @@ Options:
   --output,  -o  Directory containing run folders to scan  (default: ./output)
   --count,   -n  Number of most-recent runs to include     (default: all)
   --from,    -f  Include runs at-or-after this folder name (e.g. 2026-04-14/13.00)
-  --prompt,  -p  Prompt filter: control | training | both  (default: both)
+  --prompt,  -p  Prompt filter: control | variant | both  (default: both)
   --save,    -s  Write output to a file instead of stdout
   --help,    -h  Print this help message
 
 Examples:
   node src/summarize.js --count 5
   node src/summarize.js --from 2026-04-14/14.20 --save
-  node src/summarize.js --prompt training --count 8
+  node src/summarize.js --prompt variant --count 8
   node src/summarize.js --output /path/to/other/output --count 10
 `);
   process.exit(0);
@@ -81,13 +81,13 @@ const fromFilter  = values.from.trim();
 const promptFilter = values.prompt;
 const saveToFile  = values.save;
 
-const VALID_PROMPTS = ['control', 'training', 'both'];
+const VALID_PROMPTS = ['control', 'variant', 'both'];
 if (!VALID_PROMPTS.includes(promptFilter)) {
   console.error(`Error: --prompt must be one of: ${VALID_PROMPTS.join(', ')}`);
   process.exit(1);
 }
 
-const promptKeys = promptFilter === 'both' ? ['control', 'training'] : [promptFilter];
+const promptKeys = promptFilter === 'both' ? ['control', 'variant'] : [promptFilter];
 
 // ─── Main ────────────────────────────────────────────────────────────────────
 
@@ -294,12 +294,12 @@ function fmtInt(n) {
 }
 
 /**
- * Render a Δ column comparing training to control.
+ * Render a Δ column comparing variant to control.
  * lowerIsBetter controls which direction is marked ✅.
  */
-function delta(ctrl, train, lowerIsBetter = true) {
-  if (ctrl === null || train === null || ctrl === 0) return '';
-  const pct = ((train - ctrl) / Math.abs(ctrl)) * 100;
+function delta(ctrl, variant, lowerIsBetter = true) {
+  if (ctrl === null || variant === null || ctrl === 0) return '';
+  const pct = ((variant - ctrl) / Math.abs(ctrl)) * 100;
   const improved = lowerIsBetter ? pct < 0 : pct > 0;
   const sign = pct >= 0 ? '+' : '';
   return `${improved ? '✅' : '❌'} ${sign}${pct.toFixed(0)}%`;
@@ -327,8 +327,8 @@ function mdTable(headers, rows) {
 
 function renderSummary(runs, promptKeys, scannedDir) {
   const hasControl  = promptKeys.includes('control');
-  const hasTraining = promptKeys.includes('training');
-  const showDelta   = hasControl && hasTraining;
+  const hasVariant  = promptKeys.includes('variant');
+  const showDelta   = hasControl && hasVariant;
 
   // Resolve per-run metrics for each requested prompt
   const perRun = runs.map(({ name, report }) => {
@@ -360,7 +360,7 @@ function renderSummary(runs, promptKeys, scannedDir) {
   // ── Aggregate averages ──────────────────────────────────────────────────────
   md += `## Aggregate Averages (${runs.length} runs)\n\n`;
 
-  const deltaHeader = showDelta ? ['**Δ (train vs ctrl)**'] : [];
+  const deltaHeader = showDelta ? ['**Δ (variant vs ctrl)**'] : [];
   const aggHeaders  = ['Metric', ...promptKeys.map(k => `**${k}**`), ...deltaHeader];
 
   const METRIC_ROWS = [
@@ -400,7 +400,7 @@ function renderSummary(runs, promptKeys, scannedDir) {
       return decimals === 0 ? fmtInt(v) : fmt(v, decimals);
     });
     const d = showDelta
-      ? [delta(agg.control?.[key], agg.training?.[key], lowerBetter)]
+      ? [delta(agg.control?.[key], agg.variant?.[key], lowerBetter)]
       : [];
     return [label, ...vals, ...d];
   });
@@ -415,7 +415,7 @@ function renderSummary(runs, promptKeys, scannedDir) {
     });
     const d = showDelta
       // higher clean rate is better, so invert lowerIsBetter
-      ? [delta(agg.control?.cleanOnFirstTry, agg.training?.cleanOnFirstTry, false)]
+      ? [delta(agg.control?.cleanOnFirstTry, agg.variant?.cleanOnFirstTry, false)]
       : [];
     return ['Clean on 1st try (avg)', ...vals, ...d];
   })();

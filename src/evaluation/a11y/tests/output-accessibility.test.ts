@@ -18,7 +18,7 @@ const OUTPUT_ROOT = path.join(ROOT, "output");
 // ---------------------------------------------------------------------------
 
 interface IterationEntry {
-  /** e.g. "control" or "training" */
+  /** e.g. "control" or "variant" */
   prompt: string;
   /** e.g. "iteration-1" */
   name: string;
@@ -109,7 +109,7 @@ function discoverIterations(): IterationEntry[] {
   const iterationFilter = process.env.A11Y_ITERATION?.trim();
   const runDir = resolveRunDir();
 
-  const promptKeys = ["control", "training"];
+  const promptKeys = ["control", "variant"];
   const iterations: IterationEntry[] = [];
 
   for (const prompt of promptKeys) {

@@ -106,7 +106,7 @@ async function resolveRunDir(outputFlag) {
     return runs[0].fullPath;
   }
 
-  // Fallback: maybe it's an old-style flat output/ with control/training directly
+  // Fallback: maybe it's an old-style flat output/ with control/variant directly
   return outputRoot;
 }
 
@@ -261,12 +261,12 @@ async function main() {
   // Determine which prompt directories to scan
   let promptKeys;
   if (promptArg === "both") {
-    promptKeys = ["control", "training"];
-  } else if (["control", "training"].includes(promptArg)) {
+    promptKeys = ["control", "variant"];
+  } else if (["control", "variant"].includes(promptArg)) {
     promptKeys = [promptArg];
   } else {
     console.error(
-      `Error: --prompt must be "control", "training", or "both". Got "${promptArg}"`,
+      `Error: --prompt must be "control", "variant", or "both". Got "${promptArg}"`,
     );
     process.exit(1);
   }

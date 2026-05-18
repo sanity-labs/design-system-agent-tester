@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
-import dsConfig from "../config/design-system.js";
+import dsConfig from "../config/load.js";
 
 /**
  * Lightweight MCP stdio client.
@@ -270,10 +270,10 @@ class McpClient extends EventEmitter {
 
 /**
  * Convenience factory: create, start, and return a connected McpClient
- * for the Sanity UI MCP server.
+ * configured from the project's MCP config block.
  *
  * @param {object} [opts]
- * @param {string} [opts.directory] - Path to the sanity-ui-mcp project
+ * @param {string} [opts.directory] - Path to the MCP server project
  * @param {number} [opts.requestTimeoutMs] - Per-request timeout
  * @returns {Promise<McpClient>}
  */
@@ -290,6 +290,3 @@ export async function createMcpClient({
   await client.start();
   return client;
 }
-
-// Backward compatibility
-export const createSanityUiMcpClient = createMcpClient;
