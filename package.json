@@ -5,26 +5,16 @@
   "type": "module",
   "main": "src/index.js",
   "scripts": {
-    "test:control": "node --env-file=.env src/index.js --prompt control",
-    "test:training": "node --env-file=.env src/index.js --prompt training",
-    "test:both": "node --env-file=.env src/index.js --prompt both",
-    "test:control:cli": "node --env-file=.env src/index.js --prompt control --runner cli",
-    "test:training:cli": "node --env-file=.env src/index.js --prompt training --runner cli",
-    "test:both:cli": "node --env-file=.env src/index.js --prompt both --runner cli",
-    "report": "node --env-file=.env src/report.js",
-    "summarize": "node src/summarize.js",
-    "rescreenshot": "node --env-file=.env src/rescreenshot.js",
-    "rescreenshot:control": "node --env-file=.env src/rescreenshot.js --prompt control",
-    "rescreenshot:training": "node --env-file=.env src/rescreenshot.js --prompt training",
-    "rebuild": "node --env-file=.env src/rebuild.js",
-    "rebuild:control": "node --env-file=.env src/rebuild.js --prompt control",
-    "rebuild:training": "node --env-file=.env src/rebuild.js --prompt training",
-    "reperf": "node src/reperf.js",
-    "reperf:control": "node src/reperf.js --prompt control",
-    "reperf:training": "node src/reperf.js --prompt training",
-    "test:a11y": "playwright test --config a11y/playwright.config.ts",
-    "test:a11y:control": "A11Y_PROMPT=control playwright test --config a11y/playwright.config.ts",
-    "test:a11y:training": "A11Y_PROMPT=training playwright test --config a11y/playwright.config.ts",
+    "start": "node --env-file=.env src/index.js",
+    "summarize": "node src/reporting/summarize.js",
+    "rebuild": "node --env-file=.env src/scripts/rebuild.js",
+    "rescreenshot": "node --env-file=.env src/scripts/rescreenshot.js",
+    "reperf": "node src/scripts/reperf.js",
+    "rediff": "node --env-file=.env src/scripts/rediff-all.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:a11y": "playwright test --config src/evaluation/a11y/playwright.config.ts",
     "test:a11y:install": "playwright install --with-deps chromium"
   },
   "dependencies": {
@@ -33,7 +23,6 @@
     "@sanity-labs/ui-poc": "^0.0.1-alpha.6",
     "@sanity/ui": "^3.1.14",
     "axe-core": "^4.11.1",
-    "eslint": "^9.39.4",
     "lighthouse": "^13.1.0",
     "pixelmatch": "^7.1.0",
     "pngjs": "^7.0.0",
@@ -42,7 +31,9 @@
   "devDependencies": {
     "@axe-core/playwright": "^4.10.2",
     "@playwright/test": "^1.54.2",
-    "typescript": "^5.8.3"
+    "@vitest/coverage-v8": "^4.1.6",
+    "typescript": "^5.8.3",
+    "vitest": "^4.1.6"
   },
   "engines": {
     "node": ">=20.0.0"

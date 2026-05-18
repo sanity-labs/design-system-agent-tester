@@ -1,135 +1,63 @@
-# Agent Tester
+# Design System Tester
 
-A test harness for running AI agents in parallel to measure output consistency and quality. Each agent runs independently with zero shared context. The harness validates that every generated app actually renders in a browser before considering the job complete.
+A test harness that measures how effectively AI agents build interfaces using a design system. It runs multiple independent agent iterations against the same prompt, then evaluates the output across accessibility, performance, code quality, visual consistency, and developer experience.
 
-## What It Does
-
-Sends a prompt to Claude N times in parallel, collects the generated code, validates each app renders without fatal errors, auto-fixes broken output, and produces a report measuring:
-
-1. **Average time** to complete each iteration (including fix cycles)
-2. **Average lines of code** produced
-3. **Code variance** across iterations (pairwise Jaccard similarity on 3-gram sets)
-4. **Unique Sanity UI components** used across all iterations
-5. **Screenshots** of each generated app (saved to `output/`)
-6. **Fix attempts** — how many error→fix cycles were needed before the page rendered
-7. **Sanity UI feedback** — friction points and developer experience issues reported by each agent
-8. **Accessibility compliance** — WCAG 2.2 AA violations in each generated app (via Puppeteer + axe-core)
+While currently configured for the Sanity Design System, the tool is architecture-agnostic — swap `src/config/design-system.js` to test any design system.
 
 ## How It Works
 
-Each iteration follows a **generate → validate → fix** loop:
-
-1. **Generate** — Claude produces all project files from the prompt, plus structured feedback on Sanity UI friction points
-2. **Validate** — The harness installs deps, starts a Vite dev server, opens the page in headless Chrome, and checks for fatal JS errors + visible rendered content
-3. **Fix** (if needed) — If the page has fatal errors or fails to render, the current project files and browser errors are sent back to Claude with instructions to fix them
-4. **Repeat** — Steps 2–3 repeat until the page renders successfully or the max fix attempts are exhausted
-5. **Screenshot** — Once validated (or after max attempts), a screenshot is captured
-
-This means an iteration is not considered complete until the app works. The number of fix cycles needed is tracked as a quality metric.
-
-### MCP Tool Use
-
-When the training prompt references the Sanity UI MCP server, the API runner automatically starts a local MCP server process and registers its tools with the Anthropic SDK. This enables the model to call design system tools (`list_components`, `get_component_guideline`, `validate_icons`, etc.) during generation — fetching real component docs, props, and best practices before writing code.
-
-The tool-use conversation is multi-turn: the model calls tools, receives results, and continues until it has enough context to generate the project files. A safety limit (25 turns) prevents infinite tool-call loops, and duplicate calls are detected and short-circuited.
-
-MCP tool interactions are logged per-iteration as `_mcp_tool_log.json`.
-
-To disable MCP (e.g. for a pure baseline comparison), pass `--no-mcp`.
-
-### Feedback Collection
-
-The system prompt instructs Claude to emit a structured `---FEEDBACK---` block after all file output. Each feedback item is tagged with a category (`documentation`, `api`, `components`, `theming`, `icons`, `dx`, `other`) and describes a specific friction point encountered while implementing with Sanity UI.
-
-The report aggregates feedback across all iterations: a deduplicated summary of unique items, a breakdown by category, and a full per-iteration line-item list. Feedback is also saved per-iteration as `_feedback.json`.
+1. **Generate** — An AI agent receives a prompt (interface brief + design system docs) and produces a complete Vite + React project
+2. **Validate** — The harness installs dependencies, runs `tsc --noEmit`, starts a dev server, and checks for rendering errors
+3. **Fix** — If validation fails, the agent is given the errors and asked to fix them (up to N cycles)
+4. **Measure** — Once rendering, the harness captures screenshots (4 breakpoints × 2 color schemes), runs 13 accessibility tests, measures Lighthouse performance, counts DOM elements, and analyzes semantic HTML
+5. **Analyze** — Inline styles, component usage, and code variance are extracted from the source
+6. **Feedback** — The agent provides structured feedback on friction points encountered
+7. **Report** — All data is aggregated into `report.json` and `report.md`
 
 ## Setup
 
-```
+```sh
+git clone <repo-url>
+cd design-system-tester
 npm install
 ```
 
-Puppeteer downloads a bundled Chromium on first install.
-
 ### Environment Variables
 
-Create a `.env` file in the project root:
+Create a `.env` file:
 
-```
-ANTHROPIC_API_KEY=sk-ant-...
-```
-
-The `.env` file is loaded automatically by all npm scripts via Node's `--env-file` flag. It is gitignored.
-
-## Runners
-
-There are two ways to run the harness, depending on how you want to authenticate.
-
-### API runner (default)
-
-Uses the Anthropic SDK directly. Requires `ANTHROPIC_API_KEY` in `.env` or as an environment variable. Supports MCP tool use for training prompts.
-
-```
-node --env-file=.env src/index.js --runner api
+```sh
+ANTHROPIC_API_KEY=sk-ant-...   # Required for the API runner
 ```
 
-### CLI runner
+### Install Playwright (for standalone a11y tests)
 
-Uses the `claude` CLI tool, which manages its own auth session. If you've already run `claude` and logged in, this just works — no environment variables required. MCP tools are accessed via the CLI's own MCP server configuration.
-
-```
-node src/index.js --runner cli
-```
-
-> **Note:** The CLI runner does not report token usage since that data isn't exposed by the `claude` command. The CLI runner also cannot handle very large prompts (>~5KB) reliably — use the API runner for the training prompt.
-
-#### Installing the Claude CLI
-
-If you don't have it yet:
-
-```
-npm install -g @anthropic-ai/claude-code
-claude auth login
+```sh
+npm run test:a11y:install
 ```
 
 ## Usage
 
-```
-# Current command being run for all existing tests
-node --env-file=.env src/index.js --prompt both --iterations 3 --model claude-sonnet-4-6 --no-mcp --agent-prompt
+```sh
+# Run both prompts (control + training), 3 iterations each
+npm start -- --prompt both
 
-# Run both prompts with the API runner (default, 3 iterations each)
-node --env-file=.env src/index.js
+# Training prompt only, 10 iterations, specific model
+npm start -- --prompt training --iterations 10 --model claude-sonnet-4-6
 
-# Run only the control prompt
-node --env-file=.env src/index.js --prompt control
+# With MCP context (auto-detected from prompt content)
+npm start -- --prompt training --iterations 5
 
-# Run only the training prompt
-node --env-file=.env src/index.js --prompt training
+# Disable MCP, use static brief
+npm start -- --prompt training --no-mcp
 
-# Configure iterations, model, and max fix attempts
-node --env-file=.env src/index.js --prompt control --iterations 5 --model claude-sonnet-4-20250514 --max-fixes 3
+# Generate a varied interface brief with an agent
+npm start -- --prompt both --agent-prompt
 
-# Limit concurrency
-node --env-file=.env src/index.js --iterations 10 --concurrency 3
 
-# Disable MCP tool use (pure baseline — no design system context)
-node --env-file=.env src/index.js --prompt training --no-mcp
 
-# Skip screenshots (and the validate/fix loop)
-node --env-file=.env src/index.js --no-screenshot
-
-# Use the CLI runner
-node src/index.js --runner cli --prompt control
-
-# Use a static fallback brief (default — no API call for prompt generation)
-node --env-file=.env src/index.js --prompt both
-
-# Auto-generate a fresh interface brief before each run
-node --env-file=.env src/index.js --agent-prompt
-
-# Auto-generate brief, training prompt only, 5 iterations
-node --env-file=.env src/index.js --agent-prompt --prompt training --iterations 5
+# Use the CLI runner (no API key needed)
+npm start -- --prompt control --runner cli
 ```
 
 ### Options
@@ -138,382 +66,195 @@ node --env-file=.env src/index.js --agent-prompt --prompt training --iterations 
 |------|-------|---------|-------------|
 | `--prompt` | `-p` | `both` | Which prompt to run: `control`, `training`, or `both` |
 | `--iterations` | `-n` | `3` | Number of independent agent runs per prompt |
-| `--model` | `-m` | `claude-sonnet-4-20250514` | Claude model to use (see [Models](#models) below) |
-| `--runner` | `-r` | `api` | Runner backend: `api` (SDK, needs `ANTHROPIC_API_KEY`) or `cli` (claude command, no key needed) |
-| `--max-fixes` | `-f` | `5` | Max error→fix cycles per iteration before giving up |
-| `--concurrency` | `-c` | `2` | Max parallel agent calls. Capped at 2 by default to avoid rate limiting on slower models. Set higher with `--concurrency 5` if your API tier supports it. |
+| `--model` | `-m` | `claude-sonnet-4-20250514` | Claude model ID |
+| `--runner` | `-r` | `api` | `api` (Anthropic SDK) or `cli` (Claude CLI) |
+| `--max-fixes` | `-f` | `5` | Max error→fix cycles per iteration |
+| `--concurrency` | `-c` | `2` | Max parallel agent calls |
 | `--screenshot` | `-s` | `true` | Capture screenshots and run the validate/fix loop |
-| `--no-mcp` | | `false` | Disable MCP tool use. By default, MCP is auto-detected from prompt content (enabled when the prompt mentions "MCP"). Pass `--no-mcp` to force it off. |
-| `--contributions` | | `false` | After each iteration, ask the agent to turn its feedback into concrete contributions (code patches, doc fixes, utilities). Outputs are saved to a `contributions/` directory per iteration with `feedback.json` and `feedback.md` summarizing challenges. |
-| `--no-ailf` | | `false` | Disable AILF evaluation task generation. By default, each iteration produces AILF task drafts in an `ailf/` directory based on patterns where the agent struggled. Pass `--no-ailf` to skip this step. |
-| `--agent-prompt` | | `false` | When set, spawns a Claude call before the test run to auto-generate a varied, PRD-style interface brief. Both `control` and `training` agents receive the same generated brief in place of the `[ADD PROMPT HERE]` placeholder. When omitted (default), a fixed fallback brief is used: *"Create a simple interface that mimics Sanity Studio using Sanity UI."* The resolved brief is recorded in `report.json` and displayed at the top of `report.md`. |
+| `--no-mcp` | | `false` | Disable MCP tool use |
+
+| `--agent-prompt` | | `false` | Generate a varied interface brief via Claude instead of using the static fallback |
 
 ### Models
 
-The `--model` flag accepts any Claude model ID. Here are the available options:
+| Model | ID | Context | Max Output |
+|-------|-----|---------|------------|
+| **Claude Opus 4.7** | `claude-opus-4-7` | 1M | 128k |
+| **Claude Sonnet 4.6** | `claude-sonnet-4-6` | 1M | 64k |
+| **Claude Opus 4.6** | `claude-opus-4-6` | 1M | 128k |
+| **Claude Haiku 4.5** | `claude-haiku-4-5` | 200k | 64k |
 
-#### Current generation (Claude 4.7)
-
-| Model | ID | Tier | Context | Max Output | Speed |
-|-------|-----|------|---------|------------|-------|
-| **Claude Opus 4.7** | `claude-opus-4-7` | Most intelligent | 1M tokens | 128k tokens | Moderate |
-
-> **Note:** Sonnet and Haiku 4.7 are not yet available. Use the 4.6 variants below until they ship.
-
-#### Claude 4.6
-
-| Model | ID | Tier | Context | Max Output | Speed |
-|-------|-----|------|---------|------------|-------|
-| **Claude Opus 4.6** | `claude-opus-4-6` | Most intelligent (4.6) | 1M tokens | 128k tokens | Moderate |
-| **Claude Sonnet 4.6** | `claude-sonnet-4-6` | Best speed/intelligence balance | 1M tokens | 64k tokens | Fast |
-| **Claude Haiku 4.5** | `claude-haiku-4-5` | Fastest, near-frontier | 200k tokens | 64k tokens | Fastest |
-
-#### Previous generation (Claude 4)
-
-| Model | ID | Tier | Context | Max Output | Speed |
-|-------|-----|------|---------|------------|-------|
-| **Claude Opus 4** | `claude-opus-4-20250514` | Most intelligent (v4) | 200k tokens | 32k tokens | Moderate |
-| **Claude Sonnet 4** | `claude-sonnet-4-20250514` | Balanced (v4) | 200k tokens | 64k tokens | Fast |
-
-#### Aliases
-
-You can also use short aliases with the Claude CLI runner:
-
-| Alias | Resolves to |
-|-------|-------------|
-| `opus` | Latest Claude Opus |
-| `sonnet` | Latest Claude Sonnet |
-| `haiku` | Latest Claude Haiku |
-
-#### Examples
+## Project Structure
 
 ```
-# Use Opus 4.7 (most capable)
-node --env-file=.env src/index.js --model claude-opus-4-7
+├── src/
+│   ├── index.js                    # Main entry point
+│   ├── pipeline/                   # Core test pipeline
+│   │   ├── runner-api.js           # Anthropic SDK runner
+│   │   ├── runner-cli.js           # Claude CLI runner
+│   │   ├── shared.js               # Shared runner logic
+│   │   └── mcp-client.js           # MCP JSON-RPC transport
+│   ├── evaluation/                 # Measurement & analysis
+│   │   ├── accessibility.js        # 13 WCAG test categories + axe-core
+│   │   ├── analyze.js              # File parsing, component/style extraction
+│   │   ├── performance.js          # Lighthouse + React profiling
+│   │   ├── screenshot.js           # Puppeteer capture + DOM analysis
+│   │   └── visual-diff.js          # Pixel-level image comparison
+│   ├── reporting/                  # Output generation
+│   │   ├── report.js               # Per-run report (JSON + Markdown)
+│   │   └── summarize.js            # Cross-run aggregation
+│   ├── config/                     # Design-system-specific config
+│   │   ├── design-system.js        # DS adapter (packages, components, rules)
+│   │   ├── prompt-generator.js     # Interface brief generation
+│   │   └── eslint-plugin/          # Custom lint rules
+│   └── scripts/                    # Standalone re-run utilities
+│       ├── rebuild.js              # Re-parse + re-screenshot existing output
+│       ├── rescreenshot.js         # Re-capture screenshots only
+│       ├── rediff-all.js           # Re-compute visual diffs
+│       ├── refilter.js             # Regenerate report with exclusions
+│       └── reperf.js               # Re-run Lighthouse measurements
+├── prompts/                        # All prompt files
+│   ├── system.md                   # System prompt for code generation
+│   ├── system-fix.md               # System prompt for fix cycles
 
-# Use Sonnet 4.6 (default — good balance of quality and cost)
-node --env-file=.env src/index.js --model claude-sonnet-4-6
+│   ├── PROMPT-CONTROL.md           # Control prompt (no DS training)
+│   ├── PROMPT-WITH-TRAINING.md     # Training prompt (with DS docs)
+│   └── PROMPT-WITH-TRAINING-MCP.md # Training + MCP variant
+├── a11y/                           # Standalone Playwright a11y tests
+├── output/                         # Test run output (YYYY-MM-DD/HH.MM/)
 
-# Use Opus 4.6
-node --env-file=.env src/index.js --model claude-opus-4-6
-
-# Use Haiku (fastest, cheapest — good for quick iteration)
-node --env-file=.env src/index.js --model claude-haiku-4-5
-
-# Use an older Sonnet 4 with a dated ID
-node --env-file=.env src/index.js --model claude-sonnet-4-20250514
+└── docs/                           # Architecture docs
 ```
-
-### npm Scripts
-
-```
-npm run test:control          # Control prompt, API runner
-npm run test:training         # Training prompt, API runner
-npm run test:both             # Both prompts, API runner
-
-npm run test:control:cli      # Control prompt, CLI runner
-npm run test:training:cli     # Training prompt, CLI runner
-npm run test:both:cli         # Both prompts, CLI runner
-
-npm run rescreenshot          # Re-screenshot all iterations (latest run)
-npm run rescreenshot:control  # Re-screenshot control iterations only
-npm run rescreenshot:training # Re-screenshot training iterations only
-
-npm run rebuild               # Re-parse raw responses, rewrite projects, re-screenshot (latest run)
-npm run rebuild:control       # Rebuild control iterations only
-npm run rebuild:training      # Rebuild training iterations only
-
-npm run test:a11y             # Run standalone a11y tests against latest run
-npm run test:a11y:control     # A11y tests for control iterations only
-npm run test:a11y:training    # A11y tests for training iterations only
-
-npm run summarize             # Summarize all runs (print to stdout)
-npm run reperf                # Re-run Lighthouse perf on the latest run's iterations
-npm run reperf:training       # Re-run perf for training iterations only
-npm run summarize -- --count 8                        # Last 8 runs
-npm run summarize -- --from 2026-04-14/12.43          # From a specific run onward
-npm run summarize -- --prompt training --count 5      # Training prompt only, last 5 runs
-npm run summarize -- --count 10 --save                # Save to output/summary-YYYY-MM-DD-HH.MM.md (in output root)
-```
-
-## Agent-Generated Interface Briefs
-
-By default, both prompt files (`PROMPT-CONTROL.md` and `PROMPT-WITH-TRAINING.md`) contain an `[ADD PROMPT HERE]` placeholder at the top. Before each test run, this placeholder is replaced in memory (the files on disk are not modified) with an **interface brief** — a short description of what agents should build.
-
-### Static brief (default)
-
-When `--agent-prompt` is not set, the placeholder is replaced with:
-
-> *Create a simple interface that mimics Sanity Studio using Sanity UI.*
-
-### Agent-generated brief (`--agent-prompt`)
-
-When `--agent-prompt` is set, a Claude API call is made before the test run to generate a varied, PRD-style brief. The generator picks a random domain (news platform, travel, e-commerce, legal, HR, etc.) and asks Claude to write a concrete product requirement for a **frontend-only prototype** — explicitly scoping out Sanity backend setup, authentication, real API calls, and unit tests.
-
-Both `control` and `training` prompt variants receive the **same generated brief**, ensuring a fair comparison.
-
-The resolved brief is:
-- Logged to the console at startup
-- Stored in `report.json` under the top-level `promptText` field
-- Rendered at the top of `report.md` under an **Interface Brief** heading
-
-### Brief format
-
-Generated briefs follow a consistent structure:
-1. **Overview** — domain context and purpose of the interface
-2. **Required views / screens** — specific sections to build (e.g. nav sidebar, document list, inspector panel)
-3. **Content types** — named document types and key fields
-4. **UI requirements** — interactions, states, and display rules
-5. **Out of scope** — explicitly excludes backend setup, auth, real API calls, and tests
-
----
-
-## Summarizing Multiple Runs
-
-`src/summarize.js` aggregates `report.json` files across any number of past runs into a single Markdown summary. This is useful for tracking how metrics trend across prompt iterations or model changes.
-
-```
-node src/summarize.js [options]
-```
-
-### Options
-
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--output` | `-o` | `./output` | Directory containing run folders to scan |
-| `--count` | `-n` | all | Number of most-recent runs to include |
-| `--from` | `-f` | — | Include runs at-or-after this folder name (e.g. `2026-04-14/13.00`) |
-| `--prompt` | `-p` | `both` | Filter to `control`, `training`, or `both` |
-| `--save` | `-s` | false | Write to `output/summary-YYYY-MM-DD-HH.MM.md` instead of stdout |
-| `--help` | `-h` | — | Print usage |
-
-### Examples
-
-```
-# Last 8 runs, both prompts, print to stdout
-node src/summarize.js --count 8
-
-# All runs since a specific date, save to file
-node src/summarize.js --from 2026-04-14/14.20 --save
-
-# Training prompt only, last 5 runs
-node src/summarize.js --prompt training --count 5
-
-# Scan a different output directory
-node src/summarize.js --output /path/to/other/output --count 10
-```
-
-### Summary output
-
-The summary includes:
-
-- **Aggregate averages table** — mean of each metric across all selected runs, with a Δ column (✅/❌) comparing training vs control
-- **Per-run inline styles** — total, per-iteration average, and `Box`-specific count for each run
-- **Per-run accessibility** — axe violation totals and per-iteration averages
-- **Per-run performance** — FCP and average render time
-- **Per-run lines of code & fixes** — LoC average, fix attempts per iteration, and how many iterations compiled clean on the first try
-- **Metric variance table** — std dev across runs for each key metric, so you can see how stable results are
-
-Runs with no `report.json`, or runs that don't contain the requested prompt, are skipped with a warning rather than causing an error.
 
 ## Output
 
-Each run creates a timestamped directory under `output/`, organized by day:
+Each run creates a timestamped directory:
 
 ```
 output/
-├── 2026-03-18/                        # One directory per day (YYYY-MM-DD)
-│   ├── 14.30/                         # One directory per run (HH.MM)
-│   │   ├── report.json                # Machine-readable report (includes accessibility data)
-│   │   ├── report.md                  # Human-readable Markdown report
-│   │   ├── control/
-│   │   │   ├── iteration-1/
-│   │   │   │   ├── project/           # Generated (and fixed) project files
-│   │   │   │   ├── screenshot.png     # App screenshot
-│   │   │   │   ├── _raw_response.txt  # Initial Claude response
-│   │   │   │   ├── _feedback.json     # Parsed feedback items
-│   │   │   │   ├── _fix_response_1.txt # First fix response (if needed)
-│   │   │   │   ├── _fix_response_2.txt # Second fix response (if needed)
-│   │   │   │   ├── _console_errors.txt # Final browser console errors (if any)
-│   │   │   │   ├── _meta.json        # Metrics including fixAttempts, fixLog, feedback, and a11yResults
-│   │   │   │   └── _a11y_results.json # Accessibility test results per iteration
-│   │   │   ├── iteration-2/
-│   │   │   └── ...
-│   │   └── training/
-│   │       ├── iteration-1/
-│   │       │   ├── ...                # Same files as control iterations
-│   │       │   └── _mcp_tool_log.json # MCP tool call log (only when MCP is enabled)
-│   │       └── ...
-│   └── 16.45/                         # Multiple runs per day are grouped together
-│       └── ...
-├── 2026-03-19/                        # Previous days are preserved
-│   └── ...
-└── ...
+└── 2026-05-14/
+    └── 16.24/
+        ├── report.json
+        ├── report.md
+        ├── control/
+        │   ├── iteration-1/
+        │   │   ├── project/                  # Generated project files
+        │   │   ├── screenshot.png            # Laptop + light (primary)
+        │   │   ├── screenshot-mobile-light.png
+        │   │   ├── screenshot-mobile-dark.png
+        │   │   ├── screenshot-tablet-light.png
+        │   │   ├── screenshot-tablet-dark.png
+        │   │   ├── screenshot-laptop-dark.png
+        │   │   ├── screenshot-desktop-light.png
+        │   │   ├── screenshot-desktop-dark.png
+        │   │   ├── _raw_response.txt
+        │   │   ├── _agent_log.txt
+        │   │   ├── _feedback.json
+        │   │   ├── _meta.json
+        │   │   ├── _a11y_results.json
+        │   │   ├── _perf_results.json
+        │   │   ├── _npm_install.txt
+        │   │   ├── _tsc_check.txt
+        │   │   ├── _console_errors.txt
+        │   │   ├── _prompt.txt
+
+        │   └── iteration-2/
+        └── training/
+            └── ...
 ```
 
-Accessibility tests run automatically after each iteration successfully builds. Results are included in both the per-iteration `_a11y_results.json` and the summarized `report.json` / `report.md`.
+## What the Report Measures
 
-## MCP Integration
+| Section | Metrics |
+|---------|---------|
+| **Timing** | Avg/min/max build time per iteration |
+| **Lines of Code** | Avg/stddev/min/max across iterations |
+| **Code Variance** | 3-gram Jaccard similarity + structural file-path similarity |
+| **Fix Attempts** | Clean-on-first-try rate, avg fixes, error categories |
+| **Components** | Unique design system components and icons used |
+| **Feedback** | Agent friction reports by category (components, API, docs, DX, theming, icons) |
+| **Accessibility** | 13 WCAG test categories + axe-core violations |
+| **Performance** | FCP, LCP, TBT, TTI, Lighthouse score, React mount/commit timing |
+| **Component Usage** | JSX instance counts per component |
+| **Inline Styles** | Count by component + top CSS properties used |
+| **DOM Elements** | Total rendered DOM element count |
+| **Semantic HTML** | Semantic vs generic tags, ARIA roles, semantic ratio |
+| **Visual Diff** | Pairwise pixel comparison between iteration screenshots |
+| **Screenshots** | 8 per iteration (4 breakpoints × light/dark) |
 
-The harness integrates with the **Sanity UI MCP server** (`sanity-ui-mcp`) to give the model access to real design system data during generation.
+## npm Scripts
 
-### How It Works
+| Script | Description |
+|--------|-------------|
+| `npm start -- [flags]` | Run the test harness |
+| `npm run summarize` | Aggregate metrics across multiple runs |
+| `npm run rebuild` | Re-parse and re-screenshot existing output |
+| `npm run rescreenshot` | Re-capture screenshots for existing output |
+| `npm run reperf` | Re-run Lighthouse measurements |
+| `npm run rediff` | Re-compute visual diffs across all runs |
+| `npm test` | Run unit tests (vitest) |
+| `npm run test:watch` | Run tests in watch mode |
+| `npm run test:coverage` | Run tests with coverage report |
+| `npm run test:a11y` | Run standalone Playwright accessibility tests |
+| `npm run test:a11y:install` | Install Playwright browsers |
 
-1. The API runner detects that the prompt references MCP (the word "mcp" appears in the prompt content)
-2. It spawns the local `sanity-ui-mcp` server as a child process using the MCP stdio protocol
-3. The server's tool definitions are registered with the Anthropic SDK as tools
-4. The model can call tools like `list_components`, `get_component_guideline`, `validate_icons`, etc.
-5. Each tool call is routed to the MCP server, and the result is sent back to the model
-6. This continues in a multi-turn loop until the model has enough context and starts generating code
+All scripts accept `--prompt control|training|both` to filter by prompt type.
 
-### Available MCP Tools
+## Summarizing Multiple Runs
 
-| Tool | Description |
-|------|-------------|
-| `list_components` | Browse all Sanity UI components, filterable by category |
-| `get_component_guideline` | Get props, usage, best practices, accessibility, variants for a component |
-| `list_icons` | Browse icons from `@sanity/icons` with search |
-| `get_icon_details` | Get details and usage guidelines for a specific icon |
-| `search_design_system` | Free-text search across all design system entities |
-| `validate_icons` | Verify icon names exist before writing code |
-
-### MCP Server Setup
-
-The Sanity UI MCP server must be installed locally:
-
-```
-# The server is expected at this path (configurable in src/mcp-client.js)
-/Users/pj/Documents/Labs/sanity-ui-mcp
-```
-
-It is run via `uv`:
-
-```
-uv run --directory /path/to/sanity-ui-mcp mcp run main.py
-```
-
-### Disabling MCP
-
-```
-# Force MCP off for a training prompt run
-node --env-file=.env src/index.js --prompt training --no-mcp
+```sh
+npm run summarize                          # All runs, both prompts
+npm run summarize -- --count 5             # Last 5 runs
+npm run summarize -- --from 2026-05-14/14.00 --save  # Since a date, save to file
+npm run summarize -- --prompt training     # Training only
 ```
 
-When MCP is disabled, the training prompt behaves like the control prompt — the model generates code from its training data only, with no design system tool access.
+## Configuring for a Different Design System
 
-## Accessibility Testing
+Edit `src/config/design-system.js`:
 
-Accessibility tests run **automatically** as part of the main harness. When an iteration's generated app successfully renders, the runner immediately tests it for WCAG 2.2 AA compliance using Puppeteer + axe-core. Results are saved per-iteration (`_a11y_results.json`) and aggregated in the final report.
-
-### What It Tests
-
-Each iteration is checked with seven accessibility tests:
-
-| Test | What it checks |
-|------|----------------|
-| **axe-core violations** | Full WCAG 2.2 AA + best-practice scan via axe-core |
-| **Images without alt** | `<img>` elements missing the `alt` attribute |
-| **Keyboard accessibility** | All interactive elements (buttons, links, inputs) can receive focus |
-| **ARIA references** | `aria-labelledby`, `aria-describedby`, `aria-controls`, etc. all point to existing DOM IDs |
-| **Color contrast** | Targeted axe-core `color-contrast` rule with detailed per-node reporting |
-| **Page language** | `<html>` has a non-empty `lang` attribute (WCAG 3.1.1) |
-| **Landmark structure** | At least one landmark region exists (`<main>`, `<nav>`, `<header>`, `[role="main"]`, etc.) |
-
-### Report Output
-
-The Markdown report includes an **♿ Accessibility** section per prompt with:
-
-- Total and average axe violations per iteration
-- Pass rate per test across all iterations
-- Most common axe violation IDs ranked by frequency
-- Per-iteration pass/fail/skip summary
-
-### Standalone Playwright Tests
-
-You can also re-run accessibility tests independently against existing output using Playwright:
-
-```
-# Install Playwright browsers (one-time)
-npm run test:a11y:install
-
-# Test all iterations in the latest run
-npm run test:a11y
-
-# Test only control prompt outputs
-npm run test:a11y:control
-
-# Test only training prompt outputs
-npm run test:a11y:training
-
-# Test a specific iteration
-A11Y_ITERATION=2 npm run test:a11y:control
-
-# Point at a specific run directory
-A11Y_RUN_DIR=output/2026-03-18/14.30 npm run test:a11y
-```
-
-The standalone Playwright tests auto-detect the latest timestamped run directory under `output/`, or you can point at a specific one with `A11Y_RUN_DIR`.
-
-### Results Format
-
-Each iteration gets an `_a11y_results.json` file:
-
-```json
-{
-  "label": "control-iter-1",
-  "timestamp": "2026-03-18T12:30:00.000Z",
-  "tests": {
-    "axe-core": { "status": "failed", "details": { "violationCount": 3, "..." : "..." } },
-    "images-alt": { "status": "passed", "details": { "missingAltCount": 0 } },
-    "keyboard-accessible": { "status": "passed", "details": { "totalInteractive": 8, "notFocusableCount": 0 } },
-    "aria-references": { "status": "passed", "details": { "brokenCount": 0 } },
-    "color-contrast": { "status": "passed", "details": { "violationCount": 0 } },
-    "page-lang": { "status": "passed", "details": { "lang": "en" } },
-    "landmark-structure": { "status": "passed", "details": { "landmarkCount": 2, "landmarks": ["main (1)", "nav (1)"] } }
+```js
+export default {
+  name: "Your Design System",
+  packages: {
+    designSystem: {
+      name: "@your-org/design-system",
+      components: ["Box", "Flex", "Grid", ...],
+      cssImport: "@your-org/design-system/styles.css",
+    },
+    legacy: { name: "@your-org/ui" },
+    icons: { name: "@your-org/icons" },
   },
-  "axeViolationCount": 3,
-  "axeViolations": ["..."],
-  "summary": { "totalTests": 7, "passed": 6, "failed": 1, "skipped": 0 }
-}
+  enforcedDeps: { "@your-org/design-system": "latest" },
+  reactVersion: "^19.0",
+  promptTrigger: "@your-org/design-system",
+  // ...
+};
 ```
 
-### Environment Variables (Playwright)
+Then update the prompts in `prompts/` to reference your design system's docs and components.
 
-| Variable | Example | Description |
-|----------|---------|-------------|
-| `A11Y_PROMPT` | `control` | Only test iterations for this prompt (Playwright only) |
-| `A11Y_ITERATION` | `2` | Only test a specific iteration number (Playwright only) |
-| `A11Y_RUN_DIR` | `output/2026-03-18/14.30` | Point Playwright at a specific run directory |
+## Standalone Accessibility Tests
 
-## How Isolation Works
+The Playwright-based a11y tests can re-run against existing output:
 
-Each iteration makes a completely independent call to Claude with no shared conversation history, no access to other iterations' output, and its own output directory. The system prompt instructs the model to emit all files in a parseable `---FILE: path---` block format.
-
-Fix calls are also isolated — they are standalone requests with only the current iteration's files and errors as context. There is no multi-turn conversation carried across fix attempts.
-
-- **API runner:** Creates a fresh `Anthropic()` client call each time — no conversation state carries over. When MCP is enabled, a fresh MCP server process is started per iteration and shut down after generation completes.
-- **CLI runner:** Spawns a separate `claude --print` process per call with `--no-session-persistence`. When MCP is enabled, the CLI accesses the `sanity-ui` MCP server via its own user-level config.
-
-## Architecture
-
-- **`src/index.js`** — CLI entry point, argument parsing, runner selection, orchestration with bounded concurrency. Creates a timestamped run directory per invocation.
-- **`src/runner.js`** — API runner: generate → validate → a11y test → fix loop using the Anthropic SDK (requires `ANTHROPIC_API_KEY`). Supports MCP tool use via `src/mcp-client.js`.
-- **`src/runner-cli.js`** — CLI runner: same generate → validate → a11y test → fix loop using `claude --print` (no API key needed). Supports MCP via the CLI's MCP server config.
-- **`src/mcp-client.js`** — Lightweight MCP stdio client. Spawns the local Sanity UI MCP server, performs the JSON-RPC handshake, and exposes `callTool()` / `getToolsForAnthropic()` for the API runner.
-- **`src/screenshot.js`** — Shared validation and screenshot pipeline: `validateProject()` (install, serve, check for errors/render), `captureScreenshot()`, `killDevServer()`
-- **`src/a11y.js`** — Inline accessibility testing module: runs 7 WCAG 2.2 AA tests via Puppeteer + axe-core against a live dev server
-- **`src/analyze.js`** — Shared utilities: file parsing, Sanity UI component extraction, source file detection
-- **`src/report.js`** — Aggregates results and generates JSON + Markdown reports (includes fix attempts, feedback, and accessibility metrics)
-- **`src/rescreenshot.js`** — Re-run the screenshot pipeline on existing iteration output. Auto-detects latest timestamped run dir.
-- **`src/rebuild.js`** — Re-parse raw responses, rewrite project files, and re-screenshot. Auto-detects latest timestamped run dir.
-- **`a11y/playwright.config.ts`** — Playwright config for standalone accessibility tests (chromium only, sequential, no shared webServer)
-- **`a11y/tests/output-accessibility.test.ts`** — Discovers iteration outputs in timestamped run dirs and runs WCAG 2.2 AA tests against each
+```sh
+npm run test:a11y                                    # All iterations
+A11Y_PROMPT=training npm run test:a11y               # Training only
+A11Y_ITERATION=2 A11Y_PROMPT=control npm run test:a11y  # Specific iteration
+A11Y_RUN_DIR=output/2026-05-14/16.24 npm run test:a11y  # Specific run
+```
 
 ## Dependencies
 
-- `@anthropic-ai/sdk` — Claude API client (only used by the API runner)
-- `puppeteer` — Headless Chrome for validation, screenshots, and inline accessibility testing
-- `axe-core` — WCAG accessibility engine, injected into Puppeteer pages for inline testing
-- `@playwright/test` — Test runner for standalone accessibility tests (dev dependency)
-- `@axe-core/playwright` — axe-core integration for Playwright (dev dependency)
-- `typescript` — TypeScript compiler for the a11y test files (dev dependency)
+| Package | Purpose |
+|---------|---------|
+| `@anthropic-ai/sdk` | Anthropic API client |
+| `puppeteer` | Headless browser for screenshots + validation |
+| `axe-core` | Accessibility testing engine |
+| `lighthouse` | Performance measurement |
+| `pixelmatch` / `pngjs` | Visual diff comparison |
+| `vitest` | Unit testing |
+| `@playwright/test` | Standalone a11y test runner |
+
+
