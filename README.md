@@ -34,12 +34,6 @@ Create a `.env` file:
 ANTHROPIC_API_KEY=sk-ant-...   # Required for the API runner
 ```
 
-### Install Playwright (for standalone a11y tests)
-
-```sh
-npm run test:a11y:install
-```
-
 ## Usage
 
 ```sh
@@ -97,11 +91,20 @@ npm start -- --prompt control --runner cli
 │   │   ├── runner-cli.js           # Claude CLI runner
 │   │   ├── shared.js               # Shared runner logic
 │   │   └── mcp-client.js           # MCP JSON-RPC transport
-│   ├── evaluation/                 # Measurement & analysis
+│   ├── evaluation/                 # Measurement & analysis (one data point per file)
 │   │   ├── accessibility.js        # axe-core scans (light + dark mode)
-│   │   ├── analyze.js              # File parsing, component/style extraction
-│   │   ├── performance.js          # Lighthouse + React profiling
-│   │   ├── screenshot.js           # Puppeteer capture + DOM analysis
+│   │   ├── count-component-usage.js
+│   │   ├── dom-count.js            # Total rendered DOM element count
+│   │   ├── extract-component-imports.js
+│   │   ├── extract-inline-styles.js
+│   │   ├── lighthouse.js           # Lighthouse Core Web Vitals
+│   │   ├── parse-feedback.js
+│   │   ├── parse-files.js
+│   │   ├── puppeteer-helpers.js    # Shared browser/page helpers
+│   │   ├── react-profile.js        # React commit-level profiling
+│   │   ├── screenshot.js           # Screenshot capture (4 breakpoints × light/dark)
+│   │   ├── semantic-html.js        # Semantic vs generic tag analysis
+│   │   ├── validate.js             # npm install + tsc + dev-server gating
 │   │   └── visual-diff.js          # Pixel-level image comparison
 │   ├── reporting/                  # Output generation
 │   │   ├── report.js               # Per-run report (JSON + Markdown)
@@ -118,7 +121,6 @@ npm start -- --prompt control --runner cli
 │       └── reperf.js               # Re-run Lighthouse measurements
 ├── prompts/                        # Docs appended to a test's user prompt via docsPath
 │   └── variant-docs.md             # Default location for the `variant` test's docs
-├── a11y/                           # Standalone Playwright a11y tests
 ├── output/                         # Test run output (YYYY-MM-DD/HH.MM/)
 └── docs/                           # Architecture docs
 ```
@@ -207,8 +209,6 @@ The `ctx` object passed to every prompt function:
 }
 ```
 
-There is **no** built-in legacy/design-system distinction and **no** mechanical post-processing of the agent's output. If you want the agent to use a specific package, say so in the prompts.
-
 ## Output
 
 Each run creates a timestamped directory:
@@ -277,8 +277,6 @@ output/
 | `npm test` | Run unit tests (vitest) |
 | `npm run test:watch` | Run tests in watch mode |
 | `npm run test:coverage` | Run tests with coverage report |
-| `npm run test:a11y` | Run standalone Playwright accessibility tests |
-| `npm run test:a11y:install` | Install Playwright browsers |
 
 All scripts accept `--prompt <label>|all` to filter by test (`both` is also accepted as an alias for `all`).
 
@@ -291,17 +289,6 @@ npm run summarize -- --from 2026-05-14/14.00 --save  # Since a date, save to fil
 npm run summarize -- --prompt variant      # Variant test only
 ```
 
-## Standalone Accessibility Tests
-
-The Playwright-based a11y tests can re-run against existing output:
-
-```sh
-npm run test:a11y                                    # All iterations
-A11Y_PROMPT=variant npm run test:a11y                # Variant only
-A11Y_ITERATION=2 A11Y_PROMPT=control npm run test:a11y  # Specific iteration
-A11Y_RUN_DIR=output/2026-05-14/16.24 npm run test:a11y  # Specific run
-```
-
 ## Dependencies
 
 | Package | Purpose |
@@ -312,4 +299,3 @@ A11Y_RUN_DIR=output/2026-05-14/16.24 npm run test:a11y  # Specific run
 | `lighthouse` | Performance measurement |
 | `pixelmatch` / `pngjs` | Visual diff comparison |
 | `vitest` | Unit testing |
-| `@playwright/test` | Standalone a11y test runner |

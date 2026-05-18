@@ -13,9 +13,7 @@
     "rediff": "node --env-file=.env src/scripts/rediff-all.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
-    "test:a11y": "playwright test --config src/evaluation/a11y/playwright.config.ts",
-    "test:a11y:install": "playwright install --with-deps chromium"
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
@@ -26,8 +24,6 @@
     "puppeteer": "^24.2.0"
   },
   "devDependencies": {
-    "@axe-core/playwright": "^4.10.2",
-    "@playwright/test": "^1.54.2",
     "@vitest/coverage-v8": "^4.1.6",
     "typescript": "^5.8.3",
     "vitest": "^4.1.6"
