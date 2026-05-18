@@ -96,7 +96,7 @@ claude auth login
 
 ```
 # Current command being run for all existing tests
-node --env-file=.env src/index.js --prompt both --iterations 3 --model claude-sonnet-4-6 --no-mcp
+node --env-file=.env src/index.js --prompt both --iterations 3 --model claude-sonnet-4-6 --no-mcp --agent-prompt
 
 # Run both prompts with the API runner (default, 3 iterations each)
 node --env-file=.env src/index.js
@@ -144,26 +144,36 @@ node --env-file=.env src/index.js --agent-prompt --prompt training --iterations 
 | `--concurrency` | `-c` | `2` | Max parallel agent calls. Capped at 2 by default to avoid rate limiting on slower models. Set higher with `--concurrency 5` if your API tier supports it. |
 | `--screenshot` | `-s` | `true` | Capture screenshots and run the validate/fix loop |
 | `--no-mcp` | | `false` | Disable MCP tool use. By default, MCP is auto-detected from prompt content (enabled when the prompt mentions "MCP"). Pass `--no-mcp` to force it off. |
+| `--contributions` | | `false` | After each iteration, ask the agent to turn its feedback into concrete contributions (code patches, doc fixes, utilities). Outputs are saved to a `contributions/` directory per iteration with `feedback.json` and `feedback.md` summarizing challenges. |
+| `--no-ailf` | | `false` | Disable AILF evaluation task generation. By default, each iteration produces AILF task drafts in an `ailf/` directory based on patterns where the agent struggled. Pass `--no-ailf` to skip this step. |
 | `--agent-prompt` | | `false` | When set, spawns a Claude call before the test run to auto-generate a varied, PRD-style interface brief. Both `control` and `training` agents receive the same generated brief in place of the `[ADD PROMPT HERE]` placeholder. When omitted (default), a fixed fallback brief is used: *"Create a simple interface that mimics Sanity Studio using Sanity UI."* The resolved brief is recorded in `report.json` and displayed at the top of `report.md`. |
 
 ### Models
 
 The `--model` flag accepts any Claude model ID. Here are the available options:
 
-#### Current generation (Claude 4.6)
+#### Current generation (Claude 4.7)
 
-| Model | ID | Tier | Context | Max Output | Speed | Cost (input / output per 1M tokens) |
-|-------|-----|------|---------|------------|-------|--------------------------------------|
-| **Claude Opus 4.6** | `claude-opus-4-6` | Most intelligent | 1M tokens | 128k tokens | Moderate | $5 / $25 |
-| **Claude Sonnet 4.6** | `claude-sonnet-4-6` | Best speed/intelligence balance | 1M tokens | 64k tokens | Fast | $3 / $15 |
-| **Claude Haiku 4.5** | `claude-haiku-4-5` | Fastest, near-frontier | 200k tokens | 64k tokens | Fastest | $1 / $5 |
+| Model | ID | Tier | Context | Max Output | Speed |
+|-------|-----|------|---------|------------|-------|
+| **Claude Opus 4.7** | `claude-opus-4-7` | Most intelligent | 1M tokens | 128k tokens | Moderate |
+
+> **Note:** Sonnet and Haiku 4.7 are not yet available. Use the 4.6 variants below until they ship.
+
+#### Claude 4.6
+
+| Model | ID | Tier | Context | Max Output | Speed |
+|-------|-----|------|---------|------------|-------|
+| **Claude Opus 4.6** | `claude-opus-4-6` | Most intelligent (4.6) | 1M tokens | 128k tokens | Moderate |
+| **Claude Sonnet 4.6** | `claude-sonnet-4-6` | Best speed/intelligence balance | 1M tokens | 64k tokens | Fast |
+| **Claude Haiku 4.5** | `claude-haiku-4-5` | Fastest, near-frontier | 200k tokens | 64k tokens | Fastest |
 
 #### Previous generation (Claude 4)
 
-| Model | ID | Tier | Context | Max Output | Speed | Cost (input / output per 1M tokens) |
-|-------|-----|------|---------|------------|-------|--------------------------------------|
-| **Claude Opus 4** | `claude-opus-4-20250514` | Most intelligent (v4) | 200k tokens | 32k tokens | Moderate | $15 / $75 |
-| **Claude Sonnet 4** | `claude-sonnet-4-20250514` | Balanced (v4) | 200k tokens | 64k tokens | Fast | $3 / $15 |
+| Model | ID | Tier | Context | Max Output | Speed |
+|-------|-----|------|---------|------------|-------|
+| **Claude Opus 4** | `claude-opus-4-20250514` | Most intelligent (v4) | 200k tokens | 32k tokens | Moderate |
+| **Claude Sonnet 4** | `claude-sonnet-4-20250514` | Balanced (v4) | 200k tokens | 64k tokens | Fast |
 
 #### Aliases
 
@@ -178,17 +188,20 @@ You can also use short aliases with the Claude CLI runner:
 #### Examples
 
 ```
-# Use the latest Opus (most capable, highest cost)
-node --env-file=.env src/index.js --model claude-opus-4-6
+# Use Opus 4.7 (most capable)
+node --env-file=.env src/index.js --model claude-opus-4-7
 
-# Use Sonnet 4 (default — good balance of quality and cost)
-node --env-file=.env src/index.js --model claude-sonnet-4-20250514
-
-# Use the latest Sonnet 4.6
+# Use Sonnet 4.6 (default — good balance of quality and cost)
 node --env-file=.env src/index.js --model claude-sonnet-4-6
+
+# Use Opus 4.6
+node --env-file=.env src/index.js --model claude-opus-4-6
 
 # Use Haiku (fastest, cheapest — good for quick iteration)
 node --env-file=.env src/index.js --model claude-haiku-4-5
+
+# Use an older Sonnet 4 with a dated ID
+node --env-file=.env src/index.js --model claude-sonnet-4-20250514
 ```
 
 ### npm Scripts

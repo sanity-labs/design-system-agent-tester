@@ -35,6 +35,7 @@ import {
 const SYSTEM_PROMPT = readFileSync(resolve(PROJECT_ROOT, "prompts", "system.md"), "utf-8").trim();
 const FIX_SYSTEM_PROMPT = readFileSync(resolve(PROJECT_ROOT, "prompts", "system-fix.md"), "utf-8").trim();
 const CONTRIBUTION_SYSTEM_PROMPT = readFileSync(resolve(PROJECT_ROOT, "prompts", "system-contribution.md"), "utf-8").trim();
+const AILF_SYSTEM_PROMPT = readFileSync(resolve(PROJECT_ROOT, "prompts", "system-ailf-tasks.md"), "utf-8").trim();
 
 /**
  * Parse ---CHALLENGES--- blocks from agent contribution responses.
@@ -92,7 +93,7 @@ async function generateContributions({ client, model, feedback, iterDir, iterLab
     client,
     {
       model,
-      max_tokens: 16000,
+      max_tokens: 32000,
       system: CONTRIBUTION_SYSTEM_PROMPT,
       messages: [{ role: "user", content: userPrompt }],
     },
@@ -185,6 +186,178 @@ async function generateContributions({ client, model, feedback, iterDir, iterLab
   return { inputTokens, outputTokens, fileCount: contribFiles.length, challengeCount: challenges.length };
 }
 
+/**
+ * Generate AILF evaluation tasks based on patterns where the agent struggled.
+ * Analyzes feedback, fix log, lint violations, inline styles, and a11y failures
+ * to produce structured task drafts targeting specific failure patterns.
+ *
+ * @param {object} opts
+ * @param {import("@anthropic-ai/sdk").default} opts.client - Anthropic client
+ * @param {string} opts.model - Model name
+ * @param {Array} opts.feedback - Parsed feedback items
+ * @param {Array} opts.fixLog - Fix attempt log
+ * @param {object|null} opts.lintResults - Lint violations
+ * @param {object|null} opts.inlineStyles - Inline style analysis
+ * @param {object|null} opts.a11yResults - Accessibility test results
+ * @param {string} opts.iterDir - Iteration output directory
+ * @param {string} opts.iterLabel - Label for logging
+ * @param {string} opts.agentLogPath - Path to cumulative agent log
+ * @returns {Promise<{inputTokens: number, outputTokens: number, taskCount: number}>}
+ */
+async function generateAilfTasks({ client, model, feedback, fixLog, lintResults, inlineStyles, a11yResults, iterDir, iterLabel, agentLogPath }) {
+  const ailfDir = resolve(iterDir, "ailf");
+  await mkdir(ailfDir, { recursive: true });
+
+  // Build a context summary from all available signals
+  const sections = [];
+
+  // Feedback
+  if (feedback && feedback.length > 0) {
+    sections.push(
+      `## Agent Feedback (${feedback.length} items)\n\n` +
+      feedback.map((f, i) => `${i + 1}. [${f.category}] ${f.text}`).join("\n")
+    );
+  }
+
+  // Fix log
+  if (fixLog && fixLog.length > 0) {
+    sections.push(
+      `## Fix Attempts (${fixLog.length})\n\n` +
+      fixLog.map((f) => `- Fix #${f.attempt}: ${(f.fatalError || "unknown").split("\n")[0]}`).join("\n")
+    );
+  }
+
+  // Lint violations
+  if (lintResults && lintResults.messages && lintResults.messages.length > 0) {
+    const lintSummary = {};
+    for (const msg of lintResults.messages) {
+      const key = `${msg.ruleId} (${msg.severity === 2 ? "error" : "warning"})`;
+      lintSummary[key] = (lintSummary[key] || 0) + 1;
+    }
+    sections.push(
+      `## Lint Violations\n\n` +
+      Object.entries(lintSummary).map(([rule, count]) => `- ${rule}: ${count} occurrence(s)`).join("\n")
+    );
+  }
+
+  // Inline styles
+  if (inlineStyles && inlineStyles.total > 0) {
+    const topProps = Object.entries(inlineStyles.byProperty || {})
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([prop, count]) => `- ${prop}: ${count}`)
+      .join("\n");
+    const topComponents = Object.entries(inlineStyles.byComponent || {})
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([comp, count]) => `- ${comp}: ${count}`)
+      .join("\n");
+    sections.push(
+      `## Inline Styles (${inlineStyles.total} total)\n\n` +
+      `Top CSS properties used as inline styles:\n${topProps}\n\n` +
+      `Top components with inline styles:\n${topComponents}`
+    );
+  }
+
+  // Accessibility failures
+  if (a11yResults && a11yResults.tests) {
+    const failed = Object.entries(a11yResults.tests)
+      .filter(([, t]) => t.status === "failed")
+      .map(([name, t]) => `- ${name}: ${t.details?.issueCount || "?"} issue(s)`)
+      .join("\n");
+    if (failed) {
+      sections.push(`## Accessibility Failures\n\n${failed}`);
+    }
+  }
+
+  if (sections.length === 0) {
+    console.log(`[${iterLabel}] No struggle data to generate AILF tasks from — skipping`);
+    return { inputTokens: 0, outputTokens: 0, taskCount: 0 };
+  }
+
+  const userPrompt = `Here is the data from a test iteration where an AI agent built a web application using the Sanity Design System.\n\n${sections.join("\n\n---\n\n")}\n\nAnalyze the struggle patterns and produce AILF evaluation tasks that target the specific areas where the agent failed or had friction. Follow the output format specified in your instructions.`;
+
+  console.log(`[${iterLabel}] Generating AILF tasks from ${sections.length} signal(s)...`);
+
+  const response = await callAnthropicWithRetry(
+    client,
+    {
+      model,
+      max_tokens: 32000,
+      system: AILF_SYSTEM_PROMPT,
+      messages: [{ role: "user", content: userPrompt }],
+    },
+    iterLabel,
+  );
+
+  const ailfText = response.content
+    .filter((block) => block.type === "text")
+    .map((block) => block.text)
+    .join("\n");
+
+  const inputTokens = response.usage?.input_tokens ?? 0;
+  const outputTokens = response.usage?.output_tokens ?? 0;
+
+  // Save raw response
+  await writeFile(resolve(ailfDir, "_raw_response.txt"), ailfText, "utf-8");
+
+  // Log to cumulative agent log
+  await appendFile(
+    agentLogPath,
+    `=== AILF TASK GENERATION [${new Date().toISOString()}] ===\n` +
+      `Signals: ${sections.length}\n` +
+      `Response length: ${ailfText.length} bytes\n\n` +
+      ailfText +
+      "\n\n",
+    "utf-8",
+  );
+
+  // Parse task files from the response and write them
+  const taskFiles = parseFiles(ailfText);
+  let taskCount = 0;
+  for (const file of taskFiles) {
+    if (!file.path.endsWith(".json")) continue;
+    const filePath = resolve(ailfDir, file.path);
+    const dir = resolve(filePath, "..");
+    await mkdir(dir, { recursive: true });
+    await writeFile(filePath, file.content, "utf-8");
+    taskCount++;
+  }
+
+  console.log(`[${iterLabel}] Wrote ${taskCount} AILF task(s) to ailf/`);
+
+  // Write a summary index
+  const taskSummaries = taskFiles
+    .filter((f) => f.path.endsWith(".json"))
+    .map((f) => {
+      try {
+        const task = JSON.parse(f.content);
+        return {
+          file: f.path,
+          id: task.id?.current || "unknown",
+          description: task.description || "",
+          assertCount: (task.assert || []).length,
+          tags: task.tags || [],
+        };
+      } catch {
+        return { file: f.path, id: "parse-error", description: "", assertCount: 0, tags: [] };
+      }
+    });
+
+  await writeFile(
+    resolve(ailfDir, "_summary.json"),
+    JSON.stringify({
+      generatedAt: new Date().toISOString(),
+      model,
+      taskCount,
+      tasks: taskSummaries,
+    }, null, 2),
+    "utf-8",
+  );
+
+  return { inputTokens, outputTokens, taskCount };
+}
+
 // Max tool-use round-trips before we force the model to finish
 const MAX_TOOL_TURNS = 25;
 
@@ -234,7 +407,7 @@ async function callAnthropicWithRetry(client, params, label = "") {
 async function generateSimple({ client, model, promptContent }) {
   const response = await callAnthropicWithRetry(client, {
     model,
-    max_tokens: 16000,
+    max_tokens: 32000,
     system: SYSTEM_PROMPT,
     messages: [{ role: "user", content: promptContent }],
   });
@@ -280,21 +453,7 @@ async function generateWithMcp({
     );
 
     // Build system prompt with MCP instructions appended.
-    // Amend the instructions to fix known issues:
-    // - The MCP server instructions say to fetch the "props" section, but that
-    //   section returns empty for most components. "all" works and includes props.
-    // - search_design_system and list_icons don't support multi-word queries well;
-    //   the model needs to search one term at a time.
-    const mcpAmendments = `
-IMPORTANT corrections to the workflow above:
-- When calling get_component_guideline, ALWAYS use section: "all" (NOT "props"). The "props" section does not exist for most components. "all" includes props, usage, best practices, accessibility, variants, states, and content.
-- When calling list_icons, search for ONE term at a time (e.g. "menu", then "document", then "search"). Multi-word searches like "menu home document" return no results.
-- When calling search_design_system, use short single-concept queries (e.g. "layout", "navigation", "theme"). Long multi-word queries return no results.
-- When calling validate_icons, use the icon names WITHOUT the "Icon" suffix (e.g. "home" not "HomeIcon", "document" not "DocumentIcon").
-- ALWAYS call get_component_guideline with section "all" for EVERY component you plan to use before writing any code.
-`;
-    const systemPrompt =
-      SYSTEM_PROMPT + "\n\n" + mcpInstructions + "\n" + mcpAmendments;
+    const systemPrompt = SYSTEM_PROMPT + "\n\n" + mcpInstructions;
 
     // Conversation messages — we'll append tool results as the loop progresses
     const messages = [{ role: "user", content: promptContent }];
@@ -327,7 +486,7 @@ IMPORTANT corrections to the workflow above:
         try {
           const stream = await client.messages.stream({
             model,
-            max_tokens: 16000,
+            max_tokens: 32000,
             system: systemPrompt + nudge,
             tools: mcpTools,
             messages,
@@ -484,6 +643,8 @@ export async function runAgent({
   maxFixes = 5,
   maxGenerationRetries = 3,
   useMcp,
+  generateContributions = false,
+  generateAilf = true,
 }) {
   // Sonnet 4.6 generation can take 2-3 minutes per call. The default SDK
   // timeout is 10 min with 2 retries (30 min worst-case per call). Increase
@@ -588,7 +749,7 @@ export async function runAgent({
   const projectDir = resolve(iterDir, "project");
   await writeProjectFiles(projectDir, files);
 
-  // If the prompt references @sanity-labs/ui-poc, enforce correct imports
+  // If the prompt references @sanity-labs/design-system, enforce correct imports
   // mechanically. The model's training prior for @sanity/ui is too strong
   // for prompt instructions alone to override reliably.
   if (promptContent.includes("@sanity-labs/ui-poc")) {
@@ -679,7 +840,7 @@ export async function runAgent({
 
           // --- Step 3: Generate contributions from feedback ---
           let contribResult = null;
-          if (feedback.length > 0) {
+          if (generateContributions && feedback.length > 0) {
             try {
               contribResult = await generateContributions({
                 client, model, feedback, iterDir, iterLabel, agentLogPath,
@@ -689,6 +850,20 @@ export async function runAgent({
             } catch (err) {
               console.warn(`[${iterLabel}] ⚠ Contribution generation failed: ${err.message}`);
             }
+          }
+
+          // --- Step 4: Generate AILF tasks from struggle patterns ---
+          let ailfResult = null;
+          if (generateAilf) try {
+            ailfResult = await generateAilfTasks({
+              client, model, feedback, fixLog, lintResults,
+              inlineStyles: extractInlineStyles(files),
+              a11yResults, iterDir, iterLabel, agentLogPath,
+            });
+            totalInputTokens += ailfResult.inputTokens;
+            totalOutputTokens += ailfResult.outputTokens;
+          } catch (err) {
+            console.warn(`[${iterLabel}] ⚠ AILF task generation failed: ${err.message}`);
           }
 
           const result = buildResult({
@@ -706,6 +881,9 @@ export async function runAgent({
             perfResults,
             lintResults,
             contribResult,
+            ailfResult,
+            domElementCount: validation.domElementCount,
+            semanticHtml: validation.semanticHtml,
             runner: "api",
           });
           return result;
@@ -757,7 +935,7 @@ export async function runAgent({
           client,
           {
             model,
-            max_tokens: 16000,
+            max_tokens: 32000,
             system: FIX_SYSTEM_PROMPT,
             messages: [
               {
@@ -819,15 +997,15 @@ export async function runAgent({
           }
         }
 
-        // Re-enforce @sanity-labs/ui-poc after every fix cycle — the model
-        // frequently "fixes" errors by removing ui-poc and reverting to @sanity/ui
+        // Re-enforce @sanity-labs/design-system after every fix cycle — the model
+        // frequently "fixes" errors by removing design-system and reverting to @sanity/ui
         if (promptContent.includes("@sanity-labs/ui-poc")) {
           const rePatched = enforceUiPocImports(files, iterLabel);
           if (rePatched) {
             await appendFile(
               agentLogPath,
               `=== POST-FIX ENFORCEMENT [${new Date().toISOString()}] ===\n` +
-                `Re-applied @sanity-labs/ui-poc imports after fix attempt ${fixAttempts}\n\n`,
+                `Re-applied @sanity-labs/design-system imports after fix attempt ${fixAttempts}\n\n`,
               "utf-8",
             );
           }
@@ -876,7 +1054,7 @@ export async function runAgent({
 
     // --- Step 3: Generate contributions from feedback (fallback path) ---
     let contribResult = null;
-    if (feedback.length > 0) {
+    if (generateContributions && feedback.length > 0) {
       try {
         contribResult = await generateContributions({
           client, model, feedback, iterDir, iterLabel, agentLogPath,
@@ -886,6 +1064,20 @@ export async function runAgent({
       } catch (err) {
         console.warn(`[${iterLabel}] ⚠ Contribution generation failed: ${err.message}`);
       }
+    }
+
+    // --- Step 4: Generate AILF tasks (fallback path) ---
+    let ailfResult = null;
+    if (generateAilf) try {
+      ailfResult = await generateAilfTasks({
+        client, model, feedback, fixLog, lintResults,
+        inlineStyles: extractInlineStyles(files),
+        a11yResults: null, iterDir, iterLabel, agentLogPath,
+      });
+      totalInputTokens += ailfResult.inputTokens;
+      totalOutputTokens += ailfResult.outputTokens;
+    } catch (err) {
+      console.warn(`[${iterLabel}] ⚠ AILF task generation failed: ${err.message}`);
     }
 
     files = await readProjectFiles(projectDir, files);
@@ -903,13 +1095,16 @@ export async function runAgent({
       a11yResults: null,
       perfResults: null,
       contribResult,
+      ailfResult,
+      domElementCount: lastValidation.domElementCount,
+      semanticHtml: lastValidation.semanticHtml,
       runner: "api",
     });
   }
 
   // --- Step 3: Generate contributions from feedback (no-screenshot path) ---
   let contribResult = null;
-  if (feedback.length > 0) {
+  if (generateContributions && feedback.length > 0) {
     try {
       contribResult = await generateContributions({
         client, model, feedback, iterDir, iterLabel, agentLogPath,
@@ -919,6 +1114,20 @@ export async function runAgent({
     } catch (err) {
       console.warn(`[${iterLabel}] ⚠ Contribution generation failed: ${err.message}`);
     }
+  }
+
+  // --- Step 4: Generate AILF tasks (no-screenshot path) ---
+  let ailfResult = null;
+  if (generateAilf) try {
+    ailfResult = await generateAilfTasks({
+      client, model, feedback, fixLog: [], lintResults: null,
+      inlineStyles: extractInlineStyles(files),
+      a11yResults: null, iterDir, iterLabel, agentLogPath,
+    });
+    totalInputTokens += ailfResult.inputTokens;
+    totalOutputTokens += ailfResult.outputTokens;
+  } catch (err) {
+    console.warn(`[${iterLabel}] ⚠ AILF task generation failed: ${err.message}`);
   }
 
   // No screenshots requested or no package.json — just return metrics
@@ -936,6 +1145,9 @@ export async function runAgent({
     a11yResults: null,
     perfResults: null,
     contribResult,
+    ailfResult,
+    domElementCount: null,
+    semanticHtml: null,
     runner: "api",
   });
 }
@@ -943,12 +1155,12 @@ export async function runAgent({
 // --- Helper functions ---
 
 /**
- * Components that belong in @sanity-labs/ui-poc, NOT @sanity/ui.
+ * Components that belong in @sanity-labs/design-system, NOT @sanity/ui.
  */
 const UI_POC_COMPONENTS = ["Box", "Flex", "Grid", "Text", "Heading", "Card", "Divider"];
 
 /**
- * Mechanically enforce @sanity-labs/ui-poc usage in generated files.
+ * Mechanically enforce @sanity-labs/design-system usage in generated files.
  * Returns true if any file was modified.
  *
  * This exists because the model's training prior for @sanity/ui is too
@@ -966,7 +1178,7 @@ function enforceUiPocImports(files, iterLabel) {
       const deps = pkg.dependencies || {};
       let pkgChanged = false;
 
-      // Ensure @sanity-labs/ui-poc is listed
+      // Ensure @sanity-labs/design-system is listed
       if (!deps["@sanity-labs/ui-poc"]) {
         deps["@sanity-labs/ui-poc"] = "latest";
         pkgChanged = true;
@@ -1210,6 +1422,9 @@ async function buildResult({
   perfResults,
   lintResults,
   contribResult,
+  ailfResult,
+  domElementCount,
+  semanticHtml,
   runner,
 }) {
   const linesOfCode = files.reduce(
@@ -1234,6 +1449,7 @@ async function buildResult({
     filePaths: files.map((f) => f.path),
     sanityUIComponents: [...sanityUIComponents],
     inlineStyles,
+    semanticHtml,
     componentUsage,
     screenshotPath,
     inputTokens: totalInputTokens || null,
@@ -1245,6 +1461,8 @@ async function buildResult({
     perfResults,
     lintResults,
     contribResult: contribResult || null,
+    ailfResult: ailfResult || null,
+    domElementCount: domElementCount || null,
   };
   await writeFile(
     resolve(iterDir, "_meta.json"),
@@ -1259,6 +1477,7 @@ async function buildResult({
     files: sourceContents,
     sanityUIComponents: [...sanityUIComponents],
     inlineStyles,
+    semanticHtml,
     componentUsage,
     screenshotPath,
     inputTokens: totalInputTokens || null,
@@ -1270,5 +1489,7 @@ async function buildResult({
     perfResults,
     lintResults,
     contribResult: contribResult || null,
+    ailfResult: ailfResult || null,
+    domElementCount: domElementCount || null,
   };
 }

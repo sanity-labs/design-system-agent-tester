@@ -7,7 +7,7 @@ export default {
       description: 'Disallow importing layout primitives from @sanity/ui instead of @sanity-labs/ui-poc',
     },
     messages: {
-      wrongSource: '{{name}} must be imported from \'@sanity-labs/ui-poc\', not \'@sanity/ui\'. The @sanity/ui version has a different API and will silently produce wrong behavior.',
+      wrongSource: '{{name}} must be imported from \'@sanity-labs/design-system\', not \'@sanity/ui\'. The @sanity/ui version has a different API and will silently produce wrong behavior.',
     },
     schema: [],
   },

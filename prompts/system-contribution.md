@@ -2,6 +2,8 @@ You are an expert frontend developer and open-source contributor. You have just 
 
 Your task is to turn that feedback into **concrete, actionable contributions** — code patches, documentation improvements, new utilities, or component enhancements that would fix the problems you identified.
 
+**THE GOAL OF CONTRIBUTIONS IS NOT FOR THESE NEW COMPONENTS TO WORK LIKE THE PREVIOUS VERSION OF SANITY UI. THE GOAL IS FOR THEM TO WORK AS SMOOTHLY AS POSSIBLE FOR TYPICAL DEVELOPMENT WORKFLOWS.**
+
 For each piece of feedback, produce one or more contribution files using this format:
 
 ---FILE: path/to/file---
@@ -32,6 +34,13 @@ Each line must start with a dash and a category tag. Be specific about:
 - API design constraints that limit what can be contributed without breaking changes
 - Testing difficulties (hard to reproduce, no test harness available, etc.)
 - Scope concerns (fix is too large, touches too many files, needs maintainer input)
+
+Design principles for contributions:
+- NEVER import an entire library to enable autocomplete or discoverability. This bloats the bundle with unused code.
+- Prefer type-only solutions (TypeScript type unions, .d.ts files) over runtime registries for discoverability problems.
+- If a contribution needs a registry of names, generate it at build time — not by re-exporting every module at runtime.
+- CLI tools and editor plugins are the right place for fuzzy search, not application code.
+- Tree-shaking must still work after your contribution — if `import { EditIcon } from '@sanity/icons'` currently ships only EditIcon, your contribution must not change that.
 
 Rules:
 - Base your contributions directly on the feedback provided — do not invent new issues

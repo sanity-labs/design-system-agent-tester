@@ -49,12 +49,45 @@ export async function measurePerformance({ serverUrl, iterDir, iterLabel }) {
 
     const lhRuns = [];
     for (let i = 0; i < LIGHTHOUSE_RUNS; i++) {
-      const { lhr } = await lighthouse(
-        serverUrl,
-        { port, output: "json", logLevel: "error", throttlingMethod: "provided" },
-        desktopConfig,
+      try {
+        const { lhr } = await lighthouse(
+          serverUrl,
+          { port, output: "json", logLevel: "error", throttlingMethod: "provided" },
+          desktopConfig,
+        );
+        lhRuns.push(lhr);
+      } catch (lhErr) {
+        // Lighthouse internals (marky/lighthouse-logger) can crash on Node 24+
+        // due to strict performance.measure() enforcement. Skip this run.
+        console.warn(
+          `[${iterLabel}] Lighthouse run ${i + 1}/${LIGHTHOUSE_RUNS} failed: ${lhErr.message}`,
+        );
+      }
+    }
+
+    if (lhRuns.length === 0) {
+      console.warn(`[${iterLabel}] All Lighthouse runs failed — skipping perf metrics`);
+      const reactProfile = await collectReactProfile(browser, serverUrl, iterLabel);
+      const results = {
+        label:            iterLabel,
+        timestamp:        new Date().toISOString(),
+        runs:             0,
+        fcpMs:            null,
+        lcpMs:            null,
+        tbtMs:            null,
+        ttiMs:            null,
+        speedIndex:       null,
+        performanceScore: null,
+        perRun:           [],
+        reactProfile,
+        error:            "All Lighthouse runs failed (likely Node 24 performance.measure incompatibility)",
+      };
+      await writeFile(
+        resolve(iterDir, "_perf_results.json"),
+        JSON.stringify(results, null, 2),
+        "utf-8",
       );
-      lhRuns.push(lhr);
+      return results;
     }
 
     const pick = (key) =>

@@ -277,7 +277,7 @@ export class McpClient extends EventEmitter {
  * @returns {Promise<McpClient>}
  */
 export async function createSanityUiMcpClient({
-  directory = "/Users/pj/Documents/Labs/sanity-ui-mcp",
+  directory = "/Users/pj/Documents/Projects/sanity-ui-mcp",
   requestTimeoutMs = 30_000,
 } = {}) {
   const client = new McpClient({

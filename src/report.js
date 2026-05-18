@@ -75,6 +75,23 @@ export async function generateReport(allResults, outputDir, promptText = null) {
     // 13. Lint analysis
     const lintAnalysis = analyzeLint(validIterations);
 
+    // 15. Semantic HTML analysis
+    const semanticHtmlAnalysis = analyzeSemanticHtml(validIterations);
+
+    // 14. DOM element counts
+    const domCounts = validIterations
+      .filter((r) => r.domElementCount != null)
+      .map((r) => ({ iteration: r.iteration, count: r.domElementCount }));
+    const domElementAnalysis = {
+      iterationsWithData: domCounts.length,
+      totalIterations: validIterations.length,
+      average: domCounts.length ? round(mean(domCounts.map((d) => d.count))) : null,
+      min: domCounts.length ? Math.min(...domCounts.map((d) => d.count)) : null,
+      max: domCounts.length ? Math.max(...domCounts.map((d) => d.count)) : null,
+      stdDev: domCounts.length ? round(stdDev(domCounts.map((d) => d.count))) : null,
+      perIteration: domCounts,
+    };
+
     const avgFixes = mean(fixCounts);
     const stdDevFixes = stdDev(fixCounts);
     const iterationsNeedingFixes = fixCounts.filter((n) => n > 0).length;
@@ -134,6 +151,8 @@ export async function generateReport(allResults, outputDir, promptText = null) {
       inlineStyles: inlineStyleAnalysis,
       componentUsageCounts: componentUsageAnalysis,
       lint: lintAnalysis,
+      domElements: domElementAnalysis,
+      semanticHtml: semanticHtmlAnalysis,
       tokenUsage: {
         avgInputTokens: inputTokens.length ? round(mean(inputTokens)) : null,
         avgOutputTokens: outputTokens.length ? round(mean(outputTokens)) : null,
@@ -787,6 +806,94 @@ function renderMarkdown(report) {
         md += `\n`;
       }
 
+    // DOM Elements
+    const dom = data.domElements;
+    if (dom && dom.iterationsWithData > 0) {
+      md += `### 🏗️ DOM Elements\n\n`;
+      md += `| Metric | Value |\n|--------|-------|\n`;
+      md += `| Average | ${dom.average} |\n`;
+      md += `| Std Dev | ${dom.stdDev} |\n`;
+      md += `| Min | ${dom.min} |\n`;
+      md += `| Max | ${dom.max} |\n`;
+      md += `| Iterations measured | ${dom.iterationsWithData}/${dom.totalIterations} |\n\n`;
+
+      if (dom.perIteration.length > 0) {
+        md += `**Per iteration:**\n\n`;
+        md += `| Iteration | DOM Elements |\n|-----------|-------------|\n`;
+        for (const d of dom.perIteration) {
+          md += `| ${d.iteration} | ${d.count.toLocaleString()} |\n`;
+        }
+        md += `\n`;
+      }
+    }
+
+    // Semantic HTML
+    const sem = data.semanticHtml;
+    if (sem && sem.iterationsWithData > 0) {
+      md += `### 🏷️ Semantic HTML\n\n`;
+      md += `| Metric | Value |\n|--------|-------|\n`;
+      md += `| Avg semantic elements | ${sem.avgSemanticCount} |\n`;
+      md += `| Avg generic elements (div/span) | ${sem.avgGenericCount} |\n`;
+      md += `| Avg \`role\` attributes | ${sem.avgRoleCount} |\n`;
+      md += `| Semantic ratio | ${sem.avgSemanticRatio}% |\n`;
+      md += `| Iterations measured | ${sem.iterationsWithData}/${sem.totalIterations} |\n\n`;
+
+      // Semantic tags breakdown
+      const semTags = Object.entries(sem.globalSemanticByTag).sort((a, b) => b[1] - a[1]);
+      if (semTags.length > 0) {
+        md += `**Semantic tags used:**\n\n`;
+        md += `| Tag | Count |\n|-----|-------|\n`;
+        for (const [tag, count] of semTags) {
+          md += `| \`<${tag}>\` | ${count} |\n`;
+        }
+        md += `\n`;
+      }
+
+      // Generic tags
+      const genTags = Object.entries(sem.globalGenericByTag).sort((a, b) => b[1] - a[1]);
+      if (genTags.length > 0) {
+        md += `**Generic tags:**\n\n`;
+        md += `| Tag | Count |\n|-----|-------|\n`;
+        for (const [tag, count] of genTags) {
+          md += `| \`<${tag}>\` | ${count} |\n`;
+        }
+        md += `\n`;
+      }
+
+      // Roles
+      const roles = Object.entries(sem.globalRolesByValue).sort((a, b) => b[1] - a[1]);
+      if (roles.length > 0) {
+        md += `**ARIA roles:**\n\n`;
+        md += `| Role | Count |\n|------|-------|\n`;
+        for (const [role, count] of roles) {
+          md += `| \`${role}\` | ${count} |\n`;
+        }
+        md += `\n`;
+      }
+
+      // Per iteration
+      if (sem.perIteration.length > 0) {
+        md += `**Per iteration:**\n\n`;
+        md += `| Iteration | Semantic | Generic | Roles | Ratio |\n|-----------|----------|---------|-------|-------|\n`;
+        for (const p of sem.perIteration) {
+          md += `| ${p.iteration} | ${p.semanticCount} | ${p.genericCount} | ${p.roleCount} | ${p.semanticRatio}% |\n`;
+        }
+        md += `\n`;
+      }
+    }
+
+      if (is.topProperties && is.topProperties.length > 0) {
+        md += `**Most common inline CSS properties:**\n\n`;
+        md += `| Property | Occurrences | % of Total |\n|----------|-------------|------------|\n`;
+        for (const { property, count } of is.topProperties.slice(0, 15)) {
+          const pct = is.totalAcrossIterations > 0
+            ? round((count / is.totalAcrossIterations) * 100, 1)
+            : 0;
+          md += `| \`${property}\` | ${count} | ${pct}% |\n`;
+        }
+        md += `\n`;
+      }
+
       if (is.perIteration.length > 0) {
         md += `**Per iteration:**\n\n`;
         md += `| Iteration | Total | Top component |\n|-----------|-------|---------------|\n`;
@@ -1045,18 +1152,24 @@ function analyzeInlineStyles(iterations) {
       totalAcrossIterations: 0,
       averagePerIteration: 0,
       byComponent: {},
+      byProperty: {},
+      topProperties: [],
       perIteration: [],
     };
   }
 
   const globalByComponent = {};
+  const globalByProperty = {};
   let totalAcrossIterations = 0;
 
   const perIteration = withData.map((r) => {
-    const { total, byComponent } = r.inlineStyles;
+    const { total, byComponent, byProperty } = r.inlineStyles;
     totalAcrossIterations += total;
     for (const [comp, count] of Object.entries(byComponent || {})) {
       globalByComponent[comp] = (globalByComponent[comp] || 0) + count;
+    }
+    for (const [prop, count] of Object.entries(byProperty || {})) {
+      globalByProperty[prop] = (globalByProperty[prop] || 0) + count;
     }
     return {
       iteration: r.iteration,
@@ -1065,11 +1178,18 @@ function analyzeInlineStyles(iterations) {
     };
   });
 
+  // Sort properties by frequency, descending
+  const topProperties = Object.entries(globalByProperty)
+    .map(([property, count]) => ({ property, count }))
+    .sort((a, b) => b.count - a.count);
+
   return {
     iterationsWithData: withData.length,
     totalAcrossIterations,
     averagePerIteration: round(totalAcrossIterations / withData.length),
     byComponent: globalByComponent,
+    byProperty: globalByProperty,
+    topProperties,
     perIteration,
   };
 }
@@ -1129,6 +1249,72 @@ function analyzeLint(iterations) {
     averageWarnings: round(totalWarnings / withData.length),
     errorsByRule: globalErrorsByRule,
     warningsByRule: globalWarningsByRule,
+    perIteration,
+  };
+}
+
+/**
+ * Aggregate semantic HTML usage across iterations.
+ */
+function analyzeSemanticHtml(iterations) {
+  const withData = iterations.filter(
+    (r) => r.semanticHtml && r.semanticHtml.total !== undefined,
+  );
+
+  if (withData.length === 0) {
+    return {
+      iterationsWithData: 0,
+      totalIterations: iterations.length,
+      avgSemanticCount: null,
+      avgGenericCount: null,
+      avgRoleCount: null,
+      avgSemanticRatio: null,
+      globalSemanticByTag: {},
+      globalGenericByTag: {},
+      globalRolesByValue: {},
+      perIteration: [],
+    };
+  }
+
+  const globalSemanticByTag = {};
+  const globalGenericByTag = {};
+  const globalRolesByValue = {};
+
+  const perIteration = withData.map((r) => {
+    const s = r.semanticHtml;
+    for (const [tag, count] of Object.entries(s.semanticByTag || {})) {
+      globalSemanticByTag[tag] = (globalSemanticByTag[tag] || 0) + count;
+    }
+    for (const [tag, count] of Object.entries(s.genericByTag || {})) {
+      globalGenericByTag[tag] = (globalGenericByTag[tag] || 0) + count;
+    }
+    for (const [role, count] of Object.entries(s.rolesByValue || {})) {
+      globalRolesByValue[role] = (globalRolesByValue[role] || 0) + count;
+    }
+    return {
+      iteration: r.iteration,
+      semanticCount: s.semanticCount,
+      genericCount: s.genericCount,
+      roleCount: s.roleCount,
+      semanticRatio: s.semanticRatio,
+    };
+  });
+
+  const semanticCounts = withData.map((r) => r.semanticHtml.semanticCount);
+  const genericCounts = withData.map((r) => r.semanticHtml.genericCount);
+  const roleCounts = withData.map((r) => r.semanticHtml.roleCount);
+  const ratios = withData.map((r) => r.semanticHtml.semanticRatio);
+
+  return {
+    iterationsWithData: withData.length,
+    totalIterations: iterations.length,
+    avgSemanticCount: round(mean(semanticCounts)),
+    avgGenericCount: round(mean(genericCounts)),
+    avgRoleCount: round(mean(roleCounts)),
+    avgSemanticRatio: round(mean(ratios), 1),
+    globalSemanticByTag,
+    globalGenericByTag,
+    globalRolesByValue,
     perIteration,
   };
 }

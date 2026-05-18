@@ -2,11 +2,11 @@ export default {
   meta: {
     type: 'problem',
     docs: {
-      description: 'Require @sanity-labs/ui-poc/styles.css import in main entry file',
+      description: 'Require @sanity-labs/design-system/styles.css import in main entry file',
     },
     messages: {
       missingStyles:
-        "main.tsx must import '@sanity-labs/ui-poc/styles.css'. Without it, all ui-poc components render as unstyled HTML with no error.",
+        "main.tsx must import '@sanity-labs/design-system/styles.css'. Without it, all ui-poc components render as unstyled HTML with no error.",
     },
     schema: [],
   },
@@ -17,7 +17,7 @@ export default {
     let found = false
     return {
       ImportDeclaration(node) {
-        if (node.source.value === '@sanity-labs/ui-poc/styles.css') {
+        if (node.source.value === '@sanity-labs/design-system/styles.css') {
           found = true
         }
       },

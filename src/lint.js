@@ -185,7 +185,7 @@ function verifyWithRegex(code, filename, ruleConfig) {
           const line = code.slice(0, m.index).split("\n").length;
           messages.push({
             ruleId: "sanity-ui/no-sanity-ui-layout-import",
-            message: `${name} must be imported from '@sanity-labs/ui-poc', not '@sanity/ui'. The @sanity/ui version has a different API and will silently produce wrong behavior.`,
+            message: `${name} must be imported from '@sanity-labs/design-system', not '@sanity/ui'. The @sanity/ui version has a different API and will silently produce wrong behavior.`,
             severity: ruleConfig["sanity-ui/no-sanity-ui-layout-import"],
             line,
             column: 1,
@@ -200,11 +200,11 @@ function verifyWithRegex(code, filename, ruleConfig) {
     ruleConfig["sanity-ui/require-styles-import"] &&
     /main\.(tsx?|jsx?)$/.test(filename)
   ) {
-    if (!code.includes("@sanity-labs/ui-poc/styles.css")) {
+    if (!code.includes("@sanity-labs/design-system/styles.css")) {
       messages.push({
         ruleId: "sanity-ui/require-styles-import",
         message:
-          "main.tsx must import '@sanity-labs/ui-poc/styles.css'. Without it, all ui-poc components render as unstyled HTML with no error.",
+          "main.tsx must import '@sanity-labs/design-system/styles.css'. Without it, all ui-poc components render as unstyled HTML with no error.",
         severity: ruleConfig["sanity-ui/require-styles-import"],
         line: 1,
         column: 1,
@@ -231,17 +231,17 @@ function verifyWithRegex(code, filename, ruleConfig) {
 
   // --- Rule: require-heading-level ---
   if (ruleConfig["sanity-ui/require-heading-level"]) {
-    // Match <Heading that does NOT have a level prop before the closing >
+    // Match <Heading that does NOT have an as prop before the closing >
     const headingRe = /<Heading(?=[\s>])([^>]*?)>/g;
     let m;
     while ((m = headingRe.exec(code)) !== null) {
       const attrs = m[1];
-      if (!/\blevel\s*[=]/.test(attrs)) {
+      if (!/\bas\s*[=]/.test(attrs)) {
         const line = code.slice(0, m.index).split("\n").length;
         messages.push({
           ruleId: "sanity-ui/require-heading-level",
           message:
-            "Heading is missing the 'level' prop. Without it, <h2> is rendered silently regardless of context. Set  through as="h6" explicitly.",
+            'Heading is missing the \'as\' prop. Without it, <h2> is rendered silently regardless of context. Set as="h1" through as="h6" explicitly.',
           severity: ruleConfig["sanity-ui/require-heading-level"],
           line,
           column: 1,

@@ -30,6 +30,8 @@ export async function validateProject(projectDir, iterLabel) {
     consoleErrors: [],
     fatalError: null,
     devServer: null,
+    domElementCount: null,
+    semanticHtml: null,
   };
 
   try {
@@ -74,6 +76,39 @@ export async function validateProject(projectDir, iterLabel) {
       throw new Error(`npm install failed:\n${detail}`);
     }
 
+    // Type-check with tsc (non-blocking — logs errors but doesn't prevent dev server)
+    try {
+      console.log(`[${iterLabel}] Running type check...`);
+      const { stdout: tscOut, stderr: tscErr } = await execFileAsync(
+        "npx", ["tsc", "--noEmit"],
+        { cwd: projectDir, timeout: 60_000 },
+      );
+
+      const ts = new Date().toISOString();
+      const tscLog = `--- tsc --noEmit [${ts}] OK ---\n` +
+        (tscOut ? `[stdout]\n${tscOut.trim()}\n` : "") +
+        (tscErr ? `[stderr]\n${tscErr.trim()}\n` : "No type errors.\n");
+      await appendFile(resolve(iterDir, "_tsc_check.txt"), tscLog + "\n", "utf-8");
+    } catch (tscErr) {
+      const stderr = (tscErr.stderr || "").trim();
+      const stdout = (tscErr.stdout || "").trim();
+      // tsc exits non-zero when there are type errors — capture them
+      const errors = stdout || stderr || tscErr.message;
+
+      const ts = new Date().toISOString();
+      const tscLog = `--- tsc --noEmit [${ts}] FAILED ---\n${errors}\n`;
+      await appendFile(resolve(iterDir, "_tsc_check.txt"), tscLog + "\n", "utf-8");
+
+      // Count errors to decide severity
+      const errorCount = (errors.match(/\): error TS/g) || []).length;
+      console.warn(`[${iterLabel}] Type check found ${errorCount} error(s)`);
+
+      // Surface type errors as a fatal error so the fix loop can address them
+      if (errorCount > 0) {
+        throw new Error(`TypeScript type check failed (${errorCount} error(s)):\n${errors}`);
+      }
+    }
+
     // Start dev server
     console.log(`[${iterLabel}] Starting dev server...`);
     const devServer = spawn("npm", ["run", "dev", "--", "--port", "0"], {
@@ -94,6 +129,8 @@ export async function validateProject(projectDir, iterLabel) {
     const pageResult = await checkPage(result.serverUrl, iterLabel);
     result.consoleErrors = pageResult.consoleErrors;
     result.rendered = pageResult.rendered;
+    result.domElementCount = pageResult.domElementCount;
+    result.semanticHtml = pageResult.semanticHtml;
 
     // Determine if there are fatal errors (page crashes / missing exports)
     // Fatal errors are ones that prevent React from mounting at all
@@ -199,13 +236,29 @@ export async function attemptScreenshot(projectDir, iterDir, iterLabel) {
 }
 
 /**
- * Capture a screenshot from a running dev server URL.
+ * Breakpoints for responsive screenshots.
+ * Each captures the app at a different viewport to test responsive behavior.
+ */
+const SCREENSHOT_BREAKPOINTS = [
+  { name: "mobile",  width: 375,  height: 812,  label: "Mobile (375×812)" },
+  { name: "tablet",  width: 768,  height: 1024, label: "Tablet (768×1024)" },
+  { name: "laptop",  width: 1440, height: 900,  label: "Laptop (1440×900)" },
+  { name: "desktop", width: 1920, height: 1080, label: "Desktop (1920×1080)" },
+];
+
+const COLOR_SCHEMES = [
+  { name: "light", scheme: "light" },
+  { name: "dark",  scheme: "dark" },
+];
+
+/**
+ * Capture screenshots from a running dev server URL at multiple breakpoints.
  * Assumes the page is already validated / server is running.
  *
  * @param {string} serverUrl - The dev server URL to screenshot
- * @param {string} iterDir - Directory to write the screenshot to
+ * @param {string} iterDir - Directory to write the screenshots to
  * @param {string} iterLabel - Label for logging
- * @returns {Promise<string|null>} Path to the screenshot file, or null on failure
+ * @returns {Promise<string|null>} Path to the primary screenshot (laptop), or null on failure
  */
 export async function captureScreenshot(serverUrl, iterDir, iterLabel) {
   const puppeteer = await import("puppeteer");
@@ -216,24 +269,44 @@ export async function captureScreenshot(serverUrl, iterDir, iterLabel) {
 
   try {
     const page = await browser.newPage();
-    await page.setViewport({ width: 1440, height: 900 });
+    let primaryPath = null;
 
-    await page.goto(serverUrl, {
-      waitUntil: "networkidle2",
-      timeout: 30_000,
-    });
+    for (const cs of COLOR_SCHEMES) {
+      await page.emulateMediaFeatures([
+        { name: "prefers-color-scheme", value: cs.scheme },
+      ]);
 
-    // Wait for content to render
-    await waitForRenderedContent(page, iterLabel);
+      for (const bp of SCREENSHOT_BREAKPOINTS) {
+        await page.setViewport({ width: bp.width, height: bp.height });
 
-    // Extra breathing room for CSS transitions / font loading
-    await new Promise((r) => setTimeout(r, 1500));
+        await page.goto(serverUrl, {
+          waitUntil: "networkidle2",
+          timeout: 30_000,
+        });
 
-    const screenshotFile = resolve(iterDir, "screenshot.png");
-    await page.screenshot({ path: screenshotFile, fullPage: false });
-    console.log(`[${iterLabel}] Screenshot saved`);
+        // Wait for content to render
+        await waitForRenderedContent(page, iterLabel);
 
-    return screenshotFile;
+        // Extra breathing room for CSS transitions / font loading
+        await new Promise((r) => setTimeout(r, 1000));
+
+        // Primary screenshot: laptop + light (backward compatible filename)
+        const isDefault = bp.name === "laptop" && cs.name === "light";
+        const filename = isDefault
+          ? "screenshot.png"
+          : `screenshot-${bp.name}-${cs.name}.png`;
+        const filepath = resolve(iterDir, filename);
+        await page.screenshot({ path: filepath, fullPage: false });
+
+        if (isDefault) {
+          primaryPath = filepath;
+        }
+      }
+    }
+
+    const total = SCREENSHOT_BREAKPOINTS.length * COLOR_SCHEMES.length;
+    console.log(`[${iterLabel}] ${total} screenshots saved (${SCREENSHOT_BREAKPOINTS.map((b) => b.name).join(", ")} × ${COLOR_SCHEMES.map((c) => c.name).join(", ")})`);
+    return primaryPath;
   } catch (err) {
     console.warn(`[${iterLabel}] Screenshot capture failed: ${err.message}`);
     return null;
@@ -278,11 +351,83 @@ async function checkPage(serverUrl, iterLabel) {
 
     const rendered = await waitForRenderedContent(page, iterLabel);
 
-    return { consoleErrors, rendered };
+    // Count total DOM elements
+    const domElementCount = await page.evaluate(() => document.querySelectorAll('*').length);
+
+    // Analyze semantic HTML in the rendered DOM
+    const semanticHtml = await page.evaluate(() => {
+      // Comprehensive semantic tags per MDN HTML element reference
+      // https://developer.mozilla.org/en-US/docs/Web/HTML/Element
+      const SEMANTIC_TAGS = new Set([
+        // Content sectioning
+        'article', 'aside', 'footer', 'header', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+        'hgroup', 'main', 'nav', 'section', 'search', 'address',
+        // Text content
+        'blockquote', 'dd', 'dl', 'dt', 'figcaption', 'figure', 'hr',
+        'li', 'menu', 'ol', 'p', 'pre', 'ul',
+        // Inline text semantics
+        'a', 'abbr', 'b', 'bdi', 'bdo', 'cite', 'code', 'data', 'dfn',
+        'em', 'i', 'kbd', 'mark', 'q', 'rp', 'rt', 'ruby', 's',
+        'samp', 'small', 'strong', 'sub', 'sup', 'time', 'u', 'var',
+        // Forms
+        'button', 'datalist', 'fieldset', 'form', 'input', 'label',
+        'legend', 'meter', 'optgroup', 'option', 'output', 'progress',
+        'select', 'textarea',
+        // Interactive elements
+        'details', 'dialog', 'summary',
+        // Table content
+        'caption', 'col', 'colgroup', 'table', 'tbody', 'td', 'tfoot',
+        'th', 'thead', 'tr',
+        // Media & embedded content
+        'audio', 'canvas', 'embed', 'iframe', 'img', 'object',
+        'picture', 'source', 'svg', 'video',
+      ]);
+      const GENERIC_TAGS = new Set(['div', 'span']);
+
+      const semanticByTag = {};
+      const genericByTag = {};
+      const rolesByValue = {};
+      let semanticCount = 0;
+      let genericCount = 0;
+      let roleCount = 0;
+
+      for (const el of document.querySelectorAll('*')) {
+        const tag = el.tagName.toLowerCase();
+        if (SEMANTIC_TAGS.has(tag)) {
+          semanticCount++;
+          semanticByTag[tag] = (semanticByTag[tag] || 0) + 1;
+        } else if (GENERIC_TAGS.has(tag)) {
+          genericCount++;
+          genericByTag[tag] = (genericByTag[tag] || 0) + 1;
+        }
+
+        const role = el.getAttribute('role');
+        if (role) {
+          roleCount++;
+          rolesByValue[role] = (rolesByValue[role] || 0) + 1;
+        }
+      }
+
+      const total = semanticCount + genericCount;
+      return {
+        total,
+        semanticCount,
+        genericCount,
+        roleCount,
+        semanticRatio: total > 0 ? Math.round((semanticCount / total) * 1000) / 10 : 0,
+        semanticByTag,
+        genericByTag,
+        rolesByValue,
+      };
+    });
+
+    return { consoleErrors, rendered, domElementCount, semanticHtml };
   } catch (err) {
     return {
       consoleErrors: [`[validation-error] ${err.message}`],
       rendered: false,
+      domElementCount: null,
+      semanticHtml: null,
     };
   } finally {
     await browser.close();

@@ -2,10 +2,10 @@ export default {
   meta: {
     type: 'problem',
     docs: {
-      description: 'Require explicit level prop on Heading to prevent silent <h1> default',
+      description: 'Require explicit as prop on Heading to prevent silent <h2> default',
     },
     messages: {
-      missingLevel: 'Heading is missing the \'as\' prop. Without it, <h1> is rendered silently regardless of context. Set  through as="h6" explicitly.',
+      missingLevel: 'Heading is missing the \'as\' prop. Without it, <h2> is rendered silently regardless of context. Set as="h1" through as="h6" explicitly.',
     },
     schema: [],
   },

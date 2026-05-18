@@ -145,6 +145,7 @@ export function extractComponentUsageCounts(files) {
  */
 export function extractInlineStyles(files) {
   const globalByComponent = {};
+  const globalByProperty = {};
   let globalTotal = 0;
   const perFile = [];
 
@@ -175,6 +176,24 @@ export function extractInlineStyles(files) {
       globalByComponent[componentName] = (globalByComponent[componentName] || 0) + 1;
       fileTotal++;
       globalTotal++;
+
+      // Extract CSS property names from the style object.
+      // Find the matching closing }} after style={{ and parse property names.
+      const afterStyle = content.slice(m.index + m[0].length);
+      const closingMatch = afterStyle.match(/^([\s\S]*?)\}\s*\}/);
+      if (closingMatch) {
+        const styleBody = closingMatch[1];
+        // Match camelCase or quoted property names before a colon
+        // e.g. "fontSize:", "'background-color':", "width:"
+        const propRegex = /(?:^|[,\n])\s*(?:'([^']+)'|"([^"]+)"|([a-zA-Z_$][a-zA-Z0-9_$]*))\s*:/g;
+        let pm;
+        while ((pm = propRegex.exec(styleBody)) !== null) {
+          const prop = pm[1] || pm[2] || pm[3];
+          if (prop) {
+            globalByProperty[prop] = (globalByProperty[prop] || 0) + 1;
+          }
+        }
+      }
     }
 
     if (fileTotal > 0) {
@@ -185,6 +204,7 @@ export function extractInlineStyles(files) {
   return {
     total: globalTotal,
     byComponent: globalByComponent,
+    byProperty: globalByProperty,
     perFile,
   };
 }

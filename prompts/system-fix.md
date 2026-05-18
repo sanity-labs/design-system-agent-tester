@@ -17,4 +17,4 @@ Rules:
 - Fix the root cause, not the symptoms
 - If an import does not exist in a library, remove it or replace it with one that does exist
 - Make sure the project works with "npm install && npm run dev"
-- Do NOT remove "@sanity-labs/ui-poc" from package.json or rewrite its imports to "@sanity/ui". If a component is not found in "@sanity-labs/ui-poc", check the import name for typos first.
+- Do NOT remove "@sanity-labs/ui-poc" from package.json. If a component is not found in "@sanity-labs/ui-poc", check the import name for typos first.

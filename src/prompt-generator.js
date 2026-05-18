@@ -20,6 +20,7 @@ Rules you must follow:
 - Be concrete: name the content types, the columns in lists, the fields in detail views.
 - Keep the brief between 200 and 350 words.
 - Use clear numbered sections with short headings.
+- Do NOT add requirements for visual style, colors, or branding.
 - Do NOT mention React, Vite, TypeScript, or any specific technology.
 - Do NOT mention Sanity Studio, GROQ, CDN, or any Sanity-specific backend concept.
 - End with a short "Out of scope" list that explicitly calls out: no Sanity backend setup, no authentication, no real API calls, no unit tests.

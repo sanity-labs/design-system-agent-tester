@@ -29,7 +29,8 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
-    "@sanity-labs/ui-poc": "^0.0.1-alpha.0",
+    "@sanity-labs/design-system": "^0.0.1-alpha.0",
+    "@sanity-labs/ui-poc": "^0.0.1-alpha.6",
     "@sanity/ui": "^3.1.14",
     "axe-core": "^4.11.1",
     "eslint": "^9.39.4",

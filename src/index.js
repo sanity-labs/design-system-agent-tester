@@ -83,7 +83,14 @@ const { values } = parseArgs({
       type: "boolean",
       default: false,
     },
-
+    "no-ailf": {
+      type: "boolean",
+      default: false,
+    },
+    contributions: {
+      type: "boolean",
+      default: false,
+    },
     "agent-prompt": {
       type: "boolean",
       default: false,
@@ -94,6 +101,7 @@ const { values } = parseArgs({
 const PROMPTS = {
   control: resolve(ROOT, "PROMPT-CONTROL.md"),
   training: resolve(ROOT, "PROMPT-WITH-TRAINING.md"),
+  "training-mcp": resolve(ROOT, "PROMPT-WITH-TRAINING-MCP.md"),
 };
 
 /**
@@ -151,6 +159,13 @@ async function main() {
   const takeScreenshots = values.screenshot;
   const maxFixes = parseInt(values["max-fixes"], 10);
   const useMcp = !values["no-mcp"];
+  const generateAilf = !values["no-ailf"];
+  const generateContributions = values.contributions;
+
+  // When MCP is enabled, swap the training prompt for the MCP variant
+  if (useMcp && PROMPTS["training-mcp"]) {
+    PROMPTS.training = PROMPTS["training-mcp"];
+  }
 
   const useAgentPrompt = values["agent-prompt"];
 
@@ -208,6 +223,8 @@ async function main() {
   console.log(`Concurrency:  ${maxConcurrency}`);
   console.log(`Screenshots:  ${takeScreenshots}`);
   console.log(`MCP:          ${useMcp}`);
+  console.log(`Contributions:${generateContributions ? " enabled" : " disabled"}`);
+  console.log(`AILF tasks:   ${generateAilf ? "enabled" : "disabled"}`);
 
   console.log(`Agent prompt: ${useAgentPrompt}`);
   console.log(`Prompts:      ${promptKeys.join(", ")}`);
@@ -257,6 +274,8 @@ async function main() {
             takeScreenshots,
             maxFixes,
             useMcp,
+            generateContributions,
+            generateAilf,
           });
 
           const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);

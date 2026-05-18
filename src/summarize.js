@@ -216,6 +216,21 @@ function extractMetrics(data) {
     ttiMs:            data.performance?.avgTtiMs             ?? null,
     performanceScore: data.performance?.avgPerformanceScore  ?? null,
     reactMountMs:     data.performance?.reactMountMs         ?? null,
+    // DOM elements
+    domAvg:           data.domElements?.average              ?? null,
+    // Semantic HTML
+    semanticRatio:    data.semanticHtml?.avgSemanticRatio     ?? null,
+    semanticCount:    data.semanticHtml?.avgSemanticCount     ?? null,
+    genericCount:     data.semanticHtml?.avgGenericCount      ?? null,
+    roleCount:        data.semanticHtml?.avgRoleCount         ?? null,
+    // Lint
+    lintErrors:       data.lint?.totalErrors                  ?? null,
+    lintWarnings:     data.lint?.totalWarnings                ?? null,
+    // Component usage
+    componentTotal:   data.componentUsageCounts?.totalAcrossIterations ?? null,
+    componentAvg:     data.componentUsageCounts?.averagePerIteration   ?? null,
+    // Visual diff
+    visualDiffAvg:    data.visualDiff?.averageDiffPercent     ?? null,
   };
 }
 
@@ -249,7 +264,10 @@ function aggregateMetrics(metricSets) {
   const keys = [
     'loc', 'fixesAvg', 'fixesTotal', 'cleanOnFirstTry',
     'inlineTotal', 'inlineAvg', 'boxInline',
-    'axeTotal', 'axeAvg', 'fcpMs', 'tbtMs', 'ttiMs', 'performanceScore', 'reactMountMs',
+    'axeTotal', 'axeAvg',
+    'fcpMs', 'tbtMs', 'ttiMs', 'performanceScore', 'reactMountMs',
+    'domAvg', 'semanticRatio', 'semanticCount', 'genericCount', 'roleCount',
+    'lintErrors', 'lintWarnings', 'componentTotal', 'componentAvg', 'visualDiffAvg',
   ];
   const result = { count: metricSets.length };
   for (const k of keys) {
@@ -360,6 +378,20 @@ function renderSummary(runs, promptKeys, scannedDir) {
     ['TTI (ms)',                   'ttiMs',            true,  0],
     ['Lighthouse score',           'performanceScore', false, 0],
     ['React mount (ms)',           'reactMountMs',     true,  1],
+    // DOM & Semantic HTML
+    ['DOM elements (avg)',         'domAvg',          false, 0],
+    ['Semantic ratio',             'semanticRatio',   false, 1],
+    ['Semantic elements (avg)',    'semanticCount',   false, 0],
+    ['Generic elements (avg)',     'genericCount',    true,  0],
+    ['ARIA roles (avg)',           'roleCount',       false, 0],
+    // Lint
+    ['Lint errors total',          'lintErrors',      true,  0],
+    ['Lint warnings total',        'lintWarnings',    true,  0],
+    // Components
+    ['Component instances total',  'componentTotal',  false, 0],
+    ['Components / iter',          'componentAvg',    false, 0],
+    // Visual diff
+    ['Visual diff (avg %)',        'visualDiffAvg',   true,  2],
   ];
 
   const aggRows = METRIC_ROWS.map(([label, key, lowerBetter, decimals]) => {
@@ -524,6 +556,84 @@ function renderSummary(runs, promptKeys, scannedDir) {
     md += '\n';
   }
 
+  // ── DOM & Semantic HTML ────────────────────────────────────────────────────
+  md += `### 🏗️ DOM & Semantic HTML\n\n`;
+  {
+    const headers = [
+      'Run',
+      ...promptKeys.flatMap(pk => [`${pk} DOM avg`, `${pk} semantic ratio`, `${pk} roles`]),
+    ];
+    const rows = perRun.map(row => {
+      const cells = [row.name];
+      for (const pk of promptKeys) {
+        const m = row[pk];
+        cells.push(m ? fmtInt(m.domAvg) : '—');
+        cells.push(m && m.semanticRatio !== null ? `${fmt(m.semanticRatio, 1)}%` : '—');
+        cells.push(m ? fmtInt(m.roleCount) : '—');
+      }
+      return cells;
+    });
+    const avgRow = ['**avg**'];
+    for (const pk of promptKeys) {
+      avgRow.push(`**${fmtInt(agg[pk]?.domAvg)}**`);
+      avgRow.push(`**${agg[pk]?.semanticRatio !== null ? fmt(agg[pk]?.semanticRatio, 1) + '%' : '—'}**`);
+      avgRow.push(`**${fmtInt(agg[pk]?.roleCount)}**`);
+    }
+    rows.push(avgRow);
+    md += mdTable(headers, rows);
+    md += '\n';
+  }
+
+  // ── Lint ────────────────────────────────────────────────────────────────────
+  md += `### 🔍 Lint\n\n`;
+  {
+    const headers = [
+      'Run',
+      ...promptKeys.flatMap(pk => [`${pk} errors`, `${pk} warnings`]),
+    ];
+    const rows = perRun.map(row => {
+      const cells = [row.name];
+      for (const pk of promptKeys) {
+        const m = row[pk];
+        cells.push(m ? fmtInt(m.lintErrors) : '—');
+        cells.push(m ? fmtInt(m.lintWarnings) : '—');
+      }
+      return cells;
+    });
+    const avgRow = ['**avg**'];
+    for (const pk of promptKeys) {
+      avgRow.push(`**${fmtInt(agg[pk]?.lintErrors)}**`);
+      avgRow.push(`**${fmtInt(agg[pk]?.lintWarnings)}**`);
+    }
+    rows.push(avgRow);
+    md += mdTable(headers, rows);
+    md += '\n';
+  }
+
+  // ── Visual Consistency ─────────────────────────────────────────────────────
+  md += `### 🖼️ Visual Consistency\n\n`;
+  {
+    const headers = [
+      'Run',
+      ...promptKeys.map(pk => `${pk} avg diff %`),
+    ];
+    const rows = perRun.map(row => {
+      const cells = [row.name];
+      for (const pk of promptKeys) {
+        const m = row[pk];
+        cells.push(m && m.visualDiffAvg !== null ? `${fmt(m.visualDiffAvg, 2)}%` : '—');
+      }
+      return cells;
+    });
+    const avgRow = ['**avg**'];
+    for (const pk of promptKeys) {
+      avgRow.push(`**${agg[pk]?.visualDiffAvg !== null ? fmt(agg[pk]?.visualDiffAvg, 2) + '%' : '—'}**`);
+    }
+    rows.push(avgRow);
+    md += mdTable(headers, rows);
+    md += '\n';
+  }
+
   // ── Variance note ──────────────────────────────────────────────────────────
   if (runs.length > 1) {
     md += `### 📊 Metric Variance (std dev across runs)\n\n`;
@@ -538,6 +648,11 @@ function renderSummary(runs, promptKeys, scannedDir) {
       ['Lighthouse score',      'performanceScore'],
       ['React mount (ms)',      'reactMountMs'],
       ['Lines of code',         'loc'],
+      ['DOM elements',     'domAvg'],
+      ['Semantic ratio',   'semanticRatio'],
+      ['Lint errors',      'lintErrors'],
+      ['Component / iter', 'componentAvg'],
+      ['Visual diff %',    'visualDiffAvg'],
     ];
     const rows = VARIANCE_ROWS.map(([label, key]) => {
       const vals = promptKeys.map(pk => fmt(agg[pk]?.[`${key}_sd`], 1));
