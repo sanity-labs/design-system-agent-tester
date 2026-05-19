@@ -63,50 +63,7 @@ describe("agent-tester.config.js (loaded via ./load.js)", () => {
     });
   });
 
-  // ─── tests array ──────────────────────────────────────────────────
-
-  describe("tests", () => {
-    it("is a non-empty array", () => {
-      expect(Array.isArray(config.tests)).toBe(true);
-      expect(config.tests.length).toBeGreaterThan(0);
-    });
-
-    it("every entry has a non-empty label", () => {
-      for (const t of config.tests) {
-        expect(typeof t.label).toBe("string");
-        expect(t.label.length).toBeGreaterThan(0);
-      }
-    });
-
-    it("labels are unique", () => {
-      const labels = config.tests.map((t) => t.label);
-      expect(new Set(labels).size).toBe(labels.length);
-    });
-
-    it("every entry has a prompts block with system, fixSystem, and user functions", () => {
-      for (const t of config.tests) {
-        expect(typeof t.prompts).toBe("object");
-        expect(typeof t.prompts.system).toBe("function");
-        expect(typeof t.prompts.fixSystem).toBe("function");
-        expect(typeof t.prompts.user).toBe("function");
-      }
-    });
-
-    it("optional fields are typed correctly when present", () => {
-      for (const t of config.tests) {
-        if (t.packages !== undefined) {
-          expect(typeof t.packages).toBe("object");
-        }
-        if (t.reactVersion !== undefined && t.reactVersion !== null) {
-          expect(typeof t.reactVersion).toBe("string");
-        }
-        if (t.requiresMcp !== undefined) {
-          expect(typeof t.requiresMcp).toBe("boolean");
-        }
-        if (t.docsPath !== undefined && t.docsPath !== null) {
-          expect(typeof t.docsPath).toBe("string");
-        }
-      }
-    });
+  it("does NOT have a top-level `tests` array — tests are discovered from tests/*.js", () => {
+    expect(config.tests).toBeUndefined();
   });
 });

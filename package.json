@@ -11,6 +11,7 @@
     "rescreenshot": "node --env-file=.env src/scripts/rescreenshot.js",
     "reperf": "node src/scripts/reperf.js",
     "rediff": "node --env-file=.env src/scripts/rediff-all.js",
+    "new-test": "node src/scripts/new-test.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"

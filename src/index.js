@@ -208,7 +208,13 @@ async function main() {
 
   for (const label of testLabels) {
     const test = TESTS.find((t) => t.label === label);
-    const promptContent = buildUserPrompt(label, promptBrief);
+    // Effective MCP state: --no-mcp downgrades any test that opts in.
+    // Threaded into the prompt so `{{#if requiresMcp}}` reflects what
+    // will actually happen at runtime, not the test's static intent.
+    const effectiveRequiresMcp = mcpEnabled && test.requiresMcp;
+    const promptContent = buildUserPrompt(label, promptBrief, {
+      requiresMcp: effectiveRequiresMcp,
+    });
 
     console.log(
       `\n--- Running "${label}" test (${iterations} iterations) ---\n`,
@@ -245,7 +251,7 @@ async function main() {
             testLabel: label,
             takeScreenshots,
             maxFixes,
-            useMcp: mcpEnabled && test.requiresMcp,
+            useMcp: effectiveRequiresMcp,
           });
 
           const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);

@@ -1,0 +1,1 @@
+- Do NOT remove `{{packages.ds.name}}` from package.json. If a component is not found in `{{packages.ds.name}}`, check the import name for typos first.
