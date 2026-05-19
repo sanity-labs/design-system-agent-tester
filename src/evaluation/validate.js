@@ -13,8 +13,13 @@
  * proceed with the other evaluations (screenshot, dom-count, etc.) or
  * fall into the fix loop.
  *
- * Logs are written to `_npm_install.txt` and `_tsc_check.txt` inside the
- * iteration directory so debugging doesn't require recreating the run.
+ * Logs are written to `_npm_install.txt`, `_tsc_check.txt`, and
+ * `_dev_server.txt` inside the iteration directory so debugging doesn't
+ * require recreating the run.
+ *
+ * The dev server is bound to an OS-allocated random port (via `bind(0)`)
+ * and pinned with `--strictPort`, so a port collision fails loudly
+ * rather than landing Puppeteer on the wrong server.
  *
  * This file does NOT take measurements (no DOM counting, no screenshots,
  * no semantic-HTML analysis). Each of those lives in its own module.
@@ -22,11 +27,15 @@
 
 import { resolve, dirname } from "node:path";
 import { appendFile } from "node:fs/promises";
+import { createWriteStream } from "node:fs";
 import { execFile, spawn } from "node:child_process";
+import { createServer } from "node:net";
 import { promisify } from "node:util";
 import { launchBrowser, waitForRenderedContent } from "./puppeteer-helpers.js";
 
 const execFileAsync = promisify(execFile);
+
+const DEV_SERVER_READY_TIMEOUT_MS = 30_000;
 
 /**
  * Validate a generated project. Returns a result object — never throws.
@@ -56,9 +65,11 @@ export async function validateProject(projectDir, iterLabel) {
     await runNpmInstall(projectDir, iterLabel);
     await runTypeCheck(projectDir, iterLabel);
 
-    const devServer = await startDevServer(projectDir, iterLabel);
+    const iterDir = dirname(projectDir);
+    const port = await getAvailablePort();
+    const devServer = startDevServer(projectDir, iterLabel, port);
     result.devServer = devServer;
-    result.serverUrl = await waitForServerUrl(devServer);
+    result.serverUrl = await waitForReady(devServer, port, iterDir);
 
     console.log(
       `[${iterLabel}] Dev server at ${result.serverUrl}, validating...`,
@@ -109,9 +120,18 @@ async function runNpmInstall(projectDir, iterLabel) {
   console.log(`[${iterLabel}] Installing dependencies...`);
   const iterDir = dirname(projectDir);
   try {
+    // No --legacy-peer-deps: that flag reverts npm to v6 behavior where
+    // peer dependencies are NOT auto-installed. Modern packages (incl.
+    // @sanity-labs/ui-poc, which pins React 19 as a peer) depend on
+    // npm v7+ auto-installing peers. Suppressing it silently leaves the
+    // tree incomplete, which surfaced as bogus "Property X does not exist
+    // on Box" tsc errors when the agent's code referenced the real API
+    // surface against incomplete types. If a peer conflict ever surfaces
+    // from agent-generated code, that's a real signal worth reporting in
+    // the fix loop — not something to mask.
     const { stdout, stderr } = await execFileAsync(
       "npm",
-      ["install", "--no-audit", "--no-fund", "--legacy-peer-deps"],
+      ["install", "--no-audit", "--no-fund"],
       { cwd: projectDir, timeout: 120_000 },
     );
 
@@ -183,28 +203,98 @@ async function runTypeCheck(projectDir, iterLabel) {
   }
 }
 
-async function startDevServer(projectDir, iterLabel) {
-  console.log(`[${iterLabel}] Starting dev server...`);
-  return spawn("npm", ["run", "dev", "--", "--port", "0"], {
-    cwd: projectDir,
-    stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, BROWSER: "none" },
+/**
+ * Ask the OS for an available loopback port by binding to port 0 and
+ * reading back the assigned number. There's a tiny race between closing
+ * the probe socket and the dev server binding the port — `--strictPort`
+ * below turns any collision into a loud, diagnosable failure instead of
+ * the silent misdetection the harness used to suffer from.
+ */
+function getAvailablePort() {
+  return new Promise((resolveFn, rejectFn) => {
+    const probe = createServer();
+    probe.unref();
+    probe.on("error", rejectFn);
+    probe.listen(0, "127.0.0.1", () => {
+      const { port } = probe.address();
+      probe.close(() => resolveFn(port));
+    });
   });
 }
 
-function waitForServerUrl(devServer) {
-  return new Promise((resolve, reject) => {
-    let output = "";
-    const timeout = setTimeout(() => {
-      reject(new Error("Dev server did not start within 30s"));
-    }, 30_000);
+/**
+ * Spawn `npm run dev` against the project, pinning Vite to a specific
+ * port we already know is free. `--strictPort` makes Vite exit rather
+ * than silently auto-incrementing (which is what caused the harness to
+ * connect to the wrong port and report bogus "ERR_CONNECTION_REFUSED at
+ * localhost:5173" errors).
+ */
+function startDevServer(projectDir, iterLabel, port) {
+  console.log(`[${iterLabel}] Starting dev server on port ${port}...`);
+  return spawn(
+    "npm",
+    ["run", "dev", "--", "--port", String(port), "--strictPort"],
+    {
+      cwd: projectDir,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, BROWSER: "none" },
+    },
+  );
+}
+
+/**
+ * Stream the dev server's stdout/stderr into `_dev_server.txt` while
+ * watching for a readiness signal. Resolves with the URL we constructed
+ * ourselves (no stdout-parsing for URLs — we already know the port).
+ *
+ * Considered "ready" when either:
+ *   - the configured port appears in a `localhost:<port>` URL, or
+ *   - vite prints a `ready in <ms> ms` banner.
+ *
+ * Rejects if the process exits before ready, or if 30s elapse without a
+ * signal. In both cases the full output is on disk for diagnosis.
+ */
+function waitForReady(devServer, port, iterDir) {
+  const logPath = resolve(iterDir, "_dev_server.txt");
+  const stream = createWriteStream(logPath, { flags: "a" });
+  stream.write(
+    `\n--- dev server [${new Date().toISOString()}] port=${port} ---\n`,
+  );
+
+  const readyPattern = new RegExp(
+    `https?:\\/\\/localhost:${port}\\b|ready in \\d+\\s*ms`,
+    "i",
+  );
+
+  let resolved = false;
+  let preReadyOutput = "";
+
+  return new Promise((resolveFn, rejectFn) => {
+    const timer = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        stream.end();
+        rejectFn(
+          new Error(
+            `Dev server did not become ready on port ${port} within ${Math.round(
+              DEV_SERVER_READY_TIMEOUT_MS / 1000,
+            )}s. See ${logPath}.`,
+          ),
+        );
+      }
+    }, DEV_SERVER_READY_TIMEOUT_MS);
 
     function handleData(data) {
-      output += data.toString();
-      const urlMatch = output.match(/https?:\/\/localhost:\d+/);
-      if (urlMatch) {
-        clearTimeout(timeout);
-        resolve(urlMatch[0]);
+      const text = data.toString();
+      stream.write(text);
+      if (resolved) return;
+      preReadyOutput += text;
+      if (readyPattern.test(preReadyOutput)) {
+        resolved = true;
+        clearTimeout(timer);
+        // Leave the stream + data listeners attached so post-ready
+        // output (warnings, eventual crashes) keeps landing in the log.
+        resolveFn(`http://localhost:${port}`);
       }
     }
 
@@ -212,17 +302,24 @@ function waitForServerUrl(devServer) {
     devServer.stderr.on("data", handleData);
 
     devServer.on("error", (err) => {
-      clearTimeout(timeout);
-      reject(err);
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timer);
+      stream.end();
+      rejectFn(err);
     });
 
     devServer.on("close", (code) => {
-      clearTimeout(timeout);
-      if (code !== 0) {
-        reject(
-          new Error(`Dev server exited with code ${code}.\nOutput: ${output}`),
-        );
-      }
+      stream.end();
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timer);
+      rejectFn(
+        new Error(
+          `Dev server exited with code ${code} before becoming ready. ` +
+            `See ${logPath} for full output.`,
+        ),
+      );
     });
   });
 }

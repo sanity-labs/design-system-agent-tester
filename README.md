@@ -299,6 +299,7 @@ output/
         │   │   ├── _perf_results.json
         │   │   ├── _npm_install.txt
         │   │   ├── _tsc_check.txt
+        │   │   ├── _dev_server.txt
         │   │   ├── _console_errors.txt
         │   │   └── _prompt.txt
         │   └── iteration-2/

@@ -33,15 +33,23 @@ export function getFixSystemPrompt(testLabel) {
 
 /**
  * Write all files to the project directory (clean slate).
+ *
+ * `node_modules` is preserved between writes — re-downloading hundreds of
+ * tarballs per fix attempt would dominate run time. `package-lock.json`
+ * is NOT preserved: keeping it pinned the project to whichever versions
+ * the first install resolved, so subsequent `npm install` calls would
+ * short-circuit with "up to date in N ms" even when the agent's new code
+ * needed different sub-dep versions. Deleting the lockfile forces npm to
+ * re-resolve against the current `package.json` while still reusing any
+ * cached tarballs already on disk inside `node_modules`.
  */
 export async function writeProjectFiles(projectDir, files) {
   if (existsSync(projectDir)) {
-    // Remove node_modules from the list of things to delete to save time on reinstall
     const { readdir } = await import("node:fs/promises");
     if (existsSync(projectDir)) {
       const entries = await readdir(projectDir);
       for (const entry of entries) {
-        if (entry !== "node_modules" && entry !== "package-lock.json") {
+        if (entry !== "node_modules") {
           await rm(resolve(projectDir, entry), {
             recursive: true,
             force: true,
