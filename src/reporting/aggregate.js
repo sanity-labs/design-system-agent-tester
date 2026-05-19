@@ -45,6 +45,10 @@ export function extractMetrics(data) {
     componentTotal: data.componentUsageCounts?.totalAcrossIterations ?? null,
     componentAvg: data.componentUsageCounts?.averagePerIteration ?? null,
     visualDiffAvg: data.visualDiff?.averageDiffPercent ?? null,
+    inputTokensAvg: data.tokenUsage?.avgInputTokens ?? null,
+    outputTokensAvg: data.tokenUsage?.avgOutputTokens ?? null,
+    inputTokensTotal: data.tokenUsage?.totalInputTokens ?? null,
+    outputTokensTotal: data.tokenUsage?.totalOutputTokens ?? null,
   };
 }
 
@@ -73,6 +77,10 @@ const AGGREGATABLE_KEYS = [
   "componentTotal",
   "componentAvg",
   "visualDiffAvg",
+  "inputTokensAvg",
+  "outputTokensAvg",
+  "inputTokensTotal",
+  "outputTokensTotal",
 ];
 
 // ─── Stats helpers ──────────────────────────────────────────────────
@@ -187,6 +195,10 @@ const METRIC_ROWS = [
   ["Component instances total", "componentTotal", false, 0],
   ["Components / iter", "componentAvg", false, 0],
   ["Visual diff (avg %)", "visualDiffAvg", true, 2],
+  ["Input tokens / iter", "inputTokensAvg", true, 0],
+  ["Output tokens / iter", "outputTokensAvg", true, 0],
+  ["Input tokens total", "inputTokensTotal", true, 0],
+  ["Output tokens total", "outputTokensTotal", true, 0],
 ];
 
 /**

@@ -322,7 +322,6 @@ export function analyzeFeedback(iterations) {
     byCategory,
     categoriesSorted,
     allItems,
-    allUniqueItems: uniqueItems,
     perIteration,
   };
 }
@@ -451,7 +450,7 @@ function renderMarkdown(report) {
   md += `**Generated:** ${report.generatedAt}\n\n`;
 
   if (report.promptText) {
-    md += `## 📋 Interface Brief\n\n`;
+    md += `## Interface Brief\n\n`;
     md += `> ${report.promptText.split("\n").join("\n> ")}\n\n`;
   }
 
@@ -461,7 +460,7 @@ function renderMarkdown(report) {
     const aggregatesByLabel = Object.fromEntries(
       labels.map((label) => [label, extractMetrics(report.prompts[label])]),
     );
-    md += `## 📊 Summary\n\n`;
+    md += `## Summary\n\n`;
     md += renderMetricsTable(labels, aggregatesByLabel);
     md += `\n`;
   }
@@ -478,7 +477,7 @@ function renderMarkdown(report) {
     md += `| Failed | ${data.failedIterations} |\n\n`;
 
     // Timing
-    md += `### ⏱ Timing\n\n`;
+    md += `### Timing\n\n`;
     md += `| Metric | Value |\n|--------|-------|\n`;
     md += `| Average | ${data.timing.averageSeconds}s |\n`;
     md += `| Std Dev | ${data.timing.stdDevSeconds}s |\n`;
@@ -487,7 +486,7 @@ function renderMarkdown(report) {
     md += `| All | ${data.timing.allTimesSeconds.map((t) => `${t}s`).join(", ")} |\n\n`;
 
     // LOC
-    md += `### 📝 Lines of Code\n\n`;
+    md += `### Lines of Code\n\n`;
     md += `| Metric | Value |\n|--------|-------|\n`;
     md += `| Average | ${data.linesOfCode.average} |\n`;
     md += `| Std Dev | ${data.linesOfCode.stdDev} |\n`;
@@ -496,7 +495,7 @@ function renderMarkdown(report) {
     md += `| All | ${data.linesOfCode.all.join(", ")} |\n\n`;
 
     // Variance
-    md += `### 🔀 Code Variance\n\n`;
+    md += `### Code Variance\n\n`;
     const v = data.codeVariance;
     if (v.averageContentSimilarity !== null) {
       md += `**Average content similarity:** ${v.averageContentSimilarity} (0 = completely different, 1 = identical)\n\n`;
@@ -516,7 +515,7 @@ function renderMarkdown(report) {
     }
 
     // Fix Attempts
-    md += `### 🔧 Fix Attempts\n\n`;
+    md += `### Fix Attempts\n\n`;
     const f = data.fixAttempts;
     md += `| Metric | Value |\n|--------|-------|\n`;
     md += `| Average fixes per iteration | ${f.average} |\n`;
@@ -532,7 +531,7 @@ function renderMarkdown(report) {
       md += `**Fix details:**\n\n`;
       for (const p of f.perIteration) {
         if (p.fixAttempts === 0) {
-          md += `- **Iteration ${p.iteration}:** Clean on first try ✓\n`;
+          md += `- **Iteration ${p.iteration}:** Clean on first try\n`;
         } else {
           md += `- **Iteration ${p.iteration}:** ${p.fixAttempts} fix(es) needed\n`;
           for (const err of p.errors) {
@@ -547,7 +546,7 @@ function renderMarkdown(report) {
     }
 
     // Components
-    md += `### 🧩 ${dsConfig.name} Components\n\n`;
+    md += `### ${dsConfig.name} Components\n\n`;
     const c = data.componentImports;
     md += `| Metric | Value |\n|--------|-------|\n`;
     md += `| Unique UI components | ${c.uniqueUIComponents} |\n`;
@@ -567,7 +566,7 @@ function renderMarkdown(report) {
       const sorted = Object.entries(c.frequency).sort((a, b) => b[1] - a[1]);
       for (const [comp, freq] of sorted) {
         const label = comp.startsWith("icon:")
-          ? `🎨 ${comp.replace("icon:", "")}`
+          ? `icon: ${comp.replace("icon:", "")}`
           : comp;
         md += `| ${label} | ${freq}/${data.successfulIterations} |\n`;
       }
@@ -575,7 +574,7 @@ function renderMarkdown(report) {
     }
 
     // Feedback
-    md += `### 💬 ${dsConfig.name} Feedback\n\n`;
+    md += `### ${dsConfig.name} Feedback\n\n`;
     const fb = data.feedback;
     if (fb.totalItems > 0) {
       md += `| Metric | Value |\n|--------|-------|\n`;
@@ -589,31 +588,13 @@ function renderMarkdown(report) {
         md += `**By category:**\n\n`;
         md += `| Category | Count |\n|----------|-------|\n`;
         for (const cat of fb.categoriesSorted) {
-          const emoji =
-            {
-              documentation: "📖",
-              api: "⚙️",
-              components: "🧩",
-              theming: "🎨",
-              icons: "🎯",
-              dx: "🛠️",
-              other: "📌",
-            }[cat.category] || "📌";
-          md += `| ${emoji} ${cat.category} | ${cat.count} |\n`;
+          md += `| ${cat.category} | ${cat.count} |\n`;
         }
         md += `\n`;
       }
 
-      // Summary: deduplicated list of all feedback
-      md += `**All unique feedback:**\n\n`;
-      for (const item of fb.allUniqueItems) {
-        const catTag = `\`${item.category}\``;
-        md += `- ${catTag} ${item.text} _(iteration ${item.iteration})_\n`;
-      }
-      md += `\n`;
-
       // Full line-item list per iteration
-      md += `<details>\n<summary>Full feedback by iteration</summary>\n\n`;
+      md += `**Full feedback by iteration:**\n\n`;
       for (const p of fb.perIteration) {
         if (p.items.length === 0) {
           md += `**Iteration ${p.iteration}:** No feedback provided\n\n`;
@@ -625,13 +606,12 @@ function renderMarkdown(report) {
           md += `\n`;
         }
       }
-      md += `</details>\n\n`;
     } else {
       md += `No feedback was provided by the agent across any iteration.\n\n`;
     }
 
     // Accessibility
-    md += `### ♿ Accessibility\n\n`;
+    md += `### Accessibility\n\n`;
     const a11y = data.accessibility;
     if (a11y && a11y.iterationsWithResults > 0) {
       md += `| Metric | Value |\n|--------|-------|\n`;
@@ -655,8 +635,8 @@ function renderMarkdown(report) {
       md += `**Per iteration:**\n\n`;
       md += `| Iteration | Violations | Light | Dark-only | Status |\n|-----------|-----------|-------|-----------|--------|\n`;
       for (const p of a11y.perIteration) {
-        const icon = p.passed ? '✓' : '✗';
-        md += `| ${p.iteration} | ${p.violations} | ${p.lightViolations} | ${p.darkOnlyViolations} | ${icon} |\n`;
+        const status = p.passed ? "pass" : "fail";
+        md += `| ${p.iteration} | ${p.violations} | ${p.lightViolations} | ${p.darkOnlyViolations} | ${status} |\n`;
       }
       md += `\n`;
     } else {
@@ -664,7 +644,7 @@ function renderMarkdown(report) {
     }
 
     // Lighthouse
-    md += `### ⚡ Lighthouse\n\n`;
+    md += `### Lighthouse\n\n`;
     const lh = data.lighthouse;
     if (lh && lh.iterationsWithResults > 0) {
       md += `| Metric | Value |\n|--------|-------|\n`;
@@ -696,7 +676,7 @@ function renderMarkdown(report) {
     }
 
     // React Profiler
-    md += `### ⚛️ React Profiler\n\n`;
+    md += `### React Profiler\n\n`;
     const rp = data.reactProfile;
     if (rp && rp.iterationsWithResults > 0) {
       md += `| Metric | Value |\n|--------|-------|\n`;
@@ -720,7 +700,7 @@ function renderMarkdown(report) {
     }
 
     // Component Usage Counts
-    md += `### 🧩 Component Usage Counts\n\n`;
+    md += `### Component Usage Counts\n\n`;
     const cu = data.componentUsageCounts;
     if (cu && cu.totalAcrossIterations > 0) {
       md += `| Metric | Value |\n|--------|-------|\n`;
@@ -754,7 +734,7 @@ function renderMarkdown(report) {
     }
 
     // Inline Styles
-    md += `### 🎨 Inline Styles\n\n`;
+    md += `### Inline Styles\n\n`;
     const is = data.inlineStyles;
     if (is && is.totalAcrossIterations > 0) {
       md += `| Metric | Value |\n|--------|-------|\n`;
@@ -780,7 +760,7 @@ function renderMarkdown(report) {
     // DOM Elements
     const dom = data.domElements;
     if (dom && dom.iterationsWithData > 0) {
-      md += `### 🏗️ DOM Elements\n\n`;
+      md += `### DOM Elements\n\n`;
       md += `| Metric | Value |\n|--------|-------|\n`;
       md += `| Average | ${dom.average} |\n`;
       md += `| Std Dev | ${dom.stdDev} |\n`;
@@ -801,7 +781,7 @@ function renderMarkdown(report) {
     // Semantic HTML
     const sem = data.semanticHtml;
     if (sem && sem.iterationsWithData > 0) {
-      md += `### 🏷️ Semantic HTML\n\n`;
+      md += `### Semantic HTML\n\n`;
       md += `| Metric | Value |\n|--------|-------|\n`;
       md += `| Avg semantic elements | ${sem.avgSemanticCount} |\n`;
       md += `| Avg generic elements (div/span) | ${sem.avgGenericCount} |\n`;
@@ -880,7 +860,7 @@ function renderMarkdown(report) {
     }
 
     // Visual Diff
-    md += `### 🖼️ Visual Diff\n\n`;
+    md += `### Visual Diff\n\n`;
     const vd = data.visualDiff;
     if (vd && vd.averageDiffPercent !== null) {
       md += `| Metric | Value |\n|--------|-------|\n`;
@@ -915,7 +895,7 @@ function renderMarkdown(report) {
 
     // Screenshots
     if (data.screenshots.length > 0) {
-      md += `### 📸 Screenshots\n\n`;
+      md += `### Screenshots\n\n`;
       for (const ss of data.screenshots) {
         const relPath = ss.split("/output/").pop();
         md += `![${relPath}](${relPath})\n\n`;
@@ -924,7 +904,7 @@ function renderMarkdown(report) {
 
     // Token usage
     if (data.tokenUsage.avgInputTokens !== null) {
-      md += `### 🔤 Token Usage\n\n`;
+      md += `### Token Usage\n\n`;
       md += `| Metric | Value |\n|--------|-------|\n`;
       md += `| Avg input tokens | ${data.tokenUsage.avgInputTokens} |\n`;
       md += `| Avg output tokens | ${data.tokenUsage.avgOutputTokens} |\n`;
