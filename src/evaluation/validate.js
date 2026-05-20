@@ -32,6 +32,7 @@ import { execFile, spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { promisify } from "node:util";
 import { launchBrowser, waitForRenderedContent } from "./puppeteer-helpers.js";
+import { error, tag, warn } from "../util/color.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -72,7 +73,7 @@ export async function validateProject(projectDir, iterLabel) {
     result.serverUrl = await waitForReady(devServer, port, iterDir);
 
     console.log(
-      `[${iterLabel}] Dev server at ${result.serverUrl}, validating...`,
+      `${tag(iterLabel)} Dev server at ${result.serverUrl}, validating...`,
     );
 
     const pageResult = await checkPageRender(result.serverUrl, iterLabel);
@@ -117,12 +118,11 @@ export function killDevServer(devServer) {
 // ─── Internals ──────────────────────────────────────────────────────
 
 async function runNpmInstall(projectDir, iterLabel) {
-  console.log(`[${iterLabel}] Installing dependencies...`);
+  console.log(`${tag(iterLabel)} Installing dependencies...`);
   const iterDir = dirname(projectDir);
   try {
     // No --legacy-peer-deps: that flag reverts npm to v6 behavior where
-    // peer dependencies are NOT auto-installed. Modern packages (incl.
-    // @sanity-labs/ui-poc, which pins React 19 as a peer) depend on
+    // peer dependencies are NOT auto-installed. Modern packages depend on
     // npm v7+ auto-installing peers. Suppressing it silently leaves the
     // tree incomplete, which surfaced as bogus "Property X does not exist
     // on Box" tsc errors when the agent's code referenced the real API
@@ -162,7 +162,7 @@ async function runNpmInstall(projectDir, iterLabel) {
         .join("\n\n") + "\n";
     await appendFile(resolve(iterDir, "_npm_install.txt"), log, "utf-8");
 
-    console.error(`[${iterLabel}] npm install failed:\n${detail}`);
+    console.error(`${tag(iterLabel)} ${error("npm install failed:")}\n${detail}`);
     throw new Error(`npm install failed:\n${detail}`);
   }
 }
@@ -170,7 +170,7 @@ async function runNpmInstall(projectDir, iterLabel) {
 async function runTypeCheck(projectDir, iterLabel) {
   const iterDir = dirname(projectDir);
   try {
-    console.log(`[${iterLabel}] Running type check...`);
+    console.log(`${tag(iterLabel)} Running type check...`);
     const { stdout: tscOut, stderr: tscErr } = await execFileAsync(
       "npx",
       ["tsc", "--noEmit"],
@@ -193,7 +193,7 @@ async function runTypeCheck(projectDir, iterLabel) {
     await appendFile(resolve(iterDir, "_tsc_check.txt"), tscLog + "\n", "utf-8");
 
     const errorCount = (errors.match(/\): error TS/g) || []).length;
-    console.warn(`[${iterLabel}] Type check found ${errorCount} error(s)`);
+    console.warn(`${tag(iterLabel)} ${warn(`Type check found ${errorCount} error(s)`)}`);
 
     if (errorCount > 0) {
       throw new Error(
@@ -230,7 +230,7 @@ function getAvailablePort() {
  * localhost:5173" errors).
  */
 function startDevServer(projectDir, iterLabel, port) {
-  console.log(`[${iterLabel}] Starting dev server on port ${port}...`);
+  console.log(`${tag(iterLabel)} Starting dev server on port ${port}...`);
   return spawn(
     "npm",
     ["run", "dev", "--", "--port", String(port), "--strictPort"],

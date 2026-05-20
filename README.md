@@ -1,8 +1,6 @@
-# Design System Tester
+# Design system agent tester
 
-Run AI agents against a design system. Compare their output side-by-side.
-
-The harness gives each agent the same brief, asks it to build a Vite + React app, then measures the result. You get one report that compares every test you defined.
+Test AI agents' ability to use a design system. The harness spins up one or more defined tests. Each test is populated with a group of agents to perform a task. Each test is given the same prompt to make an interface. Each test's results are averaged and compared against the others. You get one report with each test's results.
 
 ## Setup
 
@@ -142,13 +140,7 @@ Rename `tests/foo/` to `tests/foo.disabled/` (or prefix with `_`). The engine sk
 |---|---|
 | `npm run new-test -- <label>` | Scaffold a new test directory. |
 | `npm run summarize` | Aggregate metrics across runs. |
-| `npm run rebuild` | Re-parse and re-screenshot existing output. |
-| `npm run rescreenshot` | Re-capture screenshots only. |
-| `npm run reperf` | Re-run Lighthouse measurements. |
-| `npm run rediff` | Re-compute visual diffs. |
 | `npm test` | Run unit tests. |
-
-The `re*` scripts replay measurements against saved agent output. You don't pay for fresh agent calls.
 
 ### Summarize across runs
 

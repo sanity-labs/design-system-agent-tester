@@ -6,6 +6,7 @@ import { generateReport } from "./reporting/report.js";
 import { computeVisualDiff } from "./evaluation/visual-diff.js";
 import { generateAppPrompt, STATIC_PROMPT } from "./config/prompt-generator.js";
 import { TESTS, TEST_LABELS, buildUserPrompt } from "./config/prompts.js";
+import { banner, bold, dim, error, success, tag, warn } from "./util/color.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
@@ -188,20 +189,21 @@ async function main() {
   // Resolve the interface brief once — both prompt variants receive the same text.
   const promptBrief = await resolvePromptBrief(useAgentPrompt, model);
 
-  console.log("=== Agent Tester ===");
+  console.log(banner("=== Agent Tester ==="));
+  const field = (k) => dim(k.padEnd(13));
   console.log(
-    `Runner:       ${runnerType}${runnerType === "cli" ? " (claude CLI — no API key needed)" : " (Anthropic SDK — requires ANTHROPIC_API_KEY)"}`,
+    `${field("Runner:")} ${runnerType}${runnerType === "cli" ? " (claude CLI — no API key needed)" : " (Anthropic SDK — requires ANTHROPIC_API_KEY)"}`,
   );
-  console.log(`Model:        ${model}`);
-  console.log(`Iterations:   ${iterations}`);
-  console.log(`Max fixes:    ${maxFixes}`);
-  console.log(`Concurrency:  ${maxConcurrency}`);
-  console.log(`Screenshots:  ${takeScreenshots}`);
-  console.log(`MCP:          ${mcpEnabled}`);
-  console.log(`Agent prompt: ${useAgentPrompt}`);
-  console.log(`Tests:        ${testLabels.join(", ")}`);
-  console.log(`Output:       ${runDir}`);
-  console.log(`Brief:        ${promptBrief.split("\n")[0]}${promptBrief.includes("\n") ? " …" : ""}`);
+  console.log(`${field("Model:")} ${model}`);
+  console.log(`${field("Iterations:")} ${iterations}`);
+  console.log(`${field("Max fixes:")} ${maxFixes}`);
+  console.log(`${field("Concurrency:")} ${maxConcurrency}`);
+  console.log(`${field("Screenshots:")} ${takeScreenshots}`);
+  console.log(`${field("MCP:")} ${mcpEnabled}`);
+  console.log(`${field("Agent prompt:")} ${useAgentPrompt}`);
+  console.log(`${field("Tests:")} ${testLabels.join(", ")}`);
+  console.log(`${field("Output:")} ${runDir}`);
+  console.log(`${field("Brief:")} ${promptBrief.split("\n")[0]}${promptBrief.includes("\n") ? " …" : ""}`);
   console.log("");
 
   const allResults = {};
@@ -217,7 +219,7 @@ async function main() {
     });
 
     console.log(
-      `\n--- Running "${label}" test (${iterations} iterations) ---\n`,
+      bold(`\n--- Running "${label}" test (${iterations} iterations) ---\n`),
     );
 
     const outputDir = resolve(runDir, label);
@@ -236,7 +238,7 @@ async function main() {
       const iterDir = resolve(outputDir, `iteration-${idx + 1}`);
       await mkdir(iterDir, { recursive: true });
 
-      console.log(`[${iterLabel}] Starting...`);
+      console.log(`${tag(iterLabel)} Starting...`);
       const startTime = Date.now();
 
       let lastError = null;
@@ -255,7 +257,7 @@ async function main() {
           });
 
           const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-          console.log(`[${iterLabel}] Completed in ${elapsed}s`);
+          console.log(`${tag(iterLabel)} ${success(`Completed in ${elapsed}s`)}`);
 
           results[idx] = {
             iteration: idx + 1,
@@ -270,16 +272,18 @@ async function main() {
           if (isTransientError(err) && attempt < MAX_ITERATION_RETRIES) {
             const delaySec = Math.round(RETRY_DELAY_MS / 1000);
             console.warn(
-              `[${iterLabel}] Transient error after ${elapsed}s (attempt ${attempt}/${MAX_ITERATION_RETRIES}): ${err.message}`,
+              `${tag(iterLabel)} ${warn(`Transient error after ${elapsed}s (attempt ${attempt}/${MAX_ITERATION_RETRIES}):`)} ${err.message}`,
             );
-            console.warn(`[${iterLabel}] Waiting ${delaySec}s before retry...`);
+            console.warn(
+              `${tag(iterLabel)} ${warn(`Waiting ${delaySec}s before retry...`)}`,
+            );
             await sleep(RETRY_DELAY_MS);
             continue;
           }
 
           // Non-transient error or final attempt — give up
           console.error(
-            `[${iterLabel}] Failed after ${elapsed}s: ${err.message}`,
+            `${tag(iterLabel)} ${error(`Failed after ${elapsed}s:`)} ${err.message}`,
           );
           break;
         }
@@ -319,7 +323,7 @@ async function main() {
 
   // Visual diff: compare screenshots within each test
   if (takeScreenshots) {
-    console.log("\n\n=== Computing Visual Diffs ===\n");
+    console.log(banner("\n\n=== Computing Visual Diffs ===\n"));
 
     for (const [label, iterations] of Object.entries(allResults)) {
       const validIterations = iterations.filter(
@@ -328,13 +332,13 @@ async function main() {
 
       if (validIterations.length < 2) {
         console.log(
-          `[${label}] Skipping visual diff (need ≥2 screenshots, have ${validIterations.length})`,
+          `${tag(label)} Skipping visual diff (need ≥2 screenshots, have ${validIterations.length})`,
         );
         continue;
       }
 
       console.log(
-        `[${label}] Comparing ${validIterations.length} screenshots...`,
+        `${tag(label)} Comparing ${validIterations.length} screenshots...`,
       );
       const promptOutputDir = resolve(runDir, label);
 
@@ -350,22 +354,22 @@ async function main() {
         }
 
         console.log(
-          `[${label}] Visual diff complete: avg ${visualDiff.averageDiffPercent}% difference across ${visualDiff.pairwiseDiffs.length} pair(s)`,
+          `${tag(label)} Visual diff complete: avg ${visualDiff.averageDiffPercent}% difference across ${visualDiff.pairwiseDiffs.length} pair(s)`,
         );
       } catch (err) {
-        console.warn(`[${label}] Visual diff failed: ${err.message}`);
+        console.warn(`${tag(label)} ${warn("Visual diff failed:")} ${err.message}`);
       }
     }
   }
 
   // Generate report
-  console.log("\n\n=== Generating Report ===\n");
+  console.log(banner("\n\n=== Generating Report ===\n"));
   await generateReport(allResults, runDir, promptBrief);
 
-  console.log(`\nDone! See ${runDir} for results and report.`);
+  console.log(`\n${success("Done!")} See ${runDir} for results and report.`);
 }
 
 main().catch((err) => {
-  console.error("Fatal error:", err);
+  console.error(error("Fatal error:"), err);
   process.exit(1);
 });

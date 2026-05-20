@@ -23,6 +23,7 @@ import {
   buildFixPrompt,
   buildResult,
 } from "./shared.js";
+import { error, success, tag, warn } from "../util/color.js";
 
 /**
  * Invoke the `claude` CLI in --print mode and return the text output.
@@ -42,7 +43,7 @@ async function invokeClaudeCli({
   model,
   iterLabel,
   timeoutMs = 300_000, // 5 minutes default
-  mcpTools = null, // e.g. ["mcp__Sanity"] to allow Sanity MCP tools
+  mcpTools = null, // Defined MCP tools
 }) {
   // Merge system prompt into user prompt to avoid --system-prompt CLI hang
   // (claude CLI v2.1.79+ hangs when --system-prompt is combined with
@@ -62,7 +63,7 @@ async function invokeClaudeCli({
   ];
 
   if (useMcp) {
-    // Allow only the specified MCP tool prefixes (e.g. "mcp__Sanity")
+    // Allow only the specified MCP tool prefixes
     // plus block all filesystem tools so the agent can't edit files directly.
     // --allowed-tools takes variadic args, so it must come before the prompt
     // and we pipe the prompt via stdin to avoid it being consumed as a tool name.
@@ -289,7 +290,7 @@ export async function runAgent({
       try {
         if (validation.success) {
           // Page rendered! Run every measurement against the running server.
-          console.log(`[${iterLabel}] ✓ Page renders successfully`);
+          console.log(`${tag(iterLabel)} ${success("✓ Page renders successfully")}`);
 
           const screenshotPath = await captureScreenshots(
             validation.serverUrl,
@@ -324,7 +325,7 @@ export async function runAgent({
             });
           } catch (err) {
             console.warn(
-              `[${iterLabel}] ⚠ Lighthouse measurement failed: ${err.message}`,
+              `${tag(iterLabel)} ${warn("⚠ Lighthouse measurement failed:")} ${err.message}`,
             );
           }
 
@@ -338,7 +339,7 @@ export async function runAgent({
             });
           } catch (err) {
             console.warn(
-              `[${iterLabel}] ⚠ React profile failed: ${err.message}`,
+              `${tag(iterLabel)} ${warn("⚠ React profile failed:")} ${err.message}`,
             );
           }
 
@@ -351,7 +352,7 @@ export async function runAgent({
               iterLabel,
             });
           } catch (err) {
-            console.warn(`[${iterLabel}] ⚠ A11y tests failed: ${err.message}`);
+            console.warn(`${tag(iterLabel)} ${warn("⚠ A11y tests failed:")} ${err.message}`);
           }
 
           // Collect final metrics
@@ -378,7 +379,7 @@ export async function runAgent({
         // --- Validation failed — attempt a fix ---
         if (fixAttempts >= maxFixes) {
           console.warn(
-            `[${iterLabel}] ✗ Max fix attempts (${maxFixes}) reached — giving up`,
+            `${tag(iterLabel)} ${error(`✗ Max fix attempts (${maxFixes}) reached — giving up`)}`,
           );
           break;
         }
@@ -386,7 +387,7 @@ export async function runAgent({
         fixAttempts++;
         const errorSummary = validation.fatalError || "Unknown error";
         console.log(
-          `[${iterLabel}] ✗ Validation failed (fix attempt ${fixAttempts}/${maxFixes}): ${errorSummary.split("\n")[0]}`,
+          `${tag(iterLabel)} ${warn(`✗ Validation failed (fix attempt ${fixAttempts}/${maxFixes}):`)} ${errorSummary.split("\n")[0]}`,
         );
 
         fixLog.push({

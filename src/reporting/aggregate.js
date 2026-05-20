@@ -140,17 +140,19 @@ export function fmtInt(n) {
 }
 
 /**
- * Render a Δ column comparing the second label to the first. Returns ''
- * if either value is missing, or if the first value is 0 (no baseline).
+ * Format a delta between two values as `+15% worse` / `-30% better`.
+ * Returns '' if either value is missing, or if the baseline is 0
+ * (no meaningful percentage).
  *
- * `lowerIsBetter` controls the ✅/❌ direction.
+ * `lowerIsBetter` controls the better/worse direction.
  */
 export function delta(baseline, candidate, lowerIsBetter = true) {
   if (baseline === null || candidate === null || baseline === 0) return "";
   const pct = ((candidate - baseline) / Math.abs(baseline)) * 100;
+  if (pct === 0) return "0%";
   const improved = lowerIsBetter ? pct < 0 : pct > 0;
   const sign = pct >= 0 ? "+" : "";
-  return `${improved ? "✅" : "❌"} ${sign}${pct.toFixed(0)}%`;
+  return `${sign}${pct.toFixed(0)}% ${improved ? "better" : "worse"}`;
 }
 
 // ─── Markdown table renderer ────────────────────────────────────────
@@ -204,10 +206,12 @@ const METRIC_ROWS = [
 /**
  * Render the headline metrics table comparing one or more tests.
  *
- * The delta column is only included when exactly two labels are passed
- * (treating the first as baseline and the second as candidate). With one
- * label the table is just that test's values; with 3+ labels the table
- * shows every test's values with no delta column.
+ * Layout: rows are tests, columns are metrics. This keeps the table
+ * scaling linearly with the number of metrics (constant) rather than
+ * with the number of tests (grows as you add design systems).
+ *
+ * When exactly two labels are passed, an extra row at the bottom shows
+ * the percentage delta (candidate vs baseline) for each metric.
  *
  * @param {string[]} labels — test labels, in display order
  * @param {Record<string, object>} aggregatesByLabel — `extractMetrics()` or
@@ -215,53 +219,54 @@ const METRIC_ROWS = [
  * @returns {string} — markdown
  */
 export function renderMetricsTable(labels, aggregatesByLabel) {
-  const showDelta = labels.length === 2;
-  const [baselineLabel, candidateLabel] = labels;
+  const iters = aggregatesByLabel[labels[0]]?.totalIterations ?? null;
 
-  const deltaHeader = showDelta
-    ? [`**Δ (${candidateLabel} vs ${baselineLabel})**`]
-    : [];
-  const headers = ["Metric", ...labels.map((l) => `**${l}**`), ...deltaHeader];
+  // Column definitions. METRIC_ROWS gives the standard set; we splice
+  // in a special-formatted "Clean on 1st try" column right after "Total
+  // fixes" if the iteration count is known.
+  const columns = [];
+  for (const [label, key, lowerBetter, decimals] of METRIC_ROWS) {
+    columns.push({ label, key, lowerBetter, decimals });
+    if (key === "fixesTotal" && iters) {
+      columns.push({
+        label: "Clean on 1st try (avg)",
+        key: "cleanOnFirstTry",
+        lowerBetter: false,
+        format: (agg) => {
+          if (!agg || agg.cleanOnFirstTry === null) return "—";
+          const pct = ((agg.cleanOnFirstTry / iters) * 100).toFixed(0);
+          return `${fmt(agg.cleanOnFirstTry, 1)} / ${iters} (${pct}%)`;
+        },
+      });
+    }
+  }
 
-  const rows = METRIC_ROWS.map(([label, key, lowerBetter, decimals]) => {
-    const vals = labels.map((l) => {
-      const v = aggregatesByLabel[l]?.[key];
-      return decimals === 0 ? fmtInt(v) : fmt(v, decimals);
-    });
-    const d = showDelta
-      ? [
-          delta(
-            aggregatesByLabel[baselineLabel]?.[key],
-            aggregatesByLabel[candidateLabel]?.[key],
-            lowerBetter,
-          ),
-        ]
-      : [];
-    return [label, ...vals, ...d];
+  const headers = ["Test", ...columns.map((c) => c.label)];
+
+  const rows = labels.map((l) => {
+    const agg = aggregatesByLabel[l];
+    const cells = [`**${l}**`];
+    for (const c of columns) {
+      if (c.format) {
+        cells.push(c.format(agg));
+      } else {
+        const v = agg?.[c.key];
+        cells.push(c.decimals === 0 ? fmtInt(v) : fmt(v, c.decimals));
+      }
+    }
+    return cells;
   });
 
-  // Clean-on-first-try gets its own format (X / N (P%))
-  const iters = aggregatesByLabel[labels[0]]?.totalIterations ?? null;
-  if (iters) {
-    const cleanRow = (() => {
-      const vals = labels.map((l) => {
-        const a = aggregatesByLabel[l];
-        if (!a || a.cleanOnFirstTry === null) return "—";
-        const pct = ((a.cleanOnFirstTry / iters) * 100).toFixed(0);
-        return `${fmt(a.cleanOnFirstTry, 1)} / ${iters} (${pct}%)`;
-      });
-      const d = showDelta
-        ? [
-            delta(
-              aggregatesByLabel[baselineLabel]?.cleanOnFirstTry,
-              aggregatesByLabel[candidateLabel]?.cleanOnFirstTry,
-              false, // higher clean rate is better
-            ),
-          ]
-        : [];
-      return ["Clean on 1st try (avg)", ...vals, ...d];
-    })();
-    rows.splice(2, 0, cleanRow); // insert after "total fixes"
+  // Δ row when comparing exactly two tests.
+  if (labels.length === 2) {
+    const [baselineLabel, candidateLabel] = labels;
+    const baseAgg = aggregatesByLabel[baselineLabel];
+    const candAgg = aggregatesByLabel[candidateLabel];
+    const cells = [`**Δ (${candidateLabel} vs ${baselineLabel})**`];
+    for (const c of columns) {
+      cells.push(delta(baseAgg?.[c.key], candAgg?.[c.key], c.lowerBetter));
+    }
+    rows.push(cells);
   }
 
   return mdTable(headers, rows);

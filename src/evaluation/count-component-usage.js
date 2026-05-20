@@ -27,7 +27,6 @@ export function extractComponentUsageCounts(files) {
     // Match every JSX opening tag: <ComponentName or <ComponentName.Sub
     // Only capture PascalCase names (components) and lowercase HTML tags
     // we care about (skip plain div/span/etc unless explicitly wanted).
-    // We count all capitalised names to cover both @sanity/ui and ui-poc.
     const tagRegex = /<([A-Z][A-Za-z0-9.]*)/g;
     let m;
 

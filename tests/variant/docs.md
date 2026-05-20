@@ -10,13 +10,15 @@
 
 ## Try it in 60 seconds
 
-Install it:
+
+### Install it:
 
 `npm i @sanity-labs/ui-poc`
 
 
 
-Compose it:
+
+### Compose it:
 
 ```import ``'@sanity-labs/ui-poc/styles.css'  ``// required at your entry point`
 
@@ -2046,7 +2048,7 @@ The following props are available on all components. Some props such as `as` and
 
 ---
 
-<!-- Tab: Width and Height -->
+<!-- Tab: Width and height -->
 
 
 ---
@@ -2241,7 +2243,6 @@ Box in the new system replaces the `@sanity/ui` Box. The core purpose is the sam
 | `row`, `rowStart`, `rowEnd` | `gridRow`, `gridRowStart`, `gridRowEnd` | Renamed with `grid` prefix. |
 | `columnStart`, `columnEnd` | `gridColumnStart`, `gridColumnEnd` | Renamed with `grid` prefix. |
 | — | `tone` | New. Sets a semantic background tint. |
-| — | `toneLevel` | New. Controls tone intensity (`'muted'`, `'normal'`, `'strong'`). |
 | — | `width`, `minWidth`, `maxWidth` | New. Accept any CSS string value. UI 3 Box had no width props. |
 | — | `height`, `minHeight`, `maxHeight` | New. Accept any CSS string value. |
 | — | `position` | New. Accepts `'absolute'`, `'fixed'`, `'relative'`, `'static'`, `'sticky'`. |
@@ -2278,6 +2279,224 @@ If a component instance cannot be migrated, includes ambiguous changes, or gener
 - **Grid**: Two-axis layout for card grids and dashboards
 - **Card**: Adds a visual surface with background, border, and tone
 
+
+---
+
+<!-- Tab: Card -->
+
+
+---
+
+
+# Card
+
+Groups related content into a single visual element.
+
+
+[React component](https://github.com/sanity-labs/ui-poc/tree/main/packages/ui/src/components/card) **·** [Figma component](https://www.figma.com/design/5mhVqXlldJEEB2VWZeKQ4i/Sanity-UI?node-id=30993-2035&t=Wt4zdsG8xcytqeQO-11)
+
+
+## Basic example
+
+`import { Card } from '@sanity-labs/ui-poc'`
+
+
+`<Card density="regular">`
+
+`  This is a card.`
+
+`</Card>`
+
+**Note:** Card requires `@sanity-labs/ui-poc/styles.css` to be imported once at your app's entry point. Without it, this component renders unstyled. See Getting Started for more info.
+
+
+## API documentation
+
+
+| **Prop** | **Description** | **Type** | **Values** | **Default** | **Required** |
+| --- | --- | --- | --- | --- | --- |
+| `as` | HTML element or component to render | `React.ElementType` | Any valid HTML tag or component (e.g. `'article'`, `'section'`) | `'div'` | No |
+| `density` | Composite prop that sets padding and border-radius together | `Responsive<Density>` | `'compact'`, `'regular'`, `'loose'` | `'regular'` | No |
+
+
+### Shared props
+
+- Margin
+- Tone — applies a semantic background and border color.
+
+## Usage guidelines
+
+
+### When to use
+
+- Group related content on a distinct background surface
+- Create visual separation between content regions
+- Wrap content that needs consistent internal padding and rounded corners
+
+### When not to use
+
+- Layout without a distinct visual surface → use Box or Flex
+- Structural UI regions (sidebars, toolbars, scroll containers) → use Box or Flex
+- Clickable/tappable areas → use Button for full keyboard accessibility
+
+## Best practices
+
+
+### Do
+
+- Use `density` to match the surrounding layout. `compact` for dense lists, `regular` for standard cards, `loose` for featured content.
+- Use `tone` to reinforce the semantic meaning/purpose of the Card. For example, a Card representing an error or error output should be set to `critical`.
+- Wrap Card in a `Box` or `Flex` to control layout sizing — Card handles appearance, the wrapper handles position.
+
+
+### Don't
+
+- Don't use Card for structural UI regions (toolbars, sidebars, nav headers) — use Box.
+- Don’t use Card for scrollable content. A Card’s content should be visible in its entirety.
+- Don't nest cards. Use Box/Flex/Stack for internal layout within a card.
+- Don't add `onClick` to Card. Use Button for interactive actions.
+- Don't use inline `style` for padding or border-radius — use `density` instead.
+
+## Variants
+
+
+### Tone
+
+`tone `provides the ability to assign a semantic color to Card. This should be used to reinforce the meaning/purpose of text in important situations, such as error messages or information tips.
+
+
+| **Tone** | **Use for** |
+| --- | --- |
+| `'none' `**Default** | No semantic meaning and minor visual emphasis |
+| `'neutral'` | No semantic meaning, but increased emphasis |
+| `'primary'` | Informational or educational |
+| `'suggest'` | Suggestions or recommendations |
+| `'positive'` | Success, published, healthy |
+| `'caution'` | Needs attention, in review |
+| `'critical'` | Error, failed, rejected |
+
+
+### Density
+
+`density` sets both padding and border-radius as a single value. It reflects the visual *weight* of a card at a given information density. At high density (compact spacing), a smaller radius matches the proportions. At low density, a larger radius fits the more spacious layout. If you need independent control, apply padding to a `Box` inside the Card and use `density="compact"` on the Card itself. Choose based on the visual weight of the surrounding layout:
+
+
+| **Value** | **Padding** | **Radius** | **Pixels** | **Use for** |
+| --- | --- | --- | --- | --- |
+| `'compact'` | space-3 | radius-2 | 12px padding, 3px radius | High-density lists, compact items, table rows |
+| `'regular' `**(default)** | space-4 | radius-3 | 20px padding, 7px radius | Standard content cards — the default |
+| `'loose'` | space-5 | radius-4 | 32px padding, 11px radius | Low-density layouts, featured cards, hero content |
+
+
+`density` accepts a responsive array: `density={['compact', null, 'regular']}` uses `compact` at the smallest breakpoint and `regular` at the third.
+
+
+## Accessibility
+
+- Use `as` to choose the correct HTML element:
+  - `as="article"` — self-contained content (no accessible name required)
+  - `as="section"` — requires a heading child or `aria-label` to register as a landmark (WCAG 1.3.1 A)
+  - `as="aside"` — supplementary content; add `aria-label` when the role is not clear from context
+- Card has no keyboard activation, focus management, or ARIA role. Do not use `as="button"` — use the Button component for interactive actions.
+- Heading levels inside a Card must follow the page hierarchy — do not skip levels (WCAG 1.3.1 A).
+
+## Content guidelines
+
+- Limit card content to a single topic.
+- Heading levels inside a card must respect the overall page outline.
+- Content should be logically related. Split different topics into separate cards.
+
+
+## Migrating from Sanity UI 3
+
+Card in the new system is a focused visual surface. It no longer extends Box.
+
+
+### Key differences
+
+- UI 4 components use CSS classes with a static stylesheet as opposed to `styled-components`.
+- Card no longer inherits all Box props (padding, margin, overflow, flex, grid). The new Card accepts only `density`, `tone`, `margin*`, and `as`.
+- `density` replaces `padding` + `radius`. Instead of setting padding and radius separately, choose `'compact'` (12px/3px), `'regular'` (20px/7px), or `'loose'` (32px/11px).
+- Layout props are silently ignored. `flexGrow`, `width`, `overflow`, `position`, and all other layout props do nothing on Card. Wrap Card in a Box or Flex.
+- `tone` values have changed. There is no `'default', 'muted',` or `'transparent'` tone. Use `'neutral'` for the base tone. Available:  `'none'`,  `'neutral'`, `'primary'`, `'positive'`, `'suggest'`, `'caution'`, `'critical'`.
+- No `scheme` prop. Dark mode inversion is no longer done at the Card level.
+- No `border`, `shadow`, `muted`, `pressed`, `selected` props. Card has been changed to be more focused and purpose-built.
+
+
+### Removed props (no longer accepted on Card)
+
+
+| **UI 3 prop** | **UI 4 prop** | **Notes** |
+| --- | --- | --- |
+| `padding` | –– | Removed. Use `density` (couples padding + radius). For custom padding, nest a Box inside Card. |
+| `radius` | –– | Removed. Use `density` (couples padding + radius). |
+| `shadow` | –– | Removed. Use `tone` for surface treatment. |
+| `border` | –– | Removed. Always rendered. Cannot be opted out of. |
+| `scheme` | –– | Removed. Use `tone` instead. |
+
+
+### `density` scale
+
+
+| **Density** | **Padding** | **Radius** |
+| --- | --- | --- |
+| `compact` | 12px | 3px |
+| `regular` | 20px | 7px |
+| `loose` | 32px | 11px |
+
+
+### Detailed list of differences
+
+
+| **UI 3 prop** | **UI 4 prop** | **Notes** |
+| --- | --- | --- |
+| `tone="default"` | `tone="neutral"` | UI 3 used `'default'` as the base tone. The new version uses `'neutral'`. There is no `'default'` tone. |
+| `padding={3}` | `density="compact"` | Card no longer accepts individual `padding` or `radius` props. Use `density` (`'compact'`, `'regular'`, `'loose'`). |
+| `radius={2}` | `density="compact"` | Coupled with padding into `density`. |
+| `shadow={1}` | — | Removed. Card has no `shadow` prop. |
+| `border` | — | Removed as a prop. Card always renders a 1px border via CSS. |
+| `borderTop`, `borderRight`, etc. | — | Removed. Card has no individual border-side props. |
+| `scheme="dark"` | — | Removed. |
+| `muted` | — | Removed. |
+| `pressed` | — | Removed. Card is not interactive. |
+| `selected` | — | Removed. Card is not interactive. |
+| All Box layout props | — | Removed. Card no longer extends Box. Wrap in Box or Flex for layout control. |
+| — | `density` | New. Composite prop for padding + border-radius (`'compact'`, `'regular'`, `'loose'`). |
+| — | `display` | New. `'block'`, `'inline-block'`, `'none'`. |
+
+
+### Breaking changes
+
+- Card no longer extends Box. All layout props (`padding`, `paddingX`, `paddingY`, `overflow`, `flexGrow`, `flexShrink`, `flexBasis`, `width`, `height`, `minWidth`, `maxWidth`, `position`, `inset`, `top`, `right`, `bottom`, `left`) are silently ignored. No TypeScript error. No runtime warning. Wrap Card in a Box or Flex for layout control.
+- `padding` and `radius` props removed. `<Card padding={3}>` and `<Card radius={2}>` do nothing. Use `density` (`'compact'`, `'regular'`, `'loose'`).
+- `tone="default"` no longer exists. Use `tone="neutral"`. Using `"default"` has no effect.
+- `tone="inherit"` removed. Card no longer inherits tone from a parent context.
+- `scheme` prop removed. `<Card scheme="dark">` has no effect.
+- `shadow` prop removed. `<Card shadow={1}>` has no effect.
+- `border` prop removed. `<Card border>` does nothing. Card always renders a 1px border. Border color is controlled by `tone`.
+- `borderTop`, `borderRight`, `borderBottom`, `borderLeft` removed. Individual border-side props are not available.
+- `muted`, `pressed`, `selected` props removed. Card is no longer interactive. These props do nothing.
+- `styled-components` no longer used. Custom styled-components extensions like `styled(Card)` will not work.
+
+### Codemod
+
+A codemod is available to make the changes above less painful. To get started, run the following command with the path (or space delimited list of paths) to the file or directory you want to migrate.
+
+
+`pnpx @sanity-labs/ui-poc-codemod latest:card --paths <paths> --toPackage @sanity-labs/ui-poc`
+
+
+
+If a component instance cannot be migrated, includes ambiguous changes, or generally requires manual validation, the codemod will insert a comment prefixed with “UI-POC-CODEMOD TODO”.
+
+
+For the best results, run the Box codemod first. One caveat, this codemod will *aggressively* transform Card components that don’t match our updated styling (padding and radius combinations plus border) to Box. It may be a good idea to manually double check any UI that follows the Card usage guidelines and should not be converted.
+
+
+## Related components
+
+- **Box**: Structural container without a visual surface
+- **Flex**: Layout container without a visual surface
 
 ---
 
@@ -2840,7 +3059,7 @@ Flex in the new system replaces the `@sanity/ui` Flex. The core layout behavior 
 | `wrap="wrap"` | `flexWrap="wrap"` | Renamed from `wrap` to `flexWrap`. |
 | `flex={1}` | `flexGrow={1}` | UI 3 used a `flex` shorthand on Box. Split into `flexGrow`, `flexShrink`, `flexBasis`. |
 | — | `rowGap`, `columnGap` | New. Separate row and column gap control. |
-| — | `tone`, `toneLevel` | New. Semantic background tint. |
+| — | `tone` | New. Semantic background tint. |
 | — | `width`, `minWidth`, `maxWidth` | New. Accept any CSS string. |
 | — | `position`, `zIndex` | New. |
 | — | `border`, `radius` | New. |
@@ -3021,7 +3240,7 @@ Grid in the new system replaces the `@sanity/ui` Grid. The core grid layout beha
 | `autoFlow="column"` | `gridAutoFlow="column"` | Renamed from `autoFlow` to `gridAutoFlow`. |
 | `gapX={2}` | `columnGap={2}` | Renamed from `gapX` to `columnGap`. |
 | `gapY={4}` | `rowGap={4}` | Renamed from `gapY` to `rowGap`. |
-| — | `tone`, `toneLevel` | New. Semantic background tint. |
+| — | `tone` | New. Semantic background tint. |
 | — | `width`, `minWidth`, `maxWidth` | New. Accept any CSS string. |
 | — | `position`, `zIndex` | New. |
 | — | `border`, `radius` | New. |
@@ -3726,224 +3945,6 @@ The new Icon component also allows for direct manipulation of sizing and toning:
 
 There are no breaking changes from UI 3 — Icon is new in UI 4. Migrate to Icon at your own pace.
 
-
----
-
-<!-- Tab: Card -->
-
-
----
-
-
-# Card
-
-Groups related content into a single visual element.
-
-
-[React component](https://github.com/sanity-labs/ui-poc/tree/main/packages/ui/src/components/card) **·** [Figma component](https://www.figma.com/design/5mhVqXlldJEEB2VWZeKQ4i/Sanity-UI?node-id=30993-2035&t=Wt4zdsG8xcytqeQO-11)
-
-
-## Basic example
-
-`import { Card } from '@sanity-labs/ui-poc'`
-
-
-`<Card density="regular">`
-
-`  This is a card.`
-
-`</Card>`
-
-**Note:** Card requires `@sanity-labs/ui-poc/styles.css` to be imported once at your app's entry point. Without it, this component renders unstyled. See Getting Started for more info.
-
-
-## API documentation
-
-
-| **Prop** | **Description** | **Type** | **Values** | **Default** | **Required** |
-| --- | --- | --- | --- | --- | --- |
-| `as` | HTML element or component to render | `React.ElementType` | Any valid HTML tag or component (e.g. `'article'`, `'section'`) | `'div'` | No |
-| `density` | Composite prop that sets padding and border-radius together | `Responsive<Density>` | `'compact'`, `'regular'`, `'loose'` | `'regular'` | No |
-
-
-### Shared props
-
-- Margin
-- Tone — applies a semantic background and border color.
-
-## Usage guidelines
-
-
-### When to use
-
-- Group related content on a distinct background surface
-- Create visual separation between content regions
-- Wrap content that needs consistent internal padding and rounded corners
-
-### When not to use
-
-- Layout without a distinct visual surface → use Box or Flex
-- Structural UI regions (sidebars, toolbars, scroll containers) → use Box or Flex
-- Clickable/tappable areas → use Button for full keyboard accessibility
-
-## Best practices
-
-
-### Do
-
-- Use `density` to match the surrounding layout. `compact` for dense lists, `regular` for standard cards, `loose` for featured content.
-- Use `tone` to reinforce the semantic meaning/purpose of the Card. For example, a Card representing an error or error output should be set to `critical`.
-- Wrap Card in a `Box` or `Flex` to control layout sizing — Card handles appearance, the wrapper handles position.
-
-
-### Don't
-
-- Don't use Card for structural UI regions (toolbars, sidebars, nav headers) — use Box.
-- Don't nest cards. Use Box/Flex/Stack for internal layout within a card.
-- Don't add `onClick` to Card. Use Button for interactive actions.
-- Don't use inline `style` for padding or border-radius — use `density` instead.
-
-## Variants
-
-
-### Tone
-
-`tone `provides the ability to assign a semantic color to Card. This should be used to reinforce the meaning/purpose of text in important situations, such as error messages or information tips.
-
-
-| **Tone** | **Use for** |
-| --- | --- |
-| `'none' `**Default** | No semantic meaning and minor visual emphasis |
-| `'neutral'` | No semantic meaning, but increased emphasis |
-| `'primary'` | Informational or educational |
-| `'suggest'` | Suggestions or recommendations |
-| `'positive'` | Success, published, healthy |
-| `'caution'` | Needs attention, in review |
-| `'critical'` | Error, failed, rejected |
-
-
-### Density
-
-`density` sets both padding and border-radius as a single value. It reflects the visual *weight* of a card at a given information density. At high density (compact spacing), a smaller radius matches the proportions. At low density, a larger radius fits the more spacious layout. If you need independent control, apply padding to a `Box` inside the Card and use `density="compact"` on the Card itself. Choose based on the visual weight of the surrounding layout:
-
-
-| **Value** | **Padding** | **Radius** | **Pixels** | **Use for** |
-| --- | --- | --- | --- | --- |
-| `'compact'` | space-3 | radius-2 | 12px padding, 3px radius | High-density lists, compact items, table rows |
-| `'regular' `**(default)** | space-4 | radius-3 | 20px padding, 7px radius | Standard content cards — the default |
-| `'loose'` | space-5 | radius-4 | 32px padding, 11px radius | Low-density layouts, featured cards, hero content |
-
-
-`density` accepts a responsive array: `density={['compact', null, 'regular']}` uses `compact` at the smallest breakpoint and `regular` at the third.
-
-
-## Accessibility
-
-- Use `as` to choose the correct HTML element:
-  - `as="article"` — self-contained content (no accessible name required)
-  - `as="section"` — requires a heading child or `aria-label` to register as a landmark (WCAG 1.3.1 A)
-  - `as="aside"` — supplementary content; add `aria-label` when the role is not clear from context
-- Card has no keyboard activation, focus management, or ARIA role. Do not use `as="button"` — use the Button component for interactive actions.
-- Heading levels inside a Card must follow the page hierarchy — do not skip levels (WCAG 1.3.1 A).
-
-## Content guidelines
-
-- Limit card content to a single topic.
-- Heading levels inside a card must respect the overall page outline.
-- Content should be logically related. Split different topics into separate cards.
-
-
-## Migrating from Sanity UI 3
-
-Card in the new system is a focused visual surface. It no longer extends Box.
-
-
-### Key differences
-
-- UI 4 components use CSS classes with a static stylesheet as opposed to `styled-components`.
-- Card no longer inherits all Box props (padding, margin, overflow, flex, grid). The new Card accepts only `density`, `tone`, `margin*`, and `as`.
-- `density` replaces `padding` + `radius`. Instead of setting padding and radius separately, choose `'compact'` (12px/3px), `'regular'` (20px/7px), or `'loose'` (32px/11px).
-- Layout props are silently ignored. `flexGrow`, `width`, `overflow`, `position`, and all other layout props do nothing on Card. Wrap Card in a Box or Flex.
-- `tone` values have changed. There is no `'default', 'muted',` or `'transparent'` tone. Use `'neutral'` for the base tone. Available:  `'none'`,  `'neutral'`, `'primary'`, `'positive'`, `'suggest'`, `'caution'`, `'critical'`.
-- No `scheme` prop. Dark mode inversion is no longer done at the Card level.
-- No `border`, `shadow`, `muted`, `pressed`, `selected` props. Card has been changed to be more focused and purpose-built.
-
-
-### Removed props (no longer accepted on Card)
-
-
-| **UI 3 prop** | **UI 4 prop** | **Notes** |
-| --- | --- | --- |
-| `padding` | –– | Removed. Use `density` (couples padding + radius). For custom padding, nest a Box inside Card. |
-| `radius` | –– | Removed. Use `density` (couples padding + radius). |
-| `shadow` | –– | Removed. Use `tone` for surface treatment. |
-| `border` | –– | Removed. Always rendered. Cannot be opted out of. |
-| `scheme` | –– | Removed. Use `tone` instead. |
-
-
-### `density` scale
-
-
-| **Density** | **Padding** | **Radius** |
-| --- | --- | --- |
-| `compact` | 12px | 3px |
-| `regular` | 20px | 7px |
-| `loose` | 32px | 11px |
-
-
-### Detailed list of differences
-
-
-| **UI 3 prop** | **UI 4 prop** | **Notes** |
-| --- | --- | --- |
-| `tone="default"` | `tone="neutral"` | UI 3 used `'default'` as the base tone. The new version uses `'neutral'`. There is no `'default'` tone. |
-| `padding={3}` | `density="compact"` | Card no longer accepts individual `padding` or `radius` props. Use `density` (`'compact'`, `'regular'`, `'loose'`). |
-| `radius={2}` | `density="compact"` | Coupled with padding into `density`. |
-| `shadow={1}` | — | Removed. Card has no `shadow` prop. |
-| `border` | — | Removed as a prop. Card always renders a 1px border via CSS. Border visibility is controlled by `toneLevel`. |
-| `borderTop`, `borderRight`, etc. | — | Removed. Card has no individual border-side props. |
-| `scheme="dark"` | `toneLevel="strong"` | UI 3 used `scheme` for dark sections. Use `tone` + `toneLevel="strong"` for emphasized surfaces. |
-| `muted` | — | Removed. |
-| `pressed` | — | Removed. Card is not interactive. |
-| `selected` | — | Removed. Card is not interactive. |
-| All Box layout props | — | Removed. Card no longer extends Box. Wrap in Box or Flex for layout control. |
-| — | `density` | New. Composite prop for padding + border-radius (`'compact'`, `'regular'`, `'loose'`). |
-| — | `toneLevel` | New. Controls tone intensity: `'muted'` (border only), `'normal'` (background fill), `'strong'` (high-contrast fill). |
-| — | `display` | New. `'block'`, `'inline-block'`, `'none'`. |
-
-
-### Breaking changes
-
-- Card no longer extends Box. All layout props (`padding`, `paddingX`, `paddingY`, `overflow`, `flexGrow`, `flexShrink`, `flexBasis`, `width`, `height`, `minWidth`, `maxWidth`, `position`, `inset`, `top`, `right`, `bottom`, `left`) are silently ignored. No TypeScript error. No runtime warning. Wrap Card in a Box or Flex for layout control.
-- `padding` and `radius` props removed. `<Card padding={3}>` and `<Card radius={2}>` do nothing. Use `density` (`'compact'`, `'regular'`, `'loose'`).
-- `tone="default"` no longer exists. Use `tone="neutral"`. Using `"default"` has no effect.
-- `tone="inherit"` removed. Card no longer inherits tone from a parent context.
-- `scheme` prop removed. `<Card scheme="dark">` has no effect.
-- `shadow` prop removed. `<Card shadow={1}>` has no effect.
-- `border` prop removed. `<Card border>` does nothing. Card always renders a 1px border. Border color is controlled by `tone`.
-- `borderTop`, `borderRight`, `borderBottom`, `borderLeft` removed. Individual border-side props are not available.
-- `muted`, `pressed`, `selected` props removed. Card is no longer interactive. These props do nothing.
-- `styled-components` no longer used. Custom styled-components extensions like `styled(Card)` will not work.
-
-### Codemod
-
-A codemod is available to make the changes above less painful. To get started, run the following command with the path (or space delimited list of paths) to the file or directory you want to migrate.
-
-
-`pnpx @sanity-labs/ui-poc-codemod latest:card --paths <paths> --toPackage @sanity-labs/ui-poc`
-
-
-
-If a component instance cannot be migrated, includes ambiguous changes, or generally requires manual validation, the codemod will insert a comment prefixed with “UI-POC-CODEMOD TODO”.
-
-
-For the best results, run the Box codemod first. One caveat, this codemod will *aggressively* transform Card components that don’t match our updated styling (padding and radius combinations plus border) to Box. It may be a good idea to manually double check any UI that follows the Card usage guidelines and should not be converted.
-
-
-## Related components
-
-- **Box**: Structural container without a visual surface
-- **Flex**: Layout container without a visual surface
 
 ---
 
@@ -6042,7 +6043,7 @@ These ratios hold across all semantic tones. Positive, caution, and critical for
 ---
 
 
-# Spacing
+# `Spacing
 
 The spacing scale controls padding, margin, and gap across all Sanity UI components. Every spacing prop maps to the same scale of 10 values.
 
@@ -6560,46 +6561,7 @@ Card's `selected` prop sets `data-selected` for styling. It does NOT set `aria-s
 
 ## 5. Reduced motion
 
-
-### Add the global override to every project
-
-Sanity UI Button, MenuButton, and other interactive parts apply `transition-duration: 0.1s` for hover states through styled-components. These transitions do not respect `prefers-reduced-motion` at the library level. You must add a global CSS override. **This is required — not optional.**
-
-
-Create `src/reduced-motion.css`:
-
-
-`@media (prefers-reduced-motion: reduce) {`
-
-`  *, *::before, *::after {`
-
-`    animation-duration: ``0``.``01ms ``!important;`
-
-`    animation-iteration-count: ``1 ``!important;`
-
-`    transition-duration: ``0``.``01ms ``!important;`
-
-`    scroll-behavior: auto !important;`
-
-`  }`
-
-`}`
-
-
-
-Import it in your entry file:
-
-
-`// main.tsx`
-
-`import './reduced-motion.css'`
-
-
-
-The `0.01ms` value triggers transition-end events that some components rely on, but it is fast enough to count as instant. Automated tests treat any duration under 1ms as passing.
-
-
-Without this file, every Button on the page will fail the motion accessibility test.
+Sanity UI 4 ships with support for `prefers-reduced-motion`. There’s no need to add any CSS to handle this user preference.
 
 
 ---
@@ -8281,7 +8243,7 @@ Wrap Card in a Box or Flex for layout control. Card handles appearance (`density
 
 
 
-Card accepts only these props: `as`, `display`, `density`, `tone`, `toneLevel`, `margin*`, `className`, `style`.
+Card accepts only these props: `as`, `display`, `density`, `tone`, `margin*`, `className`, `style`.
 
 
 ### Card silent-prop reference
@@ -8412,7 +8374,7 @@ Set `as="span"` only when Text sits inline inside a Flex row. Use `as="p"` (or o
 
 ## 6. Card `density` couples padding and radius — no escape hatch
 
-Raised in 8/10 iterations. Agents try to set padding or radius on Card independently. Card uses `density` as a composite prop:
+Agents try to set padding or radius on Card independently. Card uses `density` as a composite prop:
 
 
 | **Density** | **Padding** | **Radius** |
@@ -8420,6 +8382,63 @@ Raised in 8/10 iterations. Agents try to set padding or radius on Card independe
 | `compact` | 12px | 3px |
 | `regular` | 20px | 7px |
 | `loose` | 32px | 11px |
+
+
+### Why density couples padding and radius
+
+`density` reflects the visual *weight* of a card at a given information density. At high density (compact spacing), a smaller radius matches the proportions. At low density, a larger radius fits the more spacious layout. Decoupling them often produces visual imbalance. If you need independent control, apply padding to a `Box` inside the Card and use `density="compact"` on the Card itself.
+
+
+### Density visual reference
+
+Use this table to picture each density value before reaching for it. Pixel sizes come from the spacing and radius scales. The "ratio" column is the padding-to-radius relationship that gives each density its character.
+
+
+| **Density** | **Padding × radius** | **Padding-to-radius ratio** | **Corner appearance** | **Content density** | **Best for** |
+| --- | --- | --- | --- | --- | --- |
+| `'compact'` | 12px × 3px | 4 : 1 | Subtle, near-square — feels mechanical | High | Table rows, list items, dense panels, sidebar list items |
+| `'regular'` | 20px × 7px | ~3 : 1 | Soft, recognizably rounded — feels content-y | Medium (default) | Document cards in a feed, settings cards, dashboard panels |
+| `'loose'` | 32px × 11px | ~3 : 1 | Generous, pill-adjacent — feels editorial | Low | Marketing tiles, hero cards, empty-state cards, featured content |
+
+
+#### Side-by-side dimension reference:
+
+
+| **Visual element** | `'compact'` | `'regular'` | `'loose'` |
+| --- | --- | --- | --- |
+| Padding (all sides) | 12px | 20px | 32px |
+| Border radius | 3px | 7px | 11px |
+| Min target Card width (1 line of body text) | ~80px | ~110px | ~150px |
+| Stack rhythm — natural `gap` between Cards | `gap={2}` (8px) | `gap={3}` (12px) | `gap={4}` (20px) |
+| Feels right next to Text size | `size={1}` (13px) | `size={2}` (16px) | `size={2}` or `size={3}` |
+
+
+#### Pairing guide:
+
+
+- `compact` pairs with `<Text size={1}>` and short content. A `compact` Card with a body-size-2 Heading looks proportionally off — the padding loses against the text.
+- `regular` is the safe default. Pair with `<Heading size={1}>` + `<Text size={1}>` + a single Badge.
+- `loose` pairs with `<Heading size={2}+>`, longer descriptions, or a Card that holds an image. Avoid `loose` for list rows — the radius reads as decoration, not structure.
+
+
+#### When the density doesn't match the content, use a wrapping Box:
+
+
+`{/* A compact Card with extra inner padding for a dense layout that still needs breathing room */}`
+
+`<Card density="compact">`
+
+`  <Box padding={5}>`
+
+`    {/* content */}`
+
+`  </Box>`
+
+`</Card>`
+
+
+
+The Card keeps its `compact` radius (3px) but the inner Box overrides the padding. This is the documented escape hatch — see "Why density couples padding and radius" below.
 
 
 If you need custom padding on a Card surface, nest a Box inside the Card:
@@ -8671,7 +8690,6 @@ Several accessibility tests fail across every run. Some are universal failures, 
 | `semantic-structure` | 0% | No landmark elements | Use `as="nav"`, `as="main"`, `as="aside"` on Box/Flex |
 | `aria-conventions` | 0% | Missing ARIA on interactive patterns | `aria-label` on icon-only buttons; `aria-expanded` on disclosure triggers |
 | `spacing-and-reflow` | 0% | Content overflows at 320px | `flexWrap="wrap"` on every horizontal Flex with 2+ children |
-| `dark-mode-contrast` | 0% | No dark mode support | `toneLevel="strong"` or implement scheme toggling |
 | `touch-targets` | 10% ⚠ regressed | Icon-only buttons rendered at 32×32 or smaller | See section 13 — this is the worst-performing test in the latest run |
 | `skip-navigation` | 100% ✓ | Now consistently passing | Section 12 guidance is working — keep using it |
 | `nested-interactive` (axe) | 0 violations ✓ | No nested interactive elements observed in the latest run | Section 14 guidance still applies as preventive |
@@ -9069,8 +9087,6 @@ For selectable lists, use:
 `      aria-selected={item.id === selectedId}`
 
 `      tone={item.id === selectedId ? 'primary' : 'neutral'}`
-
-`      toneLevel={item.id === selectedId ? 'muted' : 'normal'}`
 
 `    >`
 

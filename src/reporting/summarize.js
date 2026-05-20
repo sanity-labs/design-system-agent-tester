@@ -288,241 +288,126 @@ export function renderSummary(runs, promptKeys, scannedDir) {
   return md;
 }
 
-function renderInlineStylesSection(perRun, promptKeys, agg) {
-  let md = `### 🎨 Inline Styles\n\n`;
-  const headers = [
-    "Run",
-    ...promptKeys.flatMap((pk) => [`${pk} total`, `${pk} / iter`, `${pk} Box`]),
-  ];
-  const rows = perRun.map((row) => {
-    const cells = [row.name];
-    for (const pk of promptKeys) {
-      const m = row[pk];
-      cells.push(m ? fmtInt(m.inlineTotal) : "—");
-      cells.push(m ? fmt(m.inlineAvg, 1) : "—");
-      cells.push(m ? fmtInt(m.boxInline) : "—");
-    }
-    return cells;
-  });
-
-  const avgRow = ["**avg**"];
-  for (const pk of promptKeys) {
-    avgRow.push(`**${fmtInt(agg[pk]?.inlineTotal)}**`);
-    avgRow.push(`**${fmt(agg[pk]?.inlineAvg, 1)}**`);
-    avgRow.push(`**${fmtInt(agg[pk]?.boxInline)}**`);
-  }
-  rows.push(avgRow);
-
-  return md + mdTable(headers, rows) + "\n";
-}
-
-function renderAccessibilitySection(perRun, promptKeys, agg) {
-  let md = `### ♿ Accessibility (axe violations)\n\n`;
-  const headers = [
-    "Run",
-    ...promptKeys.flatMap((pk) => [`${pk} total`, `${pk} / iter`]),
-  ];
-  const rows = perRun.map((row) => {
-    const cells = [row.name];
-    for (const pk of promptKeys) {
-      const m = row[pk];
-      cells.push(m ? fmtInt(m.axeTotal) : "—");
-      cells.push(m ? fmt(m.axeAvg, 2) : "—");
-    }
-    return cells;
-  });
-
-  const avgRow = ["**avg**"];
-  for (const pk of promptKeys) {
-    avgRow.push(`**${fmtInt(agg[pk]?.axeTotal)}**`);
-    avgRow.push(`**${fmt(agg[pk]?.axeAvg, 2)}**`);
-  }
-  rows.push(avgRow);
-
-  return md + mdTable(headers, rows) + "\n";
-}
-
-function renderPerformanceSection(perRun, promptKeys, agg) {
-  let md = `### ⚡ Performance\n\n`;
-  const headers = [
-    "Run",
-    ...promptKeys.flatMap((pk) => [
-      `${pk} FCP (ms)`,
-      `${pk} TBT (ms)`,
-      `${pk} TTI (ms)`,
-      `${pk} score`,
-      `${pk} React mount (ms)`,
-    ]),
-  ];
-  const rows = perRun.map((row) => {
-    const cells = [row.name];
-    for (const pk of promptKeys) {
-      const m = row[pk];
-      cells.push(m ? fmtInt(m.fcpMs) : "—");
-      cells.push(m ? fmt(m.tbtMs, 1) : "—");
-      cells.push(m ? fmtInt(m.ttiMs) : "—");
-      cells.push(m ? fmtInt(m.performanceScore) : "—");
-      cells.push(m ? fmt(m.reactMountMs, 1) : "—");
-    }
-    return cells;
-  });
-
-  const avgRow = ["**avg**"];
-  for (const pk of promptKeys) {
-    avgRow.push(`**${fmtInt(agg[pk]?.fcpMs)}**`);
-    avgRow.push(`**${fmt(agg[pk]?.tbtMs, 1)}**`);
-    avgRow.push(`**${fmtInt(agg[pk]?.ttiMs)}**`);
-    avgRow.push(`**${fmtInt(agg[pk]?.performanceScore)}**`);
-    avgRow.push(`**${fmt(agg[pk]?.reactMountMs, 1)}**`);
-  }
-  rows.push(avgRow);
-
-  return md + mdTable(headers, rows) + "\n";
-}
-
-function renderLocAndFixesSection(perRun, promptKeys, agg, iters) {
-  let md = `### 📝 Lines of Code & Fixes\n\n`;
-  const headers = [
-    "Run",
-    ...promptKeys.flatMap((pk) => [
-      `${pk} LoC`,
-      `${pk} fixes / iter`,
-      `${pk} clean`,
-    ]),
-  ];
-  const rows = perRun.map((row) => {
-    const cells = [row.name];
-    for (const pk of promptKeys) {
-      const m = row[pk];
-      const tot = m?.totalIterations ?? iters;
-      cells.push(m ? fmtInt(m.loc) : "—");
-      cells.push(m ? fmt(m.fixesAvg, 2) : "—");
-      cells.push(m ? `${m.cleanOnFirstTry}/${tot}` : "—");
-    }
-    return cells;
-  });
-
-  const avgRow = ["**avg**"];
-  for (const pk of promptKeys) {
+/**
+ * Tests are always rows, sub-metrics are always columns. Pulled out as a
+ * single helper because every section follows the identical shape: a
+ * heading, a fixed list of columns, and one row per test sourced from
+ * `agg[label]`.
+ *
+ * `columns` is an array of `[header, render(agg) => string]` tuples.
+ */
+function renderTestRowSection(heading, promptKeys, agg, columns) {
+  const headers = ["Test", ...columns.map(([h]) => h)];
+  const rows = promptKeys.map((pk) => {
     const a = agg[pk];
-    const cleanPct =
-      a && a.cleanOnFirstTry !== null
-        ? ` (${((a.cleanOnFirstTry / iters) * 100).toFixed(0)}%)`
-        : "";
-    avgRow.push(`**${fmtInt(a?.loc)}**`);
-    avgRow.push(`**${fmt(a?.fixesAvg, 2)}**`);
-    avgRow.push(`**${fmt(a?.cleanOnFirstTry, 1)}/${iters}${cleanPct}**`);
-  }
-  rows.push(avgRow);
-
-  return md + mdTable(headers, rows) + "\n";
-}
-
-function renderDomSection(perRun, promptKeys, agg) {
-  let md = `### 🏗️ DOM & Semantic HTML\n\n`;
-  const headers = [
-    "Run",
-    ...promptKeys.flatMap((pk) => [
-      `${pk} DOM avg`,
-      `${pk} semantic ratio`,
-      `${pk} roles`,
-    ]),
-  ];
-  const rows = perRun.map((row) => {
-    const cells = [row.name];
-    for (const pk of promptKeys) {
-      const m = row[pk];
-      cells.push(m ? fmtInt(m.domAvg) : "—");
-      cells.push(
-        m && m.semanticRatio !== null ? `${fmt(m.semanticRatio, 1)}%` : "—",
-      );
-      cells.push(m ? fmtInt(m.roleCount) : "—");
-    }
-    return cells;
+    return [`**${pk}**`, ...columns.map(([, render]) => render(a))];
   });
-  const avgRow = ["**avg**"];
-  for (const pk of promptKeys) {
-    avgRow.push(`**${fmtInt(agg[pk]?.domAvg)}**`);
-    avgRow.push(
-      `**${agg[pk]?.semanticRatio !== null ? fmt(agg[pk]?.semanticRatio, 1) + "%" : "—"}**`,
-    );
-    avgRow.push(`**${fmtInt(agg[pk]?.roleCount)}**`);
-  }
-  rows.push(avgRow);
-  return md + mdTable(headers, rows) + "\n";
+  return `### ${heading}\n\n` + mdTable(headers, rows) + "\n";
 }
 
-function renderLintSection(perRun, promptKeys, agg) {
-  let md = `### 🔍 Lint\n\n`;
-  const headers = [
-    "Run",
-    ...promptKeys.flatMap((pk) => [`${pk} errors`, `${pk} warnings`]),
-  ];
-  const rows = perRun.map((row) => {
-    const cells = [row.name];
-    for (const pk of promptKeys) {
-      const m = row[pk];
-      cells.push(m ? fmtInt(m.lintErrors) : "—");
-      cells.push(m ? fmtInt(m.lintWarnings) : "—");
-    }
-    return cells;
-  });
-  const avgRow = ["**avg**"];
-  for (const pk of promptKeys) {
-    avgRow.push(`**${fmtInt(agg[pk]?.lintErrors)}**`);
-    avgRow.push(`**${fmtInt(agg[pk]?.lintWarnings)}**`);
-  }
-  rows.push(avgRow);
-  return md + mdTable(headers, rows) + "\n";
+function renderInlineStylesSection(_perRun, promptKeys, agg) {
+  return renderTestRowSection("Inline Styles", promptKeys, agg, [
+    ["Total", (a) => fmtInt(a?.inlineTotal)],
+    ["/ iter", (a) => fmt(a?.inlineAvg, 1)],
+    ["Box", (a) => fmtInt(a?.boxInline)],
+  ]);
 }
 
-function renderVisualConsistencySection(perRun, promptKeys, agg) {
-  let md = `### 🖼️ Visual Consistency\n\n`;
-  const headers = ["Run", ...promptKeys.map((pk) => `${pk} avg diff %`)];
-  const rows = perRun.map((row) => {
-    const cells = [row.name];
-    for (const pk of promptKeys) {
-      const m = row[pk];
-      cells.push(
-        m && m.visualDiffAvg !== null ? `${fmt(m.visualDiffAvg, 2)}%` : "—",
-      );
-    }
-    return cells;
-  });
-  const avgRow = ["**avg**"];
-  for (const pk of promptKeys) {
-    avgRow.push(
-      `**${agg[pk]?.visualDiffAvg !== null ? fmt(agg[pk]?.visualDiffAvg, 2) + "%" : "—"}**`,
-    );
-  }
-  rows.push(avgRow);
-  return md + mdTable(headers, rows) + "\n";
+function renderAccessibilitySection(_perRun, promptKeys, agg) {
+  return renderTestRowSection(
+    "Accessibility (axe violations)",
+    promptKeys,
+    agg,
+    [
+      ["Total", (a) => fmtInt(a?.axeTotal)],
+      ["/ iter", (a) => fmt(a?.axeAvg, 2)],
+    ],
+  );
 }
+
+function renderPerformanceSection(_perRun, promptKeys, agg) {
+  return renderTestRowSection("Performance", promptKeys, agg, [
+    ["FCP (ms)", (a) => fmtInt(a?.fcpMs)],
+    ["TBT (ms)", (a) => fmt(a?.tbtMs, 1)],
+    ["TTI (ms)", (a) => fmtInt(a?.ttiMs)],
+    ["Lighthouse score", (a) => fmtInt(a?.performanceScore)],
+    ["React mount (ms)", (a) => fmt(a?.reactMountMs, 1)],
+  ]);
+}
+
+function renderLocAndFixesSection(_perRun, promptKeys, agg, iters) {
+  const cleanCell = (a) => {
+    if (!a || a.cleanOnFirstTry === null) return "—";
+    const pct = ((a.cleanOnFirstTry / iters) * 100).toFixed(0);
+    return `${fmt(a.cleanOnFirstTry, 1)} / ${iters} (${pct}%)`;
+  };
+  return renderTestRowSection("Lines of Code & Fixes", promptKeys, agg, [
+    ["LoC", (a) => fmtInt(a?.loc)],
+    ["Fixes / iter", (a) => fmt(a?.fixesAvg, 2)],
+    ["Clean on 1st try", cleanCell],
+  ]);
+}
+
+function renderDomSection(_perRun, promptKeys, agg) {
+  return renderTestRowSection("DOM & Semantic HTML", promptKeys, agg, [
+    ["DOM avg", (a) => fmtInt(a?.domAvg)],
+    [
+      "Semantic ratio",
+      (a) =>
+        a?.semanticRatio !== null && a?.semanticRatio !== undefined
+          ? `${fmt(a.semanticRatio, 1)}%`
+          : "—",
+    ],
+    ["Roles", (a) => fmtInt(a?.roleCount)],
+  ]);
+}
+
+function renderLintSection(_perRun, promptKeys, agg) {
+  return renderTestRowSection("Lint", promptKeys, agg, [
+    ["Errors", (a) => fmtInt(a?.lintErrors)],
+    ["Warnings", (a) => fmtInt(a?.lintWarnings)],
+  ]);
+}
+
+function renderVisualConsistencySection(_perRun, promptKeys, agg) {
+  return renderTestRowSection("Visual Consistency", promptKeys, agg, [
+    [
+      "Avg diff %",
+      (a) =>
+        a?.visualDiffAvg !== null && a?.visualDiffAvg !== undefined
+          ? `${fmt(a.visualDiffAvg, 2)}%`
+          : "—",
+    ],
+  ]);
+}
+
+const VARIANCE_COLUMNS = [
+  ["Inline styles total", "inlineTotal"],
+  ["Box inline styles", "boxInline"],
+  ["Axe violations total", "axeTotal"],
+  ["FCP (ms)", "fcpMs"],
+  ["TBT (ms)", "tbtMs"],
+  ["TTI (ms)", "ttiMs"],
+  ["Lighthouse score", "performanceScore"],
+  ["React mount (ms)", "reactMountMs"],
+  ["Lines of code", "loc"],
+  ["DOM elements", "domAvg"],
+  ["Semantic ratio", "semanticRatio"],
+  ["Lint errors", "lintErrors"],
+  ["Component / iter", "componentAvg"],
+  ["Visual diff %", "visualDiffAvg"],
+];
 
 function renderVarianceSection(promptKeys, agg) {
-  let md = `### 📊 Metric Variance (std dev across runs)\n\n`;
-  const headers = ["Metric", ...promptKeys.map((pk) => `**${pk}**`)];
-  const VARIANCE_ROWS = [
-    ["Inline styles total", "inlineTotal"],
-    ["Box inline styles", "boxInline"],
-    ["Axe violations total", "axeTotal"],
-    ["FCP (ms)", "fcpMs"],
-    ["TBT (ms)", "tbtMs"],
-    ["TTI (ms)", "ttiMs"],
-    ["Lighthouse score", "performanceScore"],
-    ["React mount (ms)", "reactMountMs"],
-    ["Lines of code", "loc"],
-    ["DOM elements", "domAvg"],
-    ["Semantic ratio", "semanticRatio"],
-    ["Lint errors", "lintErrors"],
-    ["Component / iter", "componentAvg"],
-    ["Visual diff %", "visualDiffAvg"],
-  ];
-  const rows = VARIANCE_ROWS.map(([label, key]) => {
-    const vals = promptKeys.map((pk) => fmt(agg[pk]?.[`${key}_sd`], 1));
-    return [label, ...vals];
-  });
-  return md + mdTable(headers, rows) + "\n";
+  return renderTestRowSection(
+    "Metric Variance (std dev across runs)",
+    promptKeys,
+    agg,
+    VARIANCE_COLUMNS.map(([h, key]) => [
+      h,
+      (a) => fmt(a?.[`${key}_sd`], 1),
+    ]),
+  );
 }
 
 // ─── Entry point ────────────────────────────────────────────────────
