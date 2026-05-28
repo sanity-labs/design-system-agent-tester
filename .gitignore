@@ -3,3 +3,11 @@ output/
 .DS_Store
 dist
 .env
+claude.md
+.claude
+
+agent-tester.config.js
+prompts
+TODO.md
+tests
+coverage
