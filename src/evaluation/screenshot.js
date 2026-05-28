@@ -9,9 +9,19 @@
  * for backward compatibility with the visual-diff pipeline. The other
  * seven are saved as `screenshot-{breakpoint}-{scheme}.png`.
  *
+ * Per-shot outcomes are logged to `_screenshot.txt` in the iteration
+ * directory — mirroring `_npm_install.txt` / `_tsc_check.txt` /
+ * `_dev_server.txt` — so when something goes wrong the failure is
+ * still on disk after the run finishes.
+ *
+ * Each shot is wrapped individually: one failed viewport no longer
+ * tanks the remaining seven. The function returns the primary
+ * screenshot's path if it succeeded, otherwise null.
+ *
  * Self-contained: opens its own browser instance.
  */
 
+import { appendFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { launchBrowser, waitForRenderedContent } from "./puppeteer-helpers.js";
 
@@ -37,57 +47,81 @@ export const COLOR_SCHEMES = [
  * @returns {Promise<string|null>} — path to the primary (laptop/light) screenshot, or null on failure
  */
 export async function captureScreenshots(serverUrl, iterDir, iterLabel) {
-  const browser = await launchBrowser();
+  const logPath = resolve(iterDir, "_screenshot.txt");
+  const lines = [
+    `\n--- screenshots [${new Date().toISOString()}] serverUrl=${serverUrl} ---`,
+  ];
+  const log = (msg) => lines.push(msg);
+
+  let browser;
+  let primaryPath = null;
+  const total = SCREENSHOT_BREAKPOINTS.length * COLOR_SCHEMES.length;
+  let okCount = 0;
 
   try {
+    browser = await launchBrowser();
     const page = await browser.newPage();
-    let primaryPath = null;
 
     for (const cs of COLOR_SCHEMES) {
-      await page.emulateMediaFeatures([
-        { name: "prefers-color-scheme", value: cs.scheme },
-      ]);
+      try {
+        await page.emulateMediaFeatures([
+          { name: "prefers-color-scheme", value: cs.scheme },
+        ]);
+      } catch (err) {
+        log(`[scheme=${cs.name}] emulateMediaFeatures failed: ${err.message}`);
+        continue;
+      }
 
       for (const bp of SCREENSHOT_BREAKPOINTS) {
-        await page.setViewport({ width: bp.width, height: bp.height });
-
-        await page.goto(serverUrl, {
-          waitUntil: "networkidle2",
-          timeout: 30_000,
-        });
-
-        await waitForRenderedContent(page, { iterLabel });
-
-        // Extra breathing room for CSS transitions / font loading
-        await new Promise((r) => setTimeout(r, 1000));
-
-        // Primary screenshot: laptop + light (backward-compatible filename)
+        const tag = `${bp.name}-${cs.name}`;
         const isDefault = bp.name === "laptop" && cs.name === "light";
         const filename = isDefault
           ? "screenshot.png"
-          : `screenshot-${bp.name}-${cs.name}.png`;
+          : `screenshot-${tag}.png`;
         const filepath = resolve(iterDir, filename);
-        await page.screenshot({ path: filepath, fullPage: false });
 
-        if (isDefault) {
-          primaryPath = filepath;
+        try {
+          await page.setViewport({ width: bp.width, height: bp.height });
+          await page.goto(serverUrl, {
+            waitUntil: "networkidle2",
+            timeout: 30_000,
+          });
+          await waitForRenderedContent(page, { iterLabel });
+          // Extra breathing room for CSS transitions / font loading.
+          await new Promise((r) => setTimeout(r, 1000));
+          await page.screenshot({ path: filepath, fullPage: false });
+
+          okCount++;
+          log(`[${tag}] OK ${bp.width}x${bp.height} → ${filename}`);
+          if (isDefault) primaryPath = filepath;
+        } catch (err) {
+          // Keep going — one bad viewport shouldn't kill the others.
+          log(`[${tag}] FAILED ${bp.width}x${bp.height}: ${err.message}`);
         }
       }
     }
 
+    log(`Summary: ${okCount}/${total} screenshots saved.`);
     if (iterLabel) {
-      const total = SCREENSHOT_BREAKPOINTS.length * COLOR_SCHEMES.length;
       console.log(
-        `[${iterLabel}] ${total} screenshots saved (${SCREENSHOT_BREAKPOINTS.map((b) => b.name).join(", ")} × ${COLOR_SCHEMES.map((c) => c.name).join(", ")})`,
+        `[${iterLabel}] ${okCount}/${total} screenshots saved (see _screenshot.txt)`,
       );
     }
     return primaryPath;
   } catch (err) {
+    log(`FATAL: ${err.message}`);
     if (iterLabel) {
-      console.warn(`[${iterLabel}] Screenshot capture failed: ${err.message}`);
+      console.warn(
+        `[${iterLabel}] Screenshot capture failed: ${err.message} (see _screenshot.txt)`,
+      );
     }
     return null;
   } finally {
-    await browser.close();
+    if (browser) await browser.close().catch(() => {});
+    try {
+      await appendFile(logPath, lines.join("\n") + "\n", "utf-8");
+    } catch {
+      // If we can't even write the log file, there's nothing more we can do.
+    }
   }
 }

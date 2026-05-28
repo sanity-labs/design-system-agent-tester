@@ -28,9 +28,8 @@ import {
   extractMetrics,
   aggregateMetrics,
   fmt,
-  fmtInt,
   mdTable,
-  renderMetricsTable,
+  renderMetricsTables,
 } from "./aggregate.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -265,120 +264,17 @@ export function renderSummary(runs, promptKeys, scannedDir) {
   md += `**Tests:** ${promptKeys.join(", ")}  \n`;
   md += `**Iterations per run:** ${iters}  \n\n`;
 
-  // ── Aggregate averages (shared renderer) ──────────────────────────
+  // ── Aggregate averages: one themed table per topic ────────────────
   md += `## Aggregate Averages (${runs.length} runs)\n\n`;
-  md += renderMetricsTable(promptKeys, agg);
+  md += renderMetricsTables(promptKeys, agg);
   md += "\n";
 
-  // ── Per-run breakdown sections ────────────────────────────────────
-  md += `## Per-Run Breakdown\n\n`;
-
-  md += renderInlineStylesSection(perRun, promptKeys, agg);
-  md += renderAccessibilitySection(perRun, promptKeys, agg);
-  md += renderPerformanceSection(perRun, promptKeys, agg);
-  md += renderLocAndFixesSection(perRun, promptKeys, agg, iters);
-  md += renderDomSection(perRun, promptKeys, agg);
-  md += renderLintSection(perRun, promptKeys, agg);
-  md += renderVisualConsistencySection(perRun, promptKeys, agg);
-
+  // ── Cross-run variance (only meaningful with multiple runs) ───────
   if (runs.length > 1) {
     md += renderVarianceSection(promptKeys, agg);
   }
 
   return md;
-}
-
-/**
- * Tests are always rows, sub-metrics are always columns. Pulled out as a
- * single helper because every section follows the identical shape: a
- * heading, a fixed list of columns, and one row per test sourced from
- * `agg[label]`.
- *
- * `columns` is an array of `[header, render(agg) => string]` tuples.
- */
-function renderTestRowSection(heading, promptKeys, agg, columns) {
-  const headers = ["Test", ...columns.map(([h]) => h)];
-  const rows = promptKeys.map((pk) => {
-    const a = agg[pk];
-    return [`**${pk}**`, ...columns.map(([, render]) => render(a))];
-  });
-  return `### ${heading}\n\n` + mdTable(headers, rows) + "\n";
-}
-
-function renderInlineStylesSection(_perRun, promptKeys, agg) {
-  return renderTestRowSection("Inline Styles", promptKeys, agg, [
-    ["Total", (a) => fmtInt(a?.inlineTotal)],
-    ["/ iter", (a) => fmt(a?.inlineAvg, 1)],
-    ["Box", (a) => fmtInt(a?.boxInline)],
-  ]);
-}
-
-function renderAccessibilitySection(_perRun, promptKeys, agg) {
-  return renderTestRowSection(
-    "Accessibility (axe violations)",
-    promptKeys,
-    agg,
-    [
-      ["Total", (a) => fmtInt(a?.axeTotal)],
-      ["/ iter", (a) => fmt(a?.axeAvg, 2)],
-    ],
-  );
-}
-
-function renderPerformanceSection(_perRun, promptKeys, agg) {
-  return renderTestRowSection("Performance", promptKeys, agg, [
-    ["FCP (ms)", (a) => fmtInt(a?.fcpMs)],
-    ["TBT (ms)", (a) => fmt(a?.tbtMs, 1)],
-    ["TTI (ms)", (a) => fmtInt(a?.ttiMs)],
-    ["Lighthouse score", (a) => fmtInt(a?.performanceScore)],
-    ["React mount (ms)", (a) => fmt(a?.reactMountMs, 1)],
-  ]);
-}
-
-function renderLocAndFixesSection(_perRun, promptKeys, agg, iters) {
-  const cleanCell = (a) => {
-    if (!a || a.cleanOnFirstTry === null) return "—";
-    const pct = ((a.cleanOnFirstTry / iters) * 100).toFixed(0);
-    return `${fmt(a.cleanOnFirstTry, 1)} / ${iters} (${pct}%)`;
-  };
-  return renderTestRowSection("Lines of Code & Fixes", promptKeys, agg, [
-    ["LoC", (a) => fmtInt(a?.loc)],
-    ["Fixes / iter", (a) => fmt(a?.fixesAvg, 2)],
-    ["Clean on 1st try", cleanCell],
-  ]);
-}
-
-function renderDomSection(_perRun, promptKeys, agg) {
-  return renderTestRowSection("DOM & Semantic HTML", promptKeys, agg, [
-    ["DOM avg", (a) => fmtInt(a?.domAvg)],
-    [
-      "Semantic ratio",
-      (a) =>
-        a?.semanticRatio !== null && a?.semanticRatio !== undefined
-          ? `${fmt(a.semanticRatio, 1)}%`
-          : "—",
-    ],
-    ["Roles", (a) => fmtInt(a?.roleCount)],
-  ]);
-}
-
-function renderLintSection(_perRun, promptKeys, agg) {
-  return renderTestRowSection("Lint", promptKeys, agg, [
-    ["Errors", (a) => fmtInt(a?.lintErrors)],
-    ["Warnings", (a) => fmtInt(a?.lintWarnings)],
-  ]);
-}
-
-function renderVisualConsistencySection(_perRun, promptKeys, agg) {
-  return renderTestRowSection("Visual Consistency", promptKeys, agg, [
-    [
-      "Avg diff %",
-      (a) =>
-        a?.visualDiffAvg !== null && a?.visualDiffAvg !== undefined
-          ? `${fmt(a.visualDiffAvg, 2)}%`
-          : "—",
-    ],
-  ]);
 }
 
 const VARIANCE_COLUMNS = [
@@ -398,16 +294,20 @@ const VARIANCE_COLUMNS = [
   ["Visual diff %", "visualDiffAvg"],
 ];
 
+/**
+ * Per-test standard deviation across runs. Shown only when multiple
+ * runs are aggregated, since std-dev of a single value is zero.
+ */
 function renderVarianceSection(promptKeys, agg) {
-  return renderTestRowSection(
-    "Metric Variance (std dev across runs)",
-    promptKeys,
-    agg,
-    VARIANCE_COLUMNS.map(([h, key]) => [
-      h,
-      (a) => fmt(a?.[`${key}_sd`], 1),
-    ]),
-  );
+  const headers = ["Test", ...VARIANCE_COLUMNS.map(([h]) => h)];
+  const rows = promptKeys.map((pk) => {
+    const a = agg[pk];
+    return [
+      `**${pk}**`,
+      ...VARIANCE_COLUMNS.map(([, key]) => fmt(a?.[`${key}_sd`], 1)),
+    ];
+  });
+  return `## Metric Variance (std dev across runs)\n\n` + mdTable(headers, rows) + "\n";
 }
 
 // ─── Entry point ────────────────────────────────────────────────────

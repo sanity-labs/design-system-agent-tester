@@ -1,7 +1,7 @@
 import { writeFile } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import dsConfig from "../config/load.js";
-import { extractMetrics, renderMetricsTable } from "./aggregate.js";
+import { extractMetrics, renderMetricsTables } from "./aggregate.js";
 import { renderSummary } from "./summarize.js";
 
 /**
@@ -461,7 +461,7 @@ function renderMarkdown(report) {
       labels.map((label) => [label, extractMetrics(report.prompts[label])]),
     );
     md += `## Summary\n\n`;
-    md += renderMetricsTable(labels, aggregatesByLabel);
+    md += renderMetricsTables(labels, aggregatesByLabel);
     md += `\n`;
   }
 

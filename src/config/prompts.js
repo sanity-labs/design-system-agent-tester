@@ -275,22 +275,29 @@ function buildCtx(test, extra = {}) {
 /**
  * Build the system prompt for a test: rendered intro template, then
  * engine-required OUTPUT/FEEDBACK/BASE_RULES blocks appended.
+ *
+ * `docs` is exposed to the template (in addition to the base context) so
+ * a test can pull its docs into the system prompt if useful. The docs
+ * file is read once and cached, so referencing `{{docs}}` here costs
+ * the same as referencing it from the user template.
  */
 export function buildSystemPrompt(label) {
   const test = getTest(label);
   const tpl = loadTemplate(test.prompts.system);
-  const intro = render(tpl, buildCtx(test));
+  const intro = render(tpl, buildCtx(test, { docs: loadDocs(test) }));
   return composeSystem(intro);
 }
 
 /**
  * Build the fix-system prompt: engine preamble + engine base rules,
- * plus any test-specific extra rules from `prompts.fixSystem`.
+ * plus any test-specific extra rules from `prompts.fixSystem`. Like
+ * the system prompt, `docs` is in scope so fix instructions can quote
+ * the docs when explaining what a fix should do.
  */
 export function buildFixSystemPrompt(label) {
   const test = getTest(label);
   const extras = test.prompts.fixSystem
-    ? render(loadTemplate(test.prompts.fixSystem), buildCtx(test))
+    ? render(loadTemplate(test.prompts.fixSystem), buildCtx(test, { docs: loadDocs(test) }))
     : "";
   return composeFix(extras);
 }

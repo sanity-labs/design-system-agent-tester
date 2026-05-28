@@ -8,6 +8,13 @@
  * The "semantic ratio" is `semanticCount / (semanticCount + genericCount)`
  * — a single headline number you can compare across tests.
  *
+ * SVG elements are excluded from *both* counts. `<svg>` and the elements
+ * inside it (`<path>`, `<rect>`, `<g>`, …) belong to a different
+ * namespace and are a visual format, not structural HTML — counting them
+ * as semantic would mislead, and counting them as generic would penalize
+ * tests that use icon-rich UIs (a typical icon component can render 1–10
+ * SVG descendants).
+ *
  * Self-contained: opens its own browser instance.
  */
 
@@ -20,6 +27,8 @@ import { withPage } from "./puppeteer-helpers.js";
  * Exported so it can be referenced from tests if needed; the actual
  * counting runs inside `page.evaluate` and uses a copy of this set
  * (functions / Sets can't cross the browser boundary directly).
+ *
+ * `<svg>` is intentionally omitted — see the file header.
  */
 export const SEMANTIC_TAGS = [
   // Content sectioning
@@ -41,9 +50,9 @@ export const SEMANTIC_TAGS = [
   // Table content
   "caption", "col", "colgroup", "table", "tbody", "td", "tfoot",
   "th", "thead", "tr",
-  // Media & embedded content
+  // Media & embedded content (svg deliberately excluded — see header)
   "audio", "canvas", "embed", "iframe", "img", "object",
-  "picture", "source", "svg", "video",
+  "picture", "source", "video",
 ];
 
 export const GENERIC_TAGS = ["div", "span"];
@@ -84,7 +93,16 @@ export async function analyzeSemanticHtml(serverUrl, iterLabel) {
             let genericCount = 0;
             let roleCount = 0;
 
+            // SVG-namespace elements (the <svg> itself and everything inside
+            // it: <path>, <rect>, <g>, …) are neither semantic HTML nor
+            // structural containers. Skip them on both counts. `role` attrs
+            // on SVG elements are skipped too, since those describe the
+            // graphic, not the page structure.
+            const SVG_NS = "http://www.w3.org/2000/svg";
+
             for (const el of document.querySelectorAll("*")) {
+              if (el.namespaceURI === SVG_NS) continue;
+
               const tag = el.tagName.toLowerCase();
               if (SEMANTIC.has(tag)) {
                 semanticCount++;

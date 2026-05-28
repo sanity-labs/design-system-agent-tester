@@ -167,80 +167,136 @@ export function mdTable(headers, rows) {
   return lines.join("\n") + "\n";
 }
 
-// ─── Headline metrics table ─────────────────────────────────────────
+// ─── Headline metrics tables ────────────────────────────────────────
 
 /**
- * Rows in the headline metrics table, in display order. Each tuple is
- * `[label, metricKey, lowerIsBetter, decimals]`.
+ * Metric groups in display order. Each group becomes one transposed
+ * table: rows are tests, columns are the group's metrics.
+ *
+ * Each row tuple is `[displayLabel, metricKey, lowerIsBetter, decimals]`.
+ * `lowerIsBetter` controls the better/worse direction in the two-test
+ * Δ row; `decimals` of 0 means render as integer.
+ *
+ * Adding a new metric: pick the right group (or add a new one) and
+ * append the tuple. To regroup metrics, just move tuples between
+ * groups — no other code needs to change.
  */
-const METRIC_ROWS = [
-  ["Lines of code (avg)", "loc", false, 0],
-  ["Fix attempts / iter", "fixesAvg", true, 2],
-  ["Total fixes (avg per run)", "fixesTotal", true, 1],
-  ["Inline styles total", "inlineTotal", true, 1],
-  ["Inline styles / iter", "inlineAvg", true, 1],
-  ["Box inline styles", "boxInline", true, 1],
-  ["Axe violations total", "axeTotal", true, 1],
-  ["Axe violations / iter", "axeAvg", true, 2],
-  ["FCP (ms)", "fcpMs", true, 0],
-  ["TBT (ms)", "tbtMs", true, 1],
-  ["TTI (ms)", "ttiMs", true, 0],
-  ["Lighthouse score", "performanceScore", false, 0],
-  ["React mount (ms)", "reactMountMs", true, 1],
-  ["DOM elements (avg)", "domAvg", false, 0],
-  ["Semantic ratio", "semanticRatio", false, 1],
-  ["Semantic elements (avg)", "semanticCount", false, 0],
-  ["Generic elements (avg)", "genericCount", true, 0],
-  ["ARIA roles (avg)", "roleCount", false, 0],
-  ["Lint errors total", "lintErrors", true, 0],
-  ["Lint warnings total", "lintWarnings", true, 0],
-  ["Component instances total", "componentTotal", false, 0],
-  ["Components / iter", "componentAvg", false, 0],
-  ["Visual diff (avg %)", "visualDiffAvg", true, 2],
-  ["Input tokens / iter", "inputTokensAvg", true, 0],
-  ["Output tokens / iter", "outputTokensAvg", true, 0],
-  ["Input tokens total", "inputTokensTotal", true, 0],
-  ["Output tokens total", "outputTokensTotal", true, 0],
+const METRIC_GROUPS = [
+  {
+    heading: "Build",
+    rows: [
+      ["Lines of code (avg)", "loc", false, 0],
+      ["Fix attempts / iter", "fixesAvg", true, 2],
+      ["Total fixes (avg per run)", "fixesTotal", true, 1],
+      // "Clean on 1st try" is computed below from cleanOnFirstTry +
+      // totalIterations; it has bespoke formatting and is appended
+      // automatically into this group when iteration count is known.
+    ],
+  },
+  {
+    heading: "Accessibility",
+    rows: [
+      ["Axe violations total", "axeTotal", true, 1],
+      ["Axe violations / iter", "axeAvg", true, 2],
+    ],
+  },
+  {
+    heading: "Performance",
+    rows: [
+      ["FCP (ms)", "fcpMs", true, 0],
+      ["TBT (ms)", "tbtMs", true, 1],
+      ["TTI (ms)", "ttiMs", true, 0],
+      ["Lighthouse score", "performanceScore", false, 0],
+      ["React mount (ms)", "reactMountMs", true, 1],
+    ],
+  },
+  {
+    heading: "DOM & semantic HTML",
+    rows: [
+      ["DOM elements (avg)", "domAvg", false, 0],
+      ["Semantic ratio", "semanticRatio", false, 1],
+      ["Semantic elements (avg)", "semanticCount", false, 0],
+      ["Generic elements (avg)", "genericCount", true, 0],
+      ["ARIA roles (avg)", "roleCount", false, 0],
+    ],
+  },
+  {
+    heading: "Components",
+    rows: [
+      ["Component instances total", "componentTotal", false, 0],
+      ["Components / iter", "componentAvg", false, 0],
+    ],
+  },
+  {
+    heading: "Inline styles",
+    rows: [
+      ["Inline styles total", "inlineTotal", true, 1],
+      ["Inline styles / iter", "inlineAvg", true, 1],
+      ["Box inline styles", "boxInline", true, 1],
+    ],
+  },
+  {
+    heading: "Visual consistency",
+    rows: [["Visual diff (avg %)", "visualDiffAvg", true, 2]],
+  },
+  {
+    heading: "Lint",
+    rows: [
+      ["Lint errors total", "lintErrors", true, 0],
+      ["Lint warnings total", "lintWarnings", true, 0],
+    ],
+  },
+  {
+    heading: "Token usage",
+    rows: [
+      ["Input tokens / iter", "inputTokensAvg", true, 0],
+      ["Output tokens / iter", "outputTokensAvg", true, 0],
+      ["Input tokens total", "inputTokensTotal", true, 0],
+      ["Output tokens total", "outputTokensTotal", true, 0],
+    ],
+  },
 ];
 
 /**
- * Render the headline metrics table comparing one or more tests.
- *
- * Layout: rows are tests, columns are metrics. This keeps the table
- * scaling linearly with the number of metrics (constant) rather than
- * with the number of tests (grows as you add design systems).
- *
- * When exactly two labels are passed, an extra row at the bottom shows
- * the percentage delta (candidate vs baseline) for each metric.
- *
- * @param {string[]} labels — test labels, in display order
- * @param {Record<string, object>} aggregatesByLabel — `extractMetrics()` or
- *   `aggregateMetrics()` result keyed by label
- * @returns {string} — markdown
+ * Build the column definitions for one metric group. Each column is
+ * `{ label, key, lowerBetter, format? }`. `format(agg)` overrides
+ * default cell rendering when present — used for "Clean on 1st try"
+ * which needs `X / N (P%)` formatting instead of plain numeric.
  */
-export function renderMetricsTable(labels, aggregatesByLabel) {
-  const iters = aggregatesByLabel[labels[0]]?.totalIterations ?? null;
+function buildGroupColumns(group, iters) {
+  const cols = group.rows.map(([label, key, lowerBetter, decimals]) => ({
+    label,
+    key,
+    lowerBetter,
+    decimals,
+  }));
 
-  // Column definitions. METRIC_ROWS gives the standard set; we splice
-  // in a special-formatted "Clean on 1st try" column right after "Total
-  // fixes" if the iteration count is known.
-  const columns = [];
-  for (const [label, key, lowerBetter, decimals] of METRIC_ROWS) {
-    columns.push({ label, key, lowerBetter, decimals });
-    if (key === "fixesTotal" && iters) {
-      columns.push({
-        label: "Clean on 1st try (avg)",
-        key: "cleanOnFirstTry",
-        lowerBetter: false,
-        format: (agg) => {
-          if (!agg || agg.cleanOnFirstTry === null) return "—";
-          const pct = ((agg.cleanOnFirstTry / iters) * 100).toFixed(0);
-          return `${fmt(agg.cleanOnFirstTry, 1)} / ${iters} (${pct}%)`;
-        },
-      });
-    }
+  // Inject the special-formatted "Clean on 1st try" column right after
+  // "Total fixes" when we're rendering the Build group and we know the
+  // iteration count.
+  if (group.heading === "Build" && iters) {
+    const insertAt = cols.findIndex((c) => c.key === "fixesTotal") + 1;
+    cols.splice(insertAt, 0, {
+      label: "Clean on 1st try (avg)",
+      key: "cleanOnFirstTry",
+      lowerBetter: false,
+      format: (agg) => {
+        if (!agg || agg.cleanOnFirstTry === null) return "—";
+        const pct = ((agg.cleanOnFirstTry / iters) * 100).toFixed(0);
+        return `${fmt(agg.cleanOnFirstTry, 1)} / ${iters} (${pct}%)`;
+      },
+    });
   }
 
+  return cols;
+}
+
+/**
+ * Render one themed table: rows are tests, columns are the group's
+ * metrics. When exactly two labels are passed, a Δ row is appended.
+ */
+function renderOneGroup(group, labels, aggregatesByLabel, iters) {
+  const columns = buildGroupColumns(group, iters);
   const headers = ["Test", ...columns.map((c) => c.label)];
 
   const rows = labels.map((l) => {
@@ -257,7 +313,6 @@ export function renderMetricsTable(labels, aggregatesByLabel) {
     return cells;
   });
 
-  // Δ row when comparing exactly two tests.
   if (labels.length === 2) {
     const [baselineLabel, candidateLabel] = labels;
     const baseAgg = aggregatesByLabel[baselineLabel];
@@ -269,5 +324,27 @@ export function renderMetricsTable(labels, aggregatesByLabel) {
     rows.push(cells);
   }
 
-  return mdTable(headers, rows);
+  return `### ${group.heading}\n\n` + mdTable(headers, rows) + "\n";
+}
+
+/**
+ * Render the headline metrics as a series of small, themed tables —
+ * one per topic (Build / Accessibility / Performance / DOM / …). Each
+ * table is `rows = tests, cols = metrics`. This keeps every individual
+ * table narrow enough to read at a glance, regardless of how many
+ * tests or metrics exist.
+ *
+ * When exactly two labels are passed, each table gets a Δ row at the
+ * bottom showing the candidate-vs-baseline percentage per metric.
+ *
+ * @param {string[]} labels — test labels, in display order
+ * @param {Record<string, object>} aggregatesByLabel — `extractMetrics()`
+ *   or `aggregateMetrics()` result keyed by label
+ * @returns {string} — markdown
+ */
+export function renderMetricsTables(labels, aggregatesByLabel) {
+  const iters = aggregatesByLabel[labels[0]]?.totalIterations ?? null;
+  return METRIC_GROUPS.map((g) =>
+    renderOneGroup(g, labels, aggregatesByLabel, iters),
+  ).join("");
 }

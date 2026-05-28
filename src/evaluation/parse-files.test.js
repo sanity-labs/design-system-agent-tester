@@ -147,6 +147,95 @@ describe("parseFiles", () => {
     expect(result).toHaveLength(1);
     expect(result[0].path).toBe("src/Main.jsx");
   });
+
+  // ─── Wrapping-fence stripping ──────────────────────────────────────
+  //
+  // Some agents emit file contents inside a ```lang fence inside the
+  // FILE block. The parser strips a fence that wraps the whole body,
+  // but leaves intentional inner fences (e.g. fenced code examples in
+  // a README) alone.
+
+  it("strips a wrapping ```json fence from package.json", () => {
+    const text = [
+      "---FILE: package.json---",
+      "```json",
+      "{",
+      '  "name": "demo"',
+      "}",
+      "```",
+      "---END FILE---",
+    ].join("\n");
+
+    const result = parseFiles(text);
+    expect(result).toHaveLength(1);
+    expect(result[0].content.trimEnd()).toBe('{\n  "name": "demo"\n}');
+    expect(result[0].content.startsWith("```")).toBe(false);
+  });
+
+  it("strips a wrapping ```tsx fence with surrounding blank lines", () => {
+    const text =
+      "---FILE: src/App.tsx---\n" +
+      "\n" +
+      "```tsx\n" +
+      "export default function App() { return null }\n" +
+      "```\n" +
+      "\n" +
+      "---END FILE---";
+
+    const result = parseFiles(text);
+    expect(result[0].content.trim()).toBe(
+      "export default function App() { return null }",
+    );
+  });
+
+  it("strips an unlabelled wrapping fence", () => {
+    const text = [
+      "---FILE: app.ts---",
+      "```",
+      "console.log('hi')",
+      "```",
+      "---END FILE---",
+    ].join("\n");
+
+    const result = parseFiles(text);
+    expect(result[0].content.trim()).toBe("console.log('hi')");
+  });
+
+  it("preserves inner fences that aren't wrapping the whole body", () => {
+    // First non-empty line is regular markdown, NOT a fence — leave alone.
+    const text = [
+      "---FILE: README.md---",
+      "# Title",
+      "",
+      "Example:",
+      "",
+      "```js",
+      "const x = 1;",
+      "```",
+      "",
+      "Done.",
+      "---END FILE---",
+    ].join("\n");
+
+    const result = parseFiles(text);
+    expect(result[0].content).toContain("# Title");
+    expect(result[0].content).toContain("```js");
+    expect(result[0].content).toContain("```\n\nDone.");
+  });
+
+  it("leaves content untouched when the body opens with a fence but doesn't close with one", () => {
+    // An asymmetric fence isn't a wrapping fence — don't strip.
+    const text = [
+      "---FILE: notes.md---",
+      "```",
+      "this is not closed properly",
+      "more lines",
+      "---END FILE---",
+    ].join("\n");
+
+    const result = parseFiles(text);
+    expect(result[0].content).toContain("```");
+  });
 });
 
 // ---------------------------------------------------------------------------

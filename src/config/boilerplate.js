@@ -20,7 +20,13 @@ export const OUTPUT_FORMAT = `Your task is to produce ALL the files needed for a
 
 ---FILE: path/to/file---
 (file contents here)
----END FILE---`;
+---END FILE---
+
+CRITICAL: Do NOT wrap the file contents inside the FILE block in
+markdown code fences (\`\`\`json, \`\`\`tsx, etc.). The contents
+between FILE markers are written verbatim to disk. A fenced
+\`package.json\` will fail \`npm install\` with EJSONPARSE; a fenced
+\`.tsx\` file will fail to compile. Emit raw file contents only.`;
 
 export const FEEDBACK_FORMAT = `After ALL file blocks, you MUST provide feedback on areas of friction you encountered when using the design system. Output your feedback in this exact format:
 

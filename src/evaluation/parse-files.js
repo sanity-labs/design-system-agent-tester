@@ -1,6 +1,40 @@
 import { extname } from "node:path";
 
 /**
+ * Strip a markdown code fence wrapping the entire file content, if present.
+ *
+ * Some agents emit file contents inside `---FILE: …---` blocks with a
+ * markdown ```lang … ``` fence wrapped around the body. Written verbatim
+ * to disk that produces, e.g., a `package.json` that literally starts
+ * with `` ```json ``, which npm rejects with EJSONPARSE.
+ *
+ * This strips a *full-content* fence — opening on the first non-empty
+ * line and closing on the last non-empty line. Inner code fences (e.g. a
+ * README that intentionally documents fenced examples) are left alone.
+ */
+function stripWrappingFence(content) {
+  const trimmed = content.trimEnd();
+  const lines = trimmed.split("\n");
+
+  // Find first non-empty line. If it's not a fence, leave content alone.
+  let start = 0;
+  while (start < lines.length && lines[start].trim() === "") start++;
+  if (start >= lines.length || !/^```/.test(lines[start].trim())) {
+    return content;
+  }
+
+  // Find last non-empty line. If it's not a closing fence, leave alone.
+  let end = lines.length - 1;
+  while (end > start && lines[end].trim() === "") end--;
+  if (end <= start || lines[end].trim() !== "```") return content;
+
+  // Preserve a trailing newline if the original had one, since many tools
+  // (and our own tests/configs) expect files to end with `\n`.
+  const trailingNl = /\n$/.test(content) ? "\n" : "";
+  return lines.slice(start + 1, end).join("\n") + trailingNl;
+}
+
+/**
  * Parse ---FILE: path--- / ---END FILE--- blocks from the agent output.
  */
 export function parseFiles(text) {
@@ -10,7 +44,7 @@ export function parseFiles(text) {
 
   while ((match = fileRegex.exec(text)) !== null) {
     const filePath = match[1].trim();
-    const content = match[2];
+    const content = stripWrappingFence(match[2]);
     files.push({ path: filePath, content });
   }
 
