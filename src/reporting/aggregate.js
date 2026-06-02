@@ -36,6 +36,7 @@ export function extractMetrics(data) {
     performanceScore: data.lighthouse?.avgPerformanceScore ?? null,
     reactMountMs: data.reactProfile?.avgMountMs ?? null,
     domAvg: data.domElements?.average ?? null,
+    domHtmlBytesAvg: data.domElements?.htmlBytesAverage ?? null,
     semanticRatio: data.semanticHtml?.avgSemanticRatio ?? null,
     semanticCount: data.semanticHtml?.avgSemanticCount ?? null,
     genericCount: data.semanticHtml?.avgGenericCount ?? null,
@@ -68,6 +69,7 @@ const AGGREGATABLE_KEYS = [
   "performanceScore",
   "reactMountMs",
   "domAvg",
+  "domHtmlBytesAvg",
   "semanticRatio",
   "semanticCount",
   "genericCount",
@@ -140,6 +142,18 @@ export function fmtInt(n) {
 }
 
 /**
+ * Format a byte count as a short human-readable string (`12 KB`,
+ * `1.4 MB`). Used for HTML-tree size, which spans roughly 5 KB to
+ * a few hundred KB across the runs we've seen.
+ */
+export function formatBytes(n) {
+  if (n === null || n === undefined || isNaN(n)) return "—";
+  if (n < 1024) return `${Math.round(n)} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+/**
  * Format a delta between two values as `+15% worse` / `-30% better`.
  * Returns '' if either value is missing, or if the baseline is 0
  * (no meaningful percentage).
@@ -173,9 +187,11 @@ export function mdTable(headers, rows) {
  * Metric groups in display order. Each group becomes one transposed
  * table: rows are tests, columns are the group's metrics.
  *
- * Each row tuple is `[displayLabel, metricKey, lowerIsBetter, decimals]`.
+ * Each row tuple is `[displayLabel, metricKey, lowerIsBetter, decimals, format?]`.
  * `lowerIsBetter` controls the better/worse direction in the two-test
- * Δ row; `decimals` of 0 means render as integer.
+ * Δ row; `decimals` of 0 means render as integer. `format`, when
+ * provided, is `(agg) => string` and overrides the default cell
+ * rendering — useful for non-numeric units like byte sizes.
  *
  * Adding a new metric: pick the right group (or add a new one) and
  * append the tuple. To regroup metrics, just move tuples between
@@ -214,6 +230,13 @@ const METRIC_GROUPS = [
     heading: "DOM & semantic HTML",
     rows: [
       ["DOM elements (avg)", "domAvg", false, 0],
+      [
+        "HTML size (avg)",
+        "domHtmlBytesAvg",
+        true,
+        0,
+        (agg) => formatBytes(agg?.domHtmlBytesAvg),
+      ],
       ["Semantic ratio", "semanticRatio", false, 1],
       ["Semantic elements (avg)", "semanticCount", false, 0],
       ["Generic elements (avg)", "genericCount", true, 0],
@@ -264,11 +287,12 @@ const METRIC_GROUPS = [
  * which needs `X / N (P%)` formatting instead of plain numeric.
  */
 function buildGroupColumns(group, iters) {
-  const cols = group.rows.map(([label, key, lowerBetter, decimals]) => ({
+  const cols = group.rows.map(([label, key, lowerBetter, decimals, format]) => ({
     label,
     key,
     lowerBetter,
     decimals,
+    ...(format ? { format } : {}),
   }));
 
   // Inject the special-formatted "Clean on 1st try" column right after
@@ -292,23 +316,55 @@ function buildGroupColumns(group, iters) {
 }
 
 /**
+ * For one metric column, find which label(s) hold the best value.
+ * Returns a Set of label names; multiple labels appear on ties. Empty
+ * when no label has data for this metric, or when there's only one
+ * label to compare (a single-row winner is meaningless).
+ */
+function findWinners(labels, aggregatesByLabel, key, lowerBetter) {
+  if (labels.length < 2) return new Set();
+  const samples = labels
+    .map((l) => ({ label: l, value: aggregatesByLabel[l]?.[key] }))
+    .filter(
+      ({ value }) =>
+        value !== null && value !== undefined && !Number.isNaN(value),
+    );
+  if (samples.length === 0) return new Set();
+  const best = lowerBetter
+    ? Math.min(...samples.map((s) => s.value))
+    : Math.max(...samples.map((s) => s.value));
+  return new Set(
+    samples.filter((s) => s.value === best).map((s) => s.label),
+  );
+}
+
+const WINNER_MARK = " ✓";
+
+/**
  * Render one themed table: rows are tests, columns are the group's
  * metrics. When exactly two labels are passed, a Δ row is appended.
+ * Each cell holding the best value for its column is suffixed with
+ * `✓` so the winner per metric is visible at a glance.
  */
 function renderOneGroup(group, labels, aggregatesByLabel, iters) {
   const columns = buildGroupColumns(group, iters);
   const headers = ["Test", ...columns.map((c) => c.label)];
 
+  const winnersByColumn = columns.map((c) =>
+    findWinners(labels, aggregatesByLabel, c.key, c.lowerBetter),
+  );
+
   const rows = labels.map((l) => {
     const agg = aggregatesByLabel[l];
     const cells = [`**${l}**`];
-    for (const c of columns) {
-      if (c.format) {
-        cells.push(c.format(agg));
-      } else {
-        const v = agg?.[c.key];
-        cells.push(c.decimals === 0 ? fmtInt(v) : fmt(v, c.decimals));
-      }
+    for (let i = 0; i < columns.length; i++) {
+      const c = columns[i];
+      const cell = c.format
+        ? c.format(agg)
+        : c.decimals === 0
+          ? fmtInt(agg?.[c.key])
+          : fmt(agg?.[c.key], c.decimals);
+      cells.push(winnersByColumn[i].has(l) ? cell + WINNER_MARK : cell);
     }
     return cells;
   });

@@ -8,7 +8,7 @@ import {
 import { resolve } from "node:path";
 import { validateProject, killDevServer } from "../evaluation/validate.js";
 import { captureScreenshots } from "../evaluation/screenshot.js";
-import { countDomElements } from "../evaluation/dom-count.js";
+import { measureDom } from "../evaluation/dom-count.js";
 import { analyzeSemanticHtml } from "../evaluation/semantic-html.js";
 import { measureLighthouse } from "../evaluation/lighthouse.js";
 import { measureReactProfile } from "../evaluation/react-profile.js";
@@ -23,7 +23,13 @@ import {
   buildFixPrompt,
   buildResult,
 } from "./shared.js";
+import { AUTOFIX_TOOL, runAutofixTool } from "./eslint-autofix-tool.js";
 import { error, success, tag, warn } from "../util/color.js";
+
+// Max tool-use round-trips inside a single fix attempt before forcing
+// the model to stop and emit files. Lower than MAX_TOOL_TURNS because
+// the fix loop has only one tool and shouldn't need many turns.
+const MAX_FIX_TOOL_TURNS = 5;
 
 // Max tool-use round-trips before we force the model to finish
 const MAX_TOOL_TURNS = 25;
@@ -66,6 +72,108 @@ async function callAnthropicWithRetry(client, params, label = "") {
       throw err;
     }
   }
+}
+
+/**
+ * Multi-turn fix-loop generation with the `run_eslint_autofix` tool
+ * available to the model. The agent can choose to call the tool (the
+ * harness shells out to `eslint/run.js`, returns the linter output plus
+ * the updated file contents) or skip straight to emitting fixed files.
+ *
+ * Returns aggregated text across all turns, token usage, and the count
+ * of autofix invocations the agent made in this fix attempt.
+ *
+ * Side effect: when the agent calls the tool, `files` is mutated in
+ * place to reflect the post-autofix contents on disk.
+ */
+async function generateFixWithAutofixTool({
+  client,
+  model,
+  fixSystemPrompt,
+  fixPrompt,
+  projectDir,
+  files,
+  iterLabel,
+  agentLogPath,
+  fixAttemptNum,
+}) {
+  const messages = [{ role: "user", content: fixPrompt }];
+
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let toolCalls = 0;
+  const textParts = [];
+
+  for (let turn = 1; turn <= MAX_FIX_TOOL_TURNS; turn++) {
+    const response = await callAnthropicWithRetry(
+      client,
+      {
+        model,
+        max_tokens: 32000,
+        system: fixSystemPrompt,
+        tools: [AUTOFIX_TOOL],
+        messages,
+      },
+      iterLabel,
+    );
+
+    inputTokens += response.usage?.input_tokens ?? 0;
+    outputTokens += response.usage?.output_tokens ?? 0;
+
+    for (const block of response.content) {
+      if (block.type === "text" && block.text) {
+        textParts.push(block.text);
+      }
+    }
+
+    const toolUses = response.content.filter((b) => b.type === "tool_use");
+
+    if (response.stop_reason === "end_turn" || toolUses.length === 0) {
+      return { fullText: textParts.join("\n"), inputTokens, outputTokens, toolCalls };
+    }
+
+    messages.push({ role: "assistant", content: response.content });
+
+    const toolResults = [];
+    for (const tu of toolUses) {
+      if (tu.name === "run_eslint_autofix") {
+        toolCalls++;
+        console.log(
+          `${tag(iterLabel)} Fix #${fixAttemptNum} turn ${turn}: agent called run_eslint_autofix`,
+        );
+        const { resultText, linterOutput } = await runAutofixTool({
+          projectDir,
+          files,
+        });
+        await appendFile(
+          agentLogPath,
+          `=== FIX ATTEMPT ${fixAttemptNum} — TOOL CALL: run_eslint_autofix (turn ${turn}) [${new Date().toISOString()}] ===\n` +
+            linterOutput +
+            "\n\n",
+          "utf-8",
+        );
+        toolResults.push({
+          type: "tool_result",
+          tool_use_id: tu.id,
+          content: resultText,
+        });
+      } else {
+        toolResults.push({
+          type: "tool_result",
+          tool_use_id: tu.id,
+          content: `Unknown tool: ${tu.name}`,
+          is_error: true,
+        });
+      }
+    }
+
+    messages.push({ role: "user", content: toolResults });
+  }
+
+  console.warn(
+    `${tag(iterLabel)} ${warn(`Fix #${fixAttemptNum}: hit MAX_FIX_TOOL_TURNS (${MAX_FIX_TOOL_TURNS}) — returning whatever text the agent produced`)}`,
+  );
+  return { fullText: textParts.join("\n"), inputTokens, outputTokens, toolCalls };
 }
 
 /**
@@ -448,10 +556,12 @@ export async function runAgent({
             iterDir,
             iterLabel,
           );
-          const domElementCount = await countDomElements(
+          const domMeasurement = await measureDom(
             validation.serverUrl,
             iterLabel,
           );
+          const domElementCount = domMeasurement?.count ?? null;
+          const domHtmlBytes = domMeasurement?.htmlBytes ?? null;
           const semanticHtml = await analyzeSemanticHtml(
             validation.serverUrl,
             iterLabel,
@@ -525,6 +635,7 @@ export async function runAgent({
             lighthouseResults,
             reactProfile,
             domElementCount,
+            domHtmlBytes,
             semanticHtml,
             runner: "api",
           });
@@ -545,11 +656,13 @@ export async function runAgent({
           `${tag(iterLabel)} ${warn(`✗ Validation failed (fix attempt ${fixAttempts}/${maxFixes}):`)} ${errorSummary.split("\n")[0]}`,
         );
 
-        fixLog.push({
+        const fixLogEntry = {
           attempt: fixAttempts,
           errors: validation.consoleErrors,
           fatalError: validation.fatalError,
-        });
+          autofixToolCalls: 0,
+        };
+        fixLog.push(fixLogEntry);
 
         // Build the fix prompt with current files + errors
         const currentFilesText = await buildCurrentFilesText(projectDir, files);
@@ -570,31 +683,28 @@ export async function runAgent({
           "utf-8",
         );
 
-        // Ask Claude to fix the errors
+        // Ask Claude to fix the errors. The agent can call the
+        // run_eslint_autofix tool to apply known mechanical rewrites
+        // before emitting fixed files. Tool calls mutate `files` in
+        // place so the merge below stays consistent with disk.
         console.log(`[${iterLabel}] Asking Claude to fix errors...`);
-        const fixResponse = await callAnthropicWithRetry(
+        const fixResponse = await generateFixWithAutofixTool({
           client,
-          {
-            model,
-            max_tokens: 32000,
-            system: fixSystemPrompt,
-            messages: [
-              {
-                role: "user",
-                content: fixPrompt,
-              },
-            ],
-          },
+          model,
+          fixSystemPrompt,
+          fixPrompt,
+          projectDir,
+          files,
           iterLabel,
-        );
+          agentLogPath,
+          fixAttemptNum: fixAttempts,
+        });
 
-        totalInputTokens += fixResponse.usage?.input_tokens ?? 0;
-        totalOutputTokens += fixResponse.usage?.output_tokens ?? 0;
+        totalInputTokens += fixResponse.inputTokens;
+        totalOutputTokens += fixResponse.outputTokens;
+        fixLogEntry.autofixToolCalls = fixResponse.toolCalls;
 
-        const fixText = fixResponse.content
-          .filter((block) => block.type === "text")
-          .map((block) => block.text)
-          .join("\n");
+        const fixText = fixResponse.fullText;
 
         // Save the fix response
         await writeFile(
@@ -657,6 +767,7 @@ export async function runAgent({
 
     let screenshotPath = null;
     let lastDomElementCount = null;
+    let lastDomHtmlBytes = null;
     let lastSemanticHtml = null;
     try {
       if (lastValidation.serverUrl) {
@@ -665,10 +776,12 @@ export async function runAgent({
           iterDir,
           iterLabel,
         );
-        lastDomElementCount = await countDomElements(
+        const lastDom = await measureDom(
           lastValidation.serverUrl,
           iterLabel,
         );
+        lastDomElementCount = lastDom?.count ?? null;
+        lastDomHtmlBytes = lastDom?.htmlBytes ?? null;
         lastSemanticHtml = await analyzeSemanticHtml(
           lastValidation.serverUrl,
           iterLabel,
@@ -702,6 +815,7 @@ export async function runAgent({
       lighthouseResults: null,
       reactProfile: null,
       domElementCount: lastDomElementCount,
+      domHtmlBytes: lastDomHtmlBytes,
       semanticHtml: lastSemanticHtml,
       runner: "api",
     });
@@ -724,6 +838,7 @@ export async function runAgent({
     lighthouseResults: null,
     reactProfile: null,
     domElementCount: null,
+    domHtmlBytes: null,
     semanticHtml: null,
     runner: "api",
   });

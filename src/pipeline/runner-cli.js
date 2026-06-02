@@ -6,7 +6,7 @@ import dsConfig from "../config/load.js";
 
 import { validateProject, killDevServer } from "../evaluation/validate.js";
 import { captureScreenshots } from "../evaluation/screenshot.js";
-import { countDomElements } from "../evaluation/dom-count.js";
+import { measureDom } from "../evaluation/dom-count.js";
 import { analyzeSemanticHtml } from "../evaluation/semantic-html.js";
 import { measureLighthouse } from "../evaluation/lighthouse.js";
 import { measureReactProfile } from "../evaluation/react-profile.js";
@@ -297,10 +297,12 @@ export async function runAgent({
             iterDir,
             iterLabel,
           );
-          const domElementCount = await countDomElements(
+          const domMeasurement = await measureDom(
             validation.serverUrl,
             iterLabel,
           );
+          const domElementCount = domMeasurement?.count ?? null;
+          const domHtmlBytes = domMeasurement?.htmlBytes ?? null;
           const semanticHtml = await analyzeSemanticHtml(
             validation.serverUrl,
             iterLabel,
@@ -371,6 +373,7 @@ export async function runAgent({
             lighthouseResults,
             reactProfile,
             domElementCount,
+            domHtmlBytes,
             semanticHtml,
           });
           return result;
@@ -484,6 +487,7 @@ export async function runAgent({
     const lastValidation = await validateProject(projectDir, iterLabel);
     let screenshotPath = null;
     let lastDomElementCount = null;
+    let lastDomHtmlBytes = null;
     let lastSemanticHtml = null;
     try {
       if (lastValidation.serverUrl) {
@@ -492,10 +496,12 @@ export async function runAgent({
           iterDir,
           iterLabel,
         );
-        lastDomElementCount = await countDomElements(
+        const lastDom = await measureDom(
           lastValidation.serverUrl,
           iterLabel,
         );
+        lastDomElementCount = lastDom?.count ?? null;
+        lastDomHtmlBytes = lastDom?.htmlBytes ?? null;
         lastSemanticHtml = await analyzeSemanticHtml(
           lastValidation.serverUrl,
           iterLabel,
@@ -527,6 +533,7 @@ export async function runAgent({
       lighthouseResults: null,
       reactProfile: null,
       domElementCount: lastDomElementCount,
+      domHtmlBytes: lastDomHtmlBytes,
       semanticHtml: lastSemanticHtml,
     });
   }
@@ -546,6 +553,7 @@ export async function runAgent({
     lighthouseResults: null,
     reactProfile: null,
     domElementCount: null,
+    domHtmlBytes: null,
     semanticHtml: null,
   });
 }

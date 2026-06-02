@@ -160,6 +160,7 @@ export async function buildResult({
   lighthouseResults,
   reactProfile,
   domElementCount,
+  domHtmlBytes,
   semanticHtml,
   runner,
 }) {
@@ -211,6 +212,7 @@ export async function buildResult({
     lighthouseResults,
     reactProfile,
     domElementCount: domElementCount || null,
+    domHtmlBytes: domHtmlBytes ?? null,
   };
   await writeFile(
     resolve(iterDir, "_meta.json"),
@@ -238,5 +240,6 @@ export async function buildResult({
     lighthouseResults,
     reactProfile,
     domElementCount: domElementCount || null,
+    domHtmlBytes: domHtmlBytes ?? null,
   };
 }

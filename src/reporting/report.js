@@ -1,7 +1,7 @@
 import { writeFile } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import dsConfig from "../config/load.js";
-import { extractMetrics, renderMetricsTables } from "./aggregate.js";
+import { extractMetrics, renderMetricsTables, formatBytes } from "./aggregate.js";
 import { renderSummary } from "./summarize.js";
 
 /**
@@ -79,23 +79,53 @@ export async function generateReport(allResults, outputDir, promptText = null) {
     // 15. Semantic HTML analysis
     const semanticHtmlAnalysis = analyzeSemanticHtml(validIterations);
 
-    // 14. DOM element counts
-    const domCounts = validIterations
+    // 14. DOM element counts + serialized HTML size
+    const domSamples = validIterations
       .filter((r) => r.domElementCount != null)
-      .map((r) => ({ iteration: r.iteration, count: r.domElementCount }));
+      .map((r) => ({
+        iteration: r.iteration,
+        count: r.domElementCount,
+        htmlBytes: r.domHtmlBytes ?? null,
+      }));
+    const counts = domSamples.map((d) => d.count);
+    const byteSamples = domSamples
+      .map((d) => d.htmlBytes)
+      .filter((b) => b != null);
     const domElementAnalysis = {
-      iterationsWithData: domCounts.length,
+      iterationsWithData: domSamples.length,
       totalIterations: validIterations.length,
-      average: domCounts.length ? round(mean(domCounts.map((d) => d.count))) : null,
-      min: domCounts.length ? Math.min(...domCounts.map((d) => d.count)) : null,
-      max: domCounts.length ? Math.max(...domCounts.map((d) => d.count)) : null,
-      stdDev: domCounts.length ? round(stdDev(domCounts.map((d) => d.count))) : null,
-      perIteration: domCounts,
+      average: counts.length ? round(mean(counts)) : null,
+      min: counts.length ? Math.min(...counts) : null,
+      max: counts.length ? Math.max(...counts) : null,
+      stdDev: counts.length ? round(stdDev(counts)) : null,
+      // Serialized HTML byte size — `document.documentElement.outerHTML`
+      // measured as UTF-8. `null` when no iteration captured a value
+      // (older runs predating this metric leave the field blank).
+      htmlBytesAverage: byteSamples.length ? round(mean(byteSamples)) : null,
+      htmlBytesMin: byteSamples.length ? Math.min(...byteSamples) : null,
+      htmlBytesMax: byteSamples.length ? Math.max(...byteSamples) : null,
+      htmlBytesStdDev: byteSamples.length ? round(stdDev(byteSamples)) : null,
+      perIteration: domSamples,
     };
 
     const avgFixes = mean(fixCounts);
     const stdDevFixes = stdDev(fixCounts);
     const iterationsNeedingFixes = fixCounts.filter((n) => n > 0).length;
+
+    // Autofix tool usage — only populated by the API runner. CLI-runner
+    // iterations leave it undefined; we treat that as "not measured"
+    // rather than zero so the percentages stay honest.
+    const autofixEntries = validIterations.flatMap((r) =>
+      (r.fixLog || []).filter((e) => e.autofixToolCalls != null),
+    );
+    const autofixTotalCalls = autofixEntries.reduce(
+      (s, e) => s + e.autofixToolCalls,
+      0,
+    );
+    const autofixAttemptsCovered = autofixEntries.length;
+    const autofixAttemptsWithCall = autofixEntries.filter(
+      (e) => e.autofixToolCalls > 0,
+    ).length;
 
     report.prompts[promptKey] = {
       model,
@@ -129,12 +159,22 @@ export async function generateReport(allResults, outputDir, promptText = null) {
         iterationsCleanOnFirstTry:
           validIterations.length - iterationsNeedingFixes,
         all: fixCounts,
+        autofixToolUsage: {
+          attemptsMeasured: autofixAttemptsCovered,
+          attemptsWithCall: autofixAttemptsWithCall,
+          totalCalls: autofixTotalCalls,
+          callRate:
+            autofixAttemptsCovered > 0
+              ? round(autofixAttemptsWithCall / autofixAttemptsCovered)
+              : null,
+        },
         perIteration: validIterations.map((r) => ({
           iteration: r.iteration,
           fixAttempts: r.fixAttempts ?? 0,
           errors: (r.fixLog || []).map((entry) => ({
             attempt: entry.attempt,
             fatalError: entry.fatalError,
+            autofixToolCalls: entry.autofixToolCalls ?? null,
           })),
         })),
       },
@@ -527,6 +567,17 @@ function renderMarkdown(report) {
     md += `| Iterations needing fixes | ${f.iterationsNeedingFixes}/${data.successfulIterations} |\n`;
     md += `| All | ${f.all.join(", ")} |\n\n`;
 
+    // Autofix tool usage (API runner only — `attemptsMeasured` is 0 for
+    // CLI runs, in which case we omit the section).
+    const aft = f.autofixToolUsage;
+    if (aft && aft.attemptsMeasured > 0) {
+      const pct = aft.callRate !== null ? round(aft.callRate * 100, 0) : 0;
+      md += `**ESLint autofix tool usage** (API runner):\n\n`;
+      md += `| Metric | Value |\n|--------|-------|\n`;
+      md += `| Fix attempts that invoked autofix | ${aft.attemptsWithCall}/${aft.attemptsMeasured} (${pct}%) |\n`;
+      md += `| Total autofix invocations | ${aft.totalCalls} |\n\n`;
+    }
+
     if (f.perIteration.some((p) => p.fixAttempts > 0)) {
       md += `**Fix details:**\n\n`;
       for (const p of f.perIteration) {
@@ -538,7 +589,11 @@ function renderMarkdown(report) {
             const shortErr = (err.fatalError || "unknown")
               .split("\n")[0]
               .slice(0, 120);
-            md += `  - Fix #${err.attempt}: \`${shortErr}\`\n`;
+            const autofixNote =
+              err.autofixToolCalls != null
+                ? ` _(autofix called: ${err.autofixToolCalls}×)_`
+                : "";
+            md += `  - Fix #${err.attempt}: \`${shortErr}\`${autofixNote}\n`;
           }
         }
       }
@@ -762,17 +817,32 @@ function renderMarkdown(report) {
     if (dom && dom.iterationsWithData > 0) {
       md += `### DOM Elements\n\n`;
       md += `| Metric | Value |\n|--------|-------|\n`;
-      md += `| Average | ${dom.average} |\n`;
-      md += `| Std Dev | ${dom.stdDev} |\n`;
-      md += `| Min | ${dom.min} |\n`;
-      md += `| Max | ${dom.max} |\n`;
+      md += `| Average elements | ${dom.average} |\n`;
+      md += `| Std Dev (elements) | ${dom.stdDev} |\n`;
+      md += `| Min elements | ${dom.min} |\n`;
+      md += `| Max elements | ${dom.max} |\n`;
+      if (dom.htmlBytesAverage != null) {
+        md += `| Avg HTML size | ${formatBytes(dom.htmlBytesAverage)} |\n`;
+        md += `| Std Dev (HTML size) | ${formatBytes(dom.htmlBytesStdDev)} |\n`;
+        md += `| Min HTML size | ${formatBytes(dom.htmlBytesMin)} |\n`;
+        md += `| Max HTML size | ${formatBytes(dom.htmlBytesMax)} |\n`;
+      }
       md += `| Iterations measured | ${dom.iterationsWithData}/${dom.totalIterations} |\n\n`;
 
       if (dom.perIteration.length > 0) {
         md += `**Per iteration:**\n\n`;
-        md += `| Iteration | DOM Elements |\n|-----------|-------------|\n`;
-        for (const d of dom.perIteration) {
-          md += `| ${d.iteration} | ${d.count.toLocaleString()} |\n`;
+        const hasBytes = dom.perIteration.some((d) => d.htmlBytes != null);
+        if (hasBytes) {
+          md += `| Iteration | DOM Elements | HTML size |\n|-----------|--------------|----------|\n`;
+          for (const d of dom.perIteration) {
+            const size = d.htmlBytes != null ? formatBytes(d.htmlBytes) : "—";
+            md += `| ${d.iteration} | ${d.count.toLocaleString()} | ${size} |\n`;
+          }
+        } else {
+          md += `| Iteration | DOM Elements |\n|-----------|-------------|\n`;
+          for (const d of dom.perIteration) {
+            md += `| ${d.iteration} | ${d.count.toLocaleString()} |\n`;
+          }
         }
         md += `\n`;
       }
