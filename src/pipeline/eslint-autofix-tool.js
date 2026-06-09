@@ -12,11 +12,14 @@
  * it open-ended shell access.
  */
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { PROJECT_ROOT } from "../config/load.js";
 import { readProjectFiles, buildCurrentFilesText } from "./shared.js";
 
 const AUTOFIX_RUNNER = resolve(PROJECT_ROOT, "eslint", "run.js");
+
+export const autofixToolAvailable = existsSync(AUTOFIX_RUNNER);
 
 /**
  * Anthropic-SDK tool definition. Pass into `tools` on a `messages.create`

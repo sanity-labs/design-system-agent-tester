@@ -1,9 +1,19 @@
 {
-  "name": "agent-tester",
+  "name": "design-system-agent-tester",
   "version": "1.0.0",
-  "description": "Test harness for running AI agents in parallel to measure output consistency and quality",
+  "description": "Test harness for measuring how well AI agents use a given design system. Runs many agents in parallel against the same brief and aggregates the results.",
   "type": "module",
   "main": "src/index.js",
+  "keywords": [
+    "ai",
+    "agents",
+    "design-system",
+    "testing",
+    "benchmarking",
+    "anthropic",
+    "claude"
+  ],
+  "license": "MIT",
   "scripts": {
     "start": "node --env-file=.env src/index.js",
     "summarize": "node src/reporting/summarize.js",
@@ -24,10 +34,11 @@
     "@typescript-eslint/parser": "^8.60.0",
     "@vitest/coverage-v8": "^4.1.6",
     "eslint": "^10.4.0",
+    "eslint-plugin-unused-imports": "^4.4.1",
     "typescript": "^5.8.3",
     "vitest": "^4.1.6"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.11.0"
   }
 }

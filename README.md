@@ -4,25 +4,37 @@ Test AI agents' ability to use a design system. The harness spins up one or more
 
 ## Setup
 
+This isn't published to npm. Clone, install, and run from the working tree.
+
 ```sh
 npm install
+cp agent-tester.config.example.js agent-tester.config.js   # then edit it
 echo 'ANTHROPIC_API_KEY=sk-ant-...' > .env
 ```
+
+Notes:
+
+- Puppeteer downloads Chromium on first install (~150MB).
+- The `.env` approach above is convenient but not ideal — prefer `direnv` or a shell-level export so the key never ends up on disk in the project directory.
+- Pass `--yes` to skip the 5-second cost-warning delay at startup.
 
 ## Run it
 
 ```sh
 # Run every test, 3 iterations each
-npm start -- --prompt all
+npm start -- --test all
 
 # One test, more iterations
-npm start -- --prompt variant --iterations 10
+npm start -- --test shad-cn --iterations 10
 
 # A few specific tests
-npm start -- --prompt control,variant
+npm start -- --test carbon,spectrum
 
 # Skip MCP
-npm start -- --prompt all --no-mcp
+npm start -- --test all --no-mcp
+
+# Skip the cost-warning delay
+npm start -- --test all --yes
 ```
 
 Output lands in `output/<date>/<time>/`. Open `report.md` to see the comparison.
@@ -31,48 +43,55 @@ Output lands in `output/<date>/<time>/`. Open `report.md` to see the comparison.
 
 | Flag | Default | What it does |
 |---|---|---|
-| `--prompt`, `-p` | `all` | Which test(s) to run. A label, `all`, or a comma list. |
+| `--test`, `-t` | `all` | Which test(s) to run. A label, `all`, or a comma list. |
 | `--iterations`, `-n` | `3` | How many times to run each test. |
-| `--model`, `-m` | `claude-sonnet-4-6` | Claude model ID. |
+| `--model`, `-m` | `claude-sonnet-4-20250514` | Claude model ID. |
 | `--runner`, `-r` | `api` | `api` (SDK) or `cli` (Claude CLI). |
 | `--max-fixes`, `-f` | `5` | Max error→fix cycles per iteration. |
 | `--concurrency`, `-c` | `2` | Max parallel agent calls. |
 | `--no-mcp` | off | Disable MCP for tests that opt in. |
 | `--agent-prompt` | off | Generate a fresh brief from Claude. |
+| `--yes`, `-y` | off | Skip the cost-warning startup delay. |
 
 ### Models
 
-| Model | ID |
-|---|---|
-| Opus 4.7 | `claude-opus-4-7` |
-| Sonnet 4.6 | `claude-sonnet-4-6` |
-| Opus 4.6 | `claude-opus-4-6` |
-| Haiku 4.5 | `claude-haiku-4-5` |
+See [Anthropic's documentation](https://docs.anthropic.com/en/docs/about-claude/models) for current model IDs. Pass via `--model`. The default is `claude-sonnet-4-20250514`.
+
+## Tests
+
+The `tests/` directory ships with four reference examples covering universal design systems:
+
+- `carbon` — IBM Carbon Design System
+- `gestalt` — Pinterest Gestalt
+- `shad-cn` — shadcn/ui
+- `spectrum` — Adobe Spectrum
+
+These are reference examples. Add your own to test the systems you care about.
 
 ## Add a test
 
 ```sh
-npm run new-test -- gestalt
+npm run new-test -- mylib
 ```
 
-That creates `tests/gestalt/` with three stub files:
+That creates `tests/mylib/` with three stub files:
 
 ```
-tests/gestalt/
+tests/mylib/
 ├── config.js     ← packages, prompt paths
 ├── system.md     ← system prompt
 └── user.md       ← user prompt
 ```
 
-Edit them, then run `npm start -- --prompt gestalt`. The directory name is the test's label.
+Edit them, then run `npm start -- --test mylib`. The directory name is the test's label.
 
 ### `config.js`
 
 ```js
 export default {
-  label: "gestalt",
+  label: "mylib",
   packages: {
-    ui: { name: "gestalt", version: "latest" },
+    ui: { name: "mylib", version: "latest" },
   },
   prompts: {
     system: "system.md",
@@ -147,6 +166,6 @@ Rename `tests/foo/` to `tests/foo.disabled/` (or prefix with `_`). The engine sk
 ```sh
 npm run summarize                                   # All runs
 npm run summarize -- --count 5                      # Last 5 runs
-npm run summarize -- --prompt variant               # One test only
+npm run summarize -- --test shad-cn                 # One test only
 npm run summarize -- --from 2026-05-14/14.00 --save # Since a date
 ```

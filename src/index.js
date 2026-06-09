@@ -45,10 +45,14 @@ function sleep(ms) {
 
 const { values } = parseArgs({
   options: {
+    test: {
+      type: "string",
+      short: "t",
+      default: "all",
+    },
     prompt: {
       type: "string",
       short: "p",
-      default: "both",
     },
     iterations: {
       type: "string",
@@ -89,8 +93,20 @@ const { values } = parseArgs({
       type: "boolean",
       default: false,
     },
+
+    yes: {
+      type: "boolean",
+      short: "y",
+      default: false,
+    },
   },
 });
+
+// Resolve --test/--prompt with deprecation warning for --prompt.
+if (values.test === "all" && values.prompt !== undefined) {
+  console.error("Warning: --prompt is deprecated, use --test instead");
+  values.test = values.prompt;
+}
 
 /**
  * Resolve the interface brief used by every variant in the current run.
@@ -126,7 +142,7 @@ function buildTimestampedRunPath() {
 }
 
 async function main() {
-  const promptArg = values.prompt;
+  const testArg = values.test;
   const iterations = parseInt(values.iterations, 10);
   const model = values.model;
   const runnerType = values.runner;
@@ -161,20 +177,20 @@ async function main() {
       : await import("./pipeline/runner-api.js");
 
   // Determine which tests to run.
-  //   --prompt all  (or `both`)    — run every test
-  //   --prompt LABEL                — run one test by label
-  //   --prompt LABEL1,LABEL2        — run a comma-separated subset
+  //   --test all  (or `both`)    — run every test
+  //   --test LABEL                — run one test by label
+  //   --test LABEL1,LABEL2        — run a comma-separated subset
   let testLabels;
-  const promptValue = promptArg.trim();
-  if (promptValue === "all" || promptValue === "both") {
+  const testValue = testArg.trim();
+  if (testValue === "all" || testValue === "both") {
     testLabels = [...TEST_LABELS];
   } else {
-    const parts = promptValue.split(",").map((s) => s.trim()).filter(Boolean);
+    const parts = testValue.split(",").map((s) => s.trim()).filter(Boolean);
     const unknown = parts.filter((p) => !TEST_LABELS.includes(p));
     if (parts.length === 0 || unknown.length > 0) {
       const valid = [...TEST_LABELS, "all"].join(", ");
       console.error(
-        `Error: --prompt must be one of: ${valid} (or a comma-separated subset). Got "${promptArg}"`,
+        `Error: --test must be one of: ${valid} (or a comma-separated subset). Got "${testArg}"`,
       );
       process.exit(1);
     }
@@ -205,6 +221,18 @@ async function main() {
   console.log(`${field("Output:")} ${runDir}`);
   console.log(`${field("Brief:")} ${promptBrief.split("\n")[0]}${promptBrief.includes("\n") ? " …" : ""}`);
   console.log("");
+
+  if (!values.yes) {
+    const total = iterations * testLabels.length;
+    const low = (0.05 * total).toFixed(2);
+    const high = (1.00 * total).toFixed(2);
+    console.log(
+      warn(
+        `About to run ${total} agent iterations against ${model}. Each iteration consumes\nAPI tokens (typically $0.05–$1.00 depending on model + iteration count).\nTotal cost for this run is approximately $${low}–$${high}. Press Ctrl-C within 5\nseconds to abort, or pass --yes to skip this warning.`,
+      ),
+    );
+    await new Promise((r) => setTimeout(r, 5000));
+  }
 
   const allResults = {};
 

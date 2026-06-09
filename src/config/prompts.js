@@ -26,25 +26,54 @@ import { composeSystem, composeFix } from "./boilerplate.js";
 
 // ─── Test discovery ─────────────────────────────────────────────────
 
-const TESTS_DIR = resolve(PROJECT_ROOT, config.testsDir ?? "tests");
+// Tests are discovered from two locations, both relative to the project
+// root:
+//   1. `testsDir` from agent-tester.config.js (default: `tests/`) — the
+//      public/shipped tests.
+//   2. `tests.internal/` — optional sibling directory for personal or
+//      maintainer-specific tests. Gitignored by default so private
+//      tests don't pollute the OSS distribution. Skipped when absent.
+//
+// Tests from both directories appear in the same `TESTS` list. Labels
+// must be unique across BOTH directories (the duplicate-label check
+// below enforces this). When the same label appears in both, the load
+// errors out rather than silently picking one.
+const PRIMARY_TESTS_DIR = resolve(PROJECT_ROOT, config.testsDir ?? "tests");
+const INTERNAL_TESTS_DIR = resolve(PROJECT_ROOT, "tests.internal");
 
-if (!existsSync(TESTS_DIR)) {
+const TEST_DISCOVERY_DIRS = [PRIMARY_TESTS_DIR];
+if (existsSync(INTERNAL_TESTS_DIR)) {
+  TEST_DISCOVERY_DIRS.push(INTERNAL_TESTS_DIR);
+}
+
+if (!existsSync(PRIMARY_TESTS_DIR)) {
   throw new Error(
-    `Tests directory not found at "${TESTS_DIR}". ` +
+    `Tests directory not found at "${PRIMARY_TESTS_DIR}". ` +
       `Create a \`tests/\` folder at the project root (one subdirectory per test) ` +
       `or set \`testsDir\` in agent-tester.config.js.`,
   );
 }
 
-const testDirs = readdirSync(TESTS_DIR)
-  .filter((name) => !name.startsWith("_"))
-  .filter((name) => !name.endsWith(".disabled"))
-  .filter((name) => statSync(resolve(TESTS_DIR, name)).isDirectory())
-  .sort();
+/**
+ * Pair every discovered test directory with the base it came from so
+ * later code can resolve paths and emit error messages that reference
+ * the right parent (`tests/` vs `tests.internal/`).
+ */
+const testEntries = TEST_DISCOVERY_DIRS.flatMap((baseDir) =>
+  readdirSync(baseDir)
+    .filter((name) => !name.startsWith("_"))
+    .filter((name) => !name.endsWith(".disabled"))
+    .filter((name) => statSync(resolve(baseDir, name)).isDirectory())
+    .map((dirName) => ({ baseDir, dirName })),
+);
 
-if (testDirs.length === 0) {
+// Sort by dirName for stable ordering across both directories. When the
+// same name exists in both, the duplicate-label check below catches it.
+testEntries.sort((a, b) => a.dirName.localeCompare(b.dirName));
+
+if (testEntries.length === 0) {
   throw new Error(
-    `No test directories found in "${TESTS_DIR}". ` +
+    `No test directories found in "${PRIMARY_TESTS_DIR}" or "${INTERNAL_TESTS_DIR}". ` +
       `Add at least one \`<label>/\` directory containing \`config.js\`. ` +
       `Use \`npm run new-test -- <label>\` to scaffold one. ` +
       `Directories starting with "_" or ending with ".disabled" are skipped.`,
@@ -170,13 +199,20 @@ function normalise(raw, dirName, testDir) {
 const loadedTests = [];
 const seenLabels = new Set();
 
-for (const dirName of testDirs) {
-  const testDir = resolve(TESTS_DIR, dirName);
+for (const { baseDir, dirName } of testEntries) {
+  const testDir = resolve(baseDir, dirName);
   const configPath = resolve(testDir, "config.js");
+  // Display path that names the actual parent (tests/ or tests.internal/)
+  // so error messages point a maintainer at the right file.
+  const baseName =
+    baseDir === INTERNAL_TESTS_DIR
+      ? "tests.internal"
+      : config.testsDir ?? "tests";
+  const displayPath = `${baseName}/${dirName}`;
 
   if (!existsSync(configPath)) {
     throw new Error(
-      `tests/${dirName}/: missing \`config.js\`. ` +
+      `${displayPath}/: missing \`config.js\`. ` +
         `Every test directory needs a \`config.js\` exporting a default object. ` +
         `Prefix the directory name with "_" or add ".disabled" to skip it.`,
     );
@@ -186,14 +222,15 @@ for (const dirName of testDirs) {
   try {
     mod = await import(pathToFileURL(configPath).href);
   } catch (err) {
-    throw new Error(`Failed to import tests/${dirName}/config.js: ${err.message}`);
+    throw new Error(`Failed to import ${displayPath}/config.js: ${err.message}`);
   }
   const raw = mod.default;
   validateTest(raw, dirName, testDir);
 
   if (seenLabels.has(raw.label)) {
     throw new Error(
-      `Duplicate test label "${raw.label}" — appears in tests/${dirName}/ and another test directory.`,
+      `Duplicate test label "${raw.label}" — appears in ${displayPath}/ and another test directory. ` +
+        `Labels must be unique across \`tests/\` and \`tests.internal/\`.`,
     );
   }
   seenLabels.add(raw.label);
@@ -201,7 +238,7 @@ for (const dirName of testDirs) {
   // Surface mismatch between directory name and label early — easy to miss.
   if (raw.label !== dirName) {
     throw new Error(
-      `tests/${dirName}/config.js: \`label\` is "${raw.label}" but the directory is named "${dirName}". ` +
+      `${displayPath}/config.js: \`label\` is "${raw.label}" but the directory is named "${dirName}". ` +
         `Rename one so they match — the directory name is used as the on-disk identifier for output.`,
     );
   }

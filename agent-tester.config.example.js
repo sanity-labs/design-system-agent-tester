@@ -1,9 +1,9 @@
 /**
- * Agent Tester configuration — EXAMPLE.
+ * Design System Agent Tester configuration — EXAMPLE.
  *
  * Copy this file to `agent-tester.config.js` at the project root and edit
- * for your own setup. It only holds engine-level settings — tests and
- * prompts live elsewhere.
+ * for your own setup. It only holds engine-level settings — each test
+ * (config + prompt templates) lives in its own directory under `tests/`.
  *
  * ┌──────────────────────────────────────────────────────────────────┐
  * │ FILE LAYOUT                                                      │

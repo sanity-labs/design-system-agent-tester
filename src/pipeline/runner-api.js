@@ -23,7 +23,7 @@ import {
   buildFixPrompt,
   buildResult,
 } from "./shared.js";
-import { AUTOFIX_TOOL, runAutofixTool } from "./eslint-autofix-tool.js";
+import { AUTOFIX_TOOL, runAutofixTool, autofixToolAvailable } from "./eslint-autofix-tool.js";
 import { error, success, tag, warn } from "../util/color.js";
 
 // Max tool-use round-trips inside a single fix attempt before forcing
@@ -111,7 +111,7 @@ async function generateFixWithAutofixTool({
         model,
         max_tokens: 32000,
         system: fixSystemPrompt,
-        tools: [AUTOFIX_TOOL],
+        ...(autofixToolAvailable ? { tools: [AUTOFIX_TOOL] } : {}),
         messages,
       },
       iterLabel,
