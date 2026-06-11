@@ -1,7 +1,6 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
-import config from "../config/load.js";
 
 /**
  * Lightweight MCP stdio client.
@@ -270,30 +269,44 @@ class McpClient extends EventEmitter {
 
 /**
  * Convenience factory: create, start, and return a connected McpClient
- * configured from the project's MCP config block.
+ * configured from a test's `mcp` block.
  *
+ * @param {object} mcpConfig
+ * @param {string} mcpConfig.command - Executable to spawn (e.g. "node", "uv")
+ * @param {string[] | (directory: string) => string[]} mcpConfig.args
+ * @param {string} [mcpConfig.defaultDirectory] - Where the server lives on disk
+ * @param {object | (directory: string) => object} [mcpConfig.env] - Extra env vars
  * @param {object} [opts]
- * @param {string} [opts.directory] - Path to the MCP server project
+ * @param {string} [opts.directory] - Override mcpConfig.defaultDirectory
  * @param {number} [opts.requestTimeoutMs] - Per-request timeout
  * @returns {Promise<McpClient>}
  */
-export async function createMcpClient({
-  directory = config.mcp.defaultDirectory,
-  requestTimeoutMs = 30_000,
-} = {}) {
-  // Resolve `env` from config. Supports either a plain object or a
-  // function `(directory) => env`, mirroring the `args` field — useful
-  // when an env var (e.g. `DSDS_PATHS`) needs to be derived from the
-  // server's install location.
-  const envFromConfig =
-    typeof config.mcp.env === "function"
-      ? config.mcp.env(directory)
-      : config.mcp.env ?? {};
+export async function createMcpClient(mcpConfig, opts = {}) {
+  if (!mcpConfig || typeof mcpConfig !== "object") {
+    throw new Error(
+      "createMcpClient requires an mcpConfig argument (the test's `mcp` block).",
+    );
+  }
+
+  const directory = opts.directory ?? mcpConfig.defaultDirectory ?? null;
+  const requestTimeoutMs = opts.requestTimeoutMs ?? 30_000;
+
+  // `args` may be a plain array or `(directory) => string[]`.
+  const args =
+    typeof mcpConfig.args === "function"
+      ? mcpConfig.args(directory)
+      : mcpConfig.args ?? [];
+
+  // `env` may be a plain object or `(directory) => env`.
+  const env =
+    typeof mcpConfig.env === "function"
+      ? mcpConfig.env(directory)
+      : mcpConfig.env ?? {};
 
   const client = new McpClient({
-    command: config.mcp.command,
-    args: config.mcp.args(directory),
-    env: envFromConfig,
+    command: mcpConfig.command,
+    args,
+    env,
     requestTimeoutMs,
   });
 

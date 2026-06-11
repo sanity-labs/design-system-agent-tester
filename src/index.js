@@ -84,11 +84,6 @@ const { values } = parseArgs({
       short: "f",
       default: "5",
     },
-    "no-mcp": {
-      type: "boolean",
-      default: false,
-    },
-
     "agent-prompt": {
       type: "boolean",
       default: false,
@@ -150,7 +145,6 @@ async function main() {
     parseInt(values.concurrency, 10) || Math.min(iterations, 2);
   const takeScreenshots = values.screenshot;
   const maxFixes = parseInt(values["max-fixes"], 10);
-  const mcpEnabled = !values["no-mcp"];
   const useAgentPrompt = values["agent-prompt"];
 
   if (isNaN(maxFixes) || maxFixes < 0) {
@@ -215,7 +209,6 @@ async function main() {
   console.log(`${field("Max fixes:")} ${maxFixes}`);
   console.log(`${field("Concurrency:")} ${maxConcurrency}`);
   console.log(`${field("Screenshots:")} ${takeScreenshots}`);
-  console.log(`${field("MCP:")} ${mcpEnabled}`);
   console.log(`${field("Agent prompt:")} ${useAgentPrompt}`);
   console.log(`${field("Tests:")} ${testLabels.join(", ")}`);
   console.log(`${field("Output:")} ${runDir}`);
@@ -238,13 +231,7 @@ async function main() {
 
   for (const label of testLabels) {
     const test = TESTS.find((t) => t.label === label);
-    // Effective MCP state: --no-mcp downgrades any test that opts in.
-    // Threaded into the prompt so `{{#if requiresMcp}}` reflects what
-    // will actually happen at runtime, not the test's static intent.
-    const effectiveRequiresMcp = mcpEnabled && test.requiresMcp;
-    const promptContent = buildUserPrompt(label, promptBrief, {
-      requiresMcp: effectiveRequiresMcp,
-    });
+    const promptContent = buildUserPrompt(label, promptBrief);
 
     console.log(
       bold(`\n--- Running "${label}" test (${iterations} iterations) ---\n`),
@@ -281,7 +268,7 @@ async function main() {
             testLabel: label,
             takeScreenshots,
             maxFixes,
-            useMcp: effectiveRequiresMcp,
+            mcpConfig: test.mcp,
           });
 
           const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);

@@ -107,11 +107,12 @@ async function generateWithMcp({
   baseSystemPrompt,
   iterDir,
   iterLabel,
+  mcpConfig,
 }) {
   let mcpClient;
   try {
     console.log(`[${iterLabel}] Starting MCP server...`);
-    mcpClient = await createMcpClient();
+    mcpClient = await createMcpClient(mcpConfig);
 
     const mcpTools = mcpClient.getToolsForAnthropic();
     const mcpInstructions = mcpClient.getInstructions() || "";
@@ -309,7 +310,7 @@ async function generateWithMcp({
  * @param {string} opts.iterLabel - Label for logging
  * @param {boolean} opts.takeScreenshots - Whether to take screenshots
  * @param {string}  opts.testLabel - Which test is being run
- * @param {boolean} opts.useMcp - Whether to enable MCP tool use for generation
+ * @param {object | null} opts.mcpConfig - The test's `mcp` block (null = no MCP)
  * @returns {Promise<object>} Result metrics
  */
 export async function runAgent({
@@ -321,7 +322,7 @@ export async function runAgent({
   takeScreenshots,
   maxFixes = 5,
   maxGenerationRetries = 3,
-  useMcp = false,
+  mcpConfig = null,
 }) {
   const systemPrompt = getSystemPrompt(testLabel);
   const fixSystemPrompt = getFixSystemPrompt(testLabel);
@@ -334,7 +335,7 @@ export async function runAgent({
     maxRetries: 1,
   });
 
-  const needsMcp = Boolean(useMcp);
+  const needsMcp = Boolean(mcpConfig);
 
   // Save the fully-resolved prompt for this iteration so it can be inspected
   // later to confirm every iteration received the same brief.
@@ -369,6 +370,7 @@ export async function runAgent({
         baseSystemPrompt: systemPrompt,
         iterDir,
         iterLabel,
+        mcpConfig,
       });
     } else {
       result = await generateSimple({

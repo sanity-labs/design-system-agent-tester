@@ -94,7 +94,12 @@ function resolveTestPath(testDir, relOrAbsPath) {
  * pointing at the directory the error came from.
  */
 function validateTest(raw, dirName, testDir) {
-  const where = `tests/${dirName}/config.js`;
+  // Use the test's actual parent directory in error messages so
+  // `tests.internal/` configs aren't reported under `tests/`.
+  const baseName = testDir.includes("/tests.internal/")
+    ? "tests.internal"
+    : "tests";
+  const where = `${baseName}/${dirName}/config.js`;
 
   if (!raw || typeof raw !== "object") {
     throw new Error(`${where}: default export must be an object.`);
@@ -138,11 +143,63 @@ function validateTest(raw, dirName, testDir) {
   if (raw.packages !== undefined && typeof raw.packages !== "object") {
     throw new Error(`${where} ("${raw.label}"): \`packages\` must be an object.`);
   }
-  if (raw.requiresMcp !== undefined && typeof raw.requiresMcp !== "boolean") {
+
+  // `requiresMcp: true` was the previous opt-in mechanism — it relied
+  // on a global `mcp` field in `agent-tester.config.js`. MCP config is
+  // now declared per-test, so reject the old field with a migration
+  // hint rather than silently ignoring it.
+  if (raw.requiresMcp !== undefined) {
     throw new Error(
-      `${where} ("${raw.label}"): \`requiresMcp\` must be a boolean.`,
+      `${where} ("${raw.label}"): \`requiresMcp\` is no longer supported. ` +
+        `Declare an \`mcp: { command, args, defaultDirectory, env?, toolPrefix }\` ` +
+        `block on this test config instead. Tests without an \`mcp\` field run without MCP.`,
     );
   }
+
+  if (raw.mcp !== undefined) {
+    if (!raw.mcp || typeof raw.mcp !== "object") {
+      throw new Error(
+        `${where} ("${raw.label}"): \`mcp\`, when set, must be an object.`,
+      );
+    }
+    if (typeof raw.mcp.command !== "string" || !raw.mcp.command.trim()) {
+      throw new Error(
+        `${where} ("${raw.label}"): \`mcp.command\` must be a non-empty string (e.g. "node", "uv").`,
+      );
+    }
+    if (typeof raw.mcp.args !== "function" && !Array.isArray(raw.mcp.args)) {
+      throw new Error(
+        `${where} ("${raw.label}"): \`mcp.args\` must be an array or \`(directory) => string[]\`.`,
+      );
+    }
+    if (
+      raw.mcp.defaultDirectory !== undefined &&
+      raw.mcp.defaultDirectory !== null &&
+      typeof raw.mcp.defaultDirectory !== "string"
+    ) {
+      throw new Error(
+        `${where} ("${raw.label}"): \`mcp.defaultDirectory\` must be a string or null.`,
+      );
+    }
+    if (
+      raw.mcp.env !== undefined &&
+      typeof raw.mcp.env !== "object" &&
+      typeof raw.mcp.env !== "function"
+    ) {
+      throw new Error(
+        `${where} ("${raw.label}"): \`mcp.env\` must be an object or \`(directory) => env\`.`,
+      );
+    }
+    if (
+      raw.mcp.toolPrefix !== undefined &&
+      typeof raw.mcp.toolPrefix !== "string"
+    ) {
+      throw new Error(
+        `${where} ("${raw.label}"): \`mcp.toolPrefix\` must be a string.`,
+      );
+    }
+  }
+
   if (
     raw.reactVersion !== undefined &&
     raw.reactVersion !== null &&
@@ -182,7 +239,10 @@ function normalise(raw, dirName, testDir) {
     dir: testDir,
     packages: raw.packages ?? {},
     reactVersion: raw.reactVersion ?? null,
-    requiresMcp: Boolean(raw.requiresMcp),
+    // `requiresMcp` is derived from presence of `mcp`. Kept on the
+    // normalised shape so templates can keep using `{{#if requiresMcp}}`.
+    requiresMcp: Boolean(raw.mcp),
+    mcp: raw.mcp ?? null,
     docsPath: raw.docsPath ? resolveTestPath(testDir, raw.docsPath) : null,
     prompts: {
       system: resolveTestPath(testDir, raw.prompts.system),
@@ -343,23 +403,13 @@ export function buildFixSystemPrompt(label) {
 /**
  * Build the user prompt for a test, injecting the brief and (if
  * `docsPath` is set) the docs content.
- *
- * `opts.requiresMcp` overrides the static test-config value in the
- * template context. The harness passes the *effective* runtime state
- * (`mcpEnabled && test.requiresMcp`) so that `{{#if requiresMcp}}`
- * blocks honor `--no-mcp` instead of always reflecting the test's
- * compile-time intent.
  */
-export function buildUserPrompt(label, brief, opts = {}) {
+export function buildUserPrompt(label, brief) {
   const test = getTest(label);
-  const extra = {
+  const ctx = buildCtx(test, {
     brief,
     docs: loadDocs(test),
-  };
-  if (opts.requiresMcp !== undefined) {
-    extra.requiresMcp = Boolean(opts.requiresMcp);
-  }
-  const ctx = buildCtx(test, extra);
+  });
   const tpl = loadTemplate(test.prompts.user);
   return render(tpl, ctx).trim();
 }

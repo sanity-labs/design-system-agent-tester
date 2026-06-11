@@ -5,13 +5,17 @@
  * for your own setup. It only holds engine-level settings — each test
  * (config + prompt templates) lives in its own directory under `tests/`.
  *
+ * MCP config is declared **per test** (not here) — see
+ * `tests/<label>/config.js` for the shape. Tests without an `mcp` block
+ * run without MCP.
+ *
  * ┌──────────────────────────────────────────────────────────────────┐
  * │ FILE LAYOUT                                                      │
  * │                                                                  │
  * │  agent-tester.config.js    ← this file (engine settings)         │
  * │  briefs/default.js         ← interface brief generator           │
  * │  tests/<label>/            ← one directory per test, auto-found  │
- * │    config.js               ← test config                         │
+ * │    config.js               ← test config (with optional `mcp`)   │
  * │    system.md               ← system-prompt template              │
  * │    user.md                 ← user-prompt template                │
  * │    fix-system.md           ← (optional) extra fix-rule template  │
@@ -27,37 +31,11 @@
  * (or prefix the directory with `_`).
  */
 
-import { resolve } from "node:path";
 import briefGenerator from "./briefs/default.js";
 
 export default {
   /** Human-readable name shown in report headings and log messages. */
   name: "Your Design System",
-
-  /**
-   * MCP server config used by any test with `requiresMcp: true`.
-   *
-   * Fields:
-   *   - `command` / `args(directory)` — how to spawn the server.
-   *   - `defaultDirectory` — where the server's source lives on disk.
-   *   - `env` — optional. Plain object or `(directory) => env`.
-   *      Merged into `process.env` at spawn time. Use for things like
-   *      `DSDS_PATHS` that the server needs as env vars.
-   *   - `toolPrefix` — label the harness uses for tool calls.
-   *
-   * The example below points at dsds-mcp (https://designsystemdocspec.org).
-   * If your MCP server is Python-based, swap `command` to `"uv"` and
-   * `args` to `["run", "--directory", directory, "mcp", "run", "main.py"]`.
-   */
-  mcp: {
-    command: "node",
-    args: (directory) => [resolve(directory, "src/index.js")],
-    defaultDirectory: "/absolute/path/to/dsds-mcp",
-    env: {
-      DSDS_PATHS: "/absolute/path/to/your-design-system.dsds.json",
-    },
-    toolPrefix: "mcp__dsds",
-  },
 
   /** CSS selectors Puppeteer uses to detect whether the app has rendered. */
   appRootSelectors: ["#root", "#app", "#__next", "[data-reactroot]"],

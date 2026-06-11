@@ -13,20 +13,8 @@ describe("agent-tester.config.js (loaded via ./load.js)", () => {
   });
 
   describe("mcp", () => {
-    it("has a `command` string", () => {
-      expect(typeof config.mcp.command).toBe("string");
-      expect(config.mcp.command.length).toBeGreaterThan(0);
-    });
-
-    it("has an `args` function that returns an array", () => {
-      expect(typeof config.mcp.args).toBe("function");
-      const result = config.mcp.args("/some/directory");
-      expect(Array.isArray(result)).toBe(true);
-    });
-
-    it("has a `defaultDirectory` string", () => {
-      expect(typeof config.mcp.defaultDirectory).toBe("string");
-      expect(config.mcp.defaultDirectory.length).toBeGreaterThan(0);
+    it("is NOT declared at the top level — MCP config moved to per-test `tests/<label>/config.js`", () => {
+      expect(config.mcp).toBeUndefined();
     });
   });
 

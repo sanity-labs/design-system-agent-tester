@@ -30,9 +30,6 @@ npm start -- --test shad-cn --iterations 10
 # A few specific tests
 npm start -- --test carbon,spectrum
 
-# Skip MCP
-npm start -- --test all --no-mcp
-
 # Skip the cost-warning delay
 npm start -- --test all --yes
 ```
@@ -49,7 +46,6 @@ Output lands in `output/<date>/<time>/`. Open `report.md` to see the comparison.
 | `--runner`, `-r` | `api` | `api` (SDK) or `cli` (Claude CLI). |
 | `--max-fixes`, `-f` | `5` | Max error→fix cycles per iteration. |
 | `--concurrency`, `-c` | `2` | Max parallel agent calls. |
-| `--no-mcp` | off | Disable MCP for tests that opt in. |
 | `--agent-prompt` | off | Generate a fresh brief from Claude. |
 | `--yes`, `-y` | off | Skip the cost-warning startup delay. |
 
@@ -125,10 +121,27 @@ Need a derived value (e.g. a comma-joined list)? Add a `derive(ctx)` function to
 | Field | What it does |
 |---|---|
 | `prompts.fixSystem` | Extra fix-loop rules. Appended to engine base. |
-| `requiresMcp` | Enable MCP for this test. |
+| `mcp` | MCP server config for this test (see below). Presence enables MCP for this test only; absence runs the test without MCP. |
 | `docsPath` | Path to a docs file. Inlined as `{{docs}}`. |
 | `reactVersion` | String exposed as `{{reactVersion}}`. |
 | `derive` | `(ctx) => object` adding fields to template context. |
+
+### Per-test MCP
+
+A test that needs an MCP server adds an `mcp` block to its `config.js`. The harness spawns the server, registers its tools, and lets the model call them during generation. Tests without `mcp` run with no tools at all.
+
+```js
+// tests/<label>/config.js
+mcp: {
+  command: "node",                                  // executable
+  args: (directory) => [resolve(directory, "src/index.js")],  // array or (dir) => array
+  defaultDirectory: "/absolute/path/to/your-mcp",   // where the server lives
+  env: { DSDS_PATHS: "/abs/path/to/docs.dsds.json" }, // optional; object or (dir) => env
+  toolPrefix: "mcp__your-server",                   // used by the CLI runner's --allowed-tools
+}
+```
+
+Inside templates, `{{#if requiresMcp}}` is true whenever an `mcp` block is present, so prompts can branch on MCP availability without duplicating the check.
 
 ### Disable a test
 

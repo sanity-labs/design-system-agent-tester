@@ -2,7 +2,6 @@ import { writeFile, mkdtemp, appendFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
-import dsConfig from "../config/load.js";
 
 import { validateProject, killDevServer } from "../evaluation/validate.js";
 import { captureScreenshots } from "../evaluation/screenshot.js";
@@ -169,7 +168,7 @@ async function invokeClaudeCli({
  * @param {string} opts.iterLabel - Label for logging
  * @param {boolean} opts.takeScreenshots - Whether to take screenshots
  * @param {string}  opts.testLabel - Which test is being run
- * @param {boolean} opts.useMcp - Whether to enable MCP tool use for generation
+ * @param {object | null} opts.mcpConfig - The test's `mcp` block (null = no MCP)
  * @returns {Promise<object>} Result metrics
  */
 export async function runAgent({
@@ -181,7 +180,7 @@ export async function runAgent({
   takeScreenshots,
   maxFixes = 5,
   maxGenerationRetries = 3,
-  useMcp = false,
+  mcpConfig = null,
 }) {
   const systemPrompt = getSystemPrompt(testLabel);
   const fixSystemPrompt = getFixSystemPrompt(testLabel);
@@ -189,8 +188,9 @@ export async function runAgent({
   // later to confirm every iteration received the same brief.
   await writeFile(resolve(iterDir, "_prompt.txt"), promptContent, "utf-8");
 
-  const needsMcp = Boolean(useMcp);
-  const mcpTools = needsMcp ? [dsConfig.mcp.toolPrefix] : null;
+  const needsMcp = Boolean(mcpConfig);
+  const mcpTools =
+    needsMcp && mcpConfig.toolPrefix ? [mcpConfig.toolPrefix] : null;
   // MCP calls need more time since the model makes tool calls before generating code
   const generationTimeout = needsMcp ? 600_000 : 300_000;
 
