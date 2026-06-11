@@ -27,25 +27,36 @@
  * (or prefix the directory with `_`).
  */
 
+import { resolve } from "node:path";
 import briefGenerator from "./briefs/default.js";
 
 export default {
   /** Human-readable name shown in report headings and log messages. */
   name: "Your Design System",
 
-  /** MCP server config used by any test with `requiresMcp: true`. */
+  /**
+   * MCP server config used by any test with `requiresMcp: true`.
+   *
+   * Fields:
+   *   - `command` / `args(directory)` — how to spawn the server.
+   *   - `defaultDirectory` — where the server's source lives on disk.
+   *   - `env` — optional. Plain object or `(directory) => env`.
+   *      Merged into `process.env` at spawn time. Use for things like
+   *      `DSDS_PATHS` that the server needs as env vars.
+   *   - `toolPrefix` — label the harness uses for tool calls.
+   *
+   * The example below points at dsds-mcp (https://designsystemdocspec.org).
+   * If your MCP server is Python-based, swap `command` to `"uv"` and
+   * `args` to `["run", "--directory", directory, "mcp", "run", "main.py"]`.
+   */
   mcp: {
-    command: "uv",
-    args: (directory) => [
-      "run",
-      "--directory",
-      directory,
-      "mcp",
-      "run",
-      "main.py",
-    ],
-    defaultDirectory: "/absolute/path/to/your/mcp-server",
-    toolPrefix: "mcp__your-design-system",
+    command: "node",
+    args: (directory) => [resolve(directory, "src/index.js")],
+    defaultDirectory: "/absolute/path/to/dsds-mcp",
+    env: {
+      DSDS_PATHS: "/absolute/path/to/your-design-system.dsds.json",
+    },
+    toolPrefix: "mcp__dsds",
   },
 
   /** CSS selectors Puppeteer uses to detect whether the app has rendered. */

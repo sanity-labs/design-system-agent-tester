@@ -23,13 +23,7 @@ import {
   buildFixPrompt,
   buildResult,
 } from "./shared.js";
-import { AUTOFIX_TOOL, runAutofixTool, autofixToolAvailable } from "./eslint-autofix-tool.js";
 import { error, success, tag, warn } from "../util/color.js";
-
-// Max tool-use round-trips inside a single fix attempt before forcing
-// the model to stop and emit files. Lower than MAX_TOOL_TURNS because
-// the fix loop has only one tool and shouldn't need many turns.
-const MAX_FIX_TOOL_TURNS = 5;
 
 // Max tool-use round-trips before we force the model to finish
 const MAX_TOOL_TURNS = 25;
@@ -72,108 +66,6 @@ async function callAnthropicWithRetry(client, params, label = "") {
       throw err;
     }
   }
-}
-
-/**
- * Multi-turn fix-loop generation with the `run_eslint_autofix` tool
- * available to the model. The agent can choose to call the tool (the
- * harness shells out to `eslint/run.js`, returns the linter output plus
- * the updated file contents) or skip straight to emitting fixed files.
- *
- * Returns aggregated text across all turns, token usage, and the count
- * of autofix invocations the agent made in this fix attempt.
- *
- * Side effect: when the agent calls the tool, `files` is mutated in
- * place to reflect the post-autofix contents on disk.
- */
-async function generateFixWithAutofixTool({
-  client,
-  model,
-  fixSystemPrompt,
-  fixPrompt,
-  projectDir,
-  files,
-  iterLabel,
-  agentLogPath,
-  fixAttemptNum,
-}) {
-  const messages = [{ role: "user", content: fixPrompt }];
-
-  let inputTokens = 0;
-  let outputTokens = 0;
-  let toolCalls = 0;
-  const textParts = [];
-
-  for (let turn = 1; turn <= MAX_FIX_TOOL_TURNS; turn++) {
-    const response = await callAnthropicWithRetry(
-      client,
-      {
-        model,
-        max_tokens: 32000,
-        system: fixSystemPrompt,
-        ...(autofixToolAvailable ? { tools: [AUTOFIX_TOOL] } : {}),
-        messages,
-      },
-      iterLabel,
-    );
-
-    inputTokens += response.usage?.input_tokens ?? 0;
-    outputTokens += response.usage?.output_tokens ?? 0;
-
-    for (const block of response.content) {
-      if (block.type === "text" && block.text) {
-        textParts.push(block.text);
-      }
-    }
-
-    const toolUses = response.content.filter((b) => b.type === "tool_use");
-
-    if (response.stop_reason === "end_turn" || toolUses.length === 0) {
-      return { fullText: textParts.join("\n"), inputTokens, outputTokens, toolCalls };
-    }
-
-    messages.push({ role: "assistant", content: response.content });
-
-    const toolResults = [];
-    for (const tu of toolUses) {
-      if (tu.name === "run_eslint_autofix") {
-        toolCalls++;
-        console.log(
-          `${tag(iterLabel)} Fix #${fixAttemptNum} turn ${turn}: agent called run_eslint_autofix`,
-        );
-        const { resultText, linterOutput } = await runAutofixTool({
-          projectDir,
-          files,
-        });
-        await appendFile(
-          agentLogPath,
-          `=== FIX ATTEMPT ${fixAttemptNum} — TOOL CALL: run_eslint_autofix (turn ${turn}) [${new Date().toISOString()}] ===\n` +
-            linterOutput +
-            "\n\n",
-          "utf-8",
-        );
-        toolResults.push({
-          type: "tool_result",
-          tool_use_id: tu.id,
-          content: resultText,
-        });
-      } else {
-        toolResults.push({
-          type: "tool_result",
-          tool_use_id: tu.id,
-          content: `Unknown tool: ${tu.name}`,
-          is_error: true,
-        });
-      }
-    }
-
-    messages.push({ role: "user", content: toolResults });
-  }
-
-  console.warn(
-    `${tag(iterLabel)} ${warn(`Fix #${fixAttemptNum}: hit MAX_FIX_TOOL_TURNS (${MAX_FIX_TOOL_TURNS}) — returning whatever text the agent produced`)}`,
-  );
-  return { fullText: textParts.join("\n"), inputTokens, outputTokens, toolCalls };
 }
 
 /**
@@ -248,10 +140,13 @@ async function generateWithMcp({
     while (turns < MAX_TOOL_TURNS) {
       turns++;
 
-      // When approaching the limit or stuck in a loop, nudge the model to stop researching
+      // When approaching the limit or stuck in a loop, nudge the model to stop researching.
+      // If the MCP server exposes a feedback tool, name it explicitly so the
+      // "stop calling tools" directive doesn't prevent it from being called.
+      const feedbackTool = mcpTools.find((t) => t.name.includes("feedback"));
       const nudge =
         turns >= MAX_TOOL_TURNS - 2 || duplicateStreak >= 3
-          ? "\n\nYou have done enough research. Stop calling tools and produce ALL project files now using ---FILE: path--- blocks."
+          ? `\n\nYou have done enough research.${feedbackTool ? ` Call ${feedbackTool.name} now, then` : ""} produce ALL project files using ---FILE: path--- blocks. No other tool calls.`
           : "";
 
       // Use streaming to keep the connection alive during long generation turns.
@@ -354,6 +249,11 @@ async function generateWithMcp({
           turn: turns,
           tool: toolName,
           input: toolInput,
+          // Full response text so post-hoc analysis can correlate
+          // findings (e.g. `dsds_lint_code` issues) with the agent's
+          // subsequent code changes. `resultLength` is retained as
+          // a quick-look field for filtering.
+          resultText,
           resultLength: resultText.length,
           isDuplicate,
         });
@@ -660,7 +560,6 @@ export async function runAgent({
           attempt: fixAttempts,
           errors: validation.consoleErrors,
           fatalError: validation.fatalError,
-          autofixToolCalls: 0,
         };
         fixLog.push(fixLogEntry);
 
@@ -683,26 +582,16 @@ export async function runAgent({
           "utf-8",
         );
 
-        // Ask Claude to fix the errors. The agent can call the
-        // run_eslint_autofix tool to apply known mechanical rewrites
-        // before emitting fixed files. Tool calls mutate `files` in
-        // place so the merge below stays consistent with disk.
         console.log(`[${iterLabel}] Asking Claude to fix errors...`);
-        const fixResponse = await generateFixWithAutofixTool({
+        const fixResponse = await generateSimple({
           client,
           model,
-          fixSystemPrompt,
-          fixPrompt,
-          projectDir,
-          files,
-          iterLabel,
-          agentLogPath,
-          fixAttemptNum: fixAttempts,
+          promptContent: fixPrompt,
+          systemPrompt: fixSystemPrompt,
         });
 
         totalInputTokens += fixResponse.inputTokens;
         totalOutputTokens += fixResponse.outputTokens;
-        fixLogEntry.autofixToolCalls = fixResponse.toolCalls;
 
         const fixText = fixResponse.fullText;
 

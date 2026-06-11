@@ -289,7 +289,6 @@ const VARIANCE_COLUMNS = [
   ["Lines of code", "loc"],
   ["DOM elements", "domAvg"],
   ["Semantic ratio", "semanticRatio"],
-  ["Lint errors", "lintErrors"],
   ["Component / iter", "componentAvg"],
   ["Visual diff %", "visualDiffAvg"],
 ];

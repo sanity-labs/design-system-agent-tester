@@ -41,8 +41,6 @@ export function extractMetrics(data) {
     semanticCount: data.semanticHtml?.avgSemanticCount ?? null,
     genericCount: data.semanticHtml?.avgGenericCount ?? null,
     roleCount: data.semanticHtml?.avgRoleCount ?? null,
-    lintErrors: data.lint?.totalErrors ?? null,
-    lintWarnings: data.lint?.totalWarnings ?? null,
     componentTotal: data.componentUsageCounts?.totalAcrossIterations ?? null,
     componentAvg: data.componentUsageCounts?.averagePerIteration ?? null,
     visualDiffAvg: data.visualDiff?.averageDiffPercent ?? null,
@@ -74,8 +72,6 @@ const AGGREGATABLE_KEYS = [
   "semanticCount",
   "genericCount",
   "roleCount",
-  "lintErrors",
-  "lintWarnings",
   "componentTotal",
   "componentAvg",
   "visualDiffAvg",
@@ -261,13 +257,6 @@ const METRIC_GROUPS = [
   {
     heading: "Visual consistency",
     rows: [["Visual diff (avg %)", "visualDiffAvg", true, 2]],
-  },
-  {
-    heading: "Lint",
-    rows: [
-      ["Lint errors total", "lintErrors", true, 0],
-      ["Lint warnings total", "lintWarnings", true, 0],
-    ],
   },
   {
     heading: "Token usage",

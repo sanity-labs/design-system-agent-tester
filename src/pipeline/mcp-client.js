@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
-import dsConfig from "../config/load.js";
+import config from "../config/load.js";
 
 /**
  * Lightweight MCP stdio client.
@@ -278,12 +278,22 @@ class McpClient extends EventEmitter {
  * @returns {Promise<McpClient>}
  */
 export async function createMcpClient({
-  directory = dsConfig.mcp.defaultDirectory,
+  directory = config.mcp.defaultDirectory,
   requestTimeoutMs = 30_000,
 } = {}) {
+  // Resolve `env` from config. Supports either a plain object or a
+  // function `(directory) => env`, mirroring the `args` field — useful
+  // when an env var (e.g. `DSDS_PATHS`) needs to be derived from the
+  // server's install location.
+  const envFromConfig =
+    typeof config.mcp.env === "function"
+      ? config.mcp.env(directory)
+      : config.mcp.env ?? {};
+
   const client = new McpClient({
-    command: dsConfig.mcp.command,
-    args: dsConfig.mcp.args(directory),
+    command: config.mcp.command,
+    args: config.mcp.args(directory),
+    env: envFromConfig,
     requestTimeoutMs,
   });
 

@@ -301,9 +301,6 @@ function buildCtx(test, extra = {}) {
     reactVersion: test.reactVersion,
     requiresMcp: test.requiresMcp,
     name: config.name,
-    // Absolute path to the harness checkout. Templates use this to
-    // reference harness-side tooling (e.g. the eslint autofix runner)
-    // without hardcoding paths in every test.
     harnessRoot: PROJECT_ROOT,
     ...extra,
   };

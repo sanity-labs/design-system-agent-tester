@@ -112,21 +112,6 @@ export async function generateReport(allResults, outputDir, promptText = null) {
     const stdDevFixes = stdDev(fixCounts);
     const iterationsNeedingFixes = fixCounts.filter((n) => n > 0).length;
 
-    // Autofix tool usage — only populated by the API runner. CLI-runner
-    // iterations leave it undefined; we treat that as "not measured"
-    // rather than zero so the percentages stay honest.
-    const autofixEntries = validIterations.flatMap((r) =>
-      (r.fixLog || []).filter((e) => e.autofixToolCalls != null),
-    );
-    const autofixTotalCalls = autofixEntries.reduce(
-      (s, e) => s + e.autofixToolCalls,
-      0,
-    );
-    const autofixAttemptsCovered = autofixEntries.length;
-    const autofixAttemptsWithCall = autofixEntries.filter(
-      (e) => e.autofixToolCalls > 0,
-    ).length;
-
     report.prompts[promptKey] = {
       model,
       totalIterations: iterations.length,
@@ -159,22 +144,12 @@ export async function generateReport(allResults, outputDir, promptText = null) {
         iterationsCleanOnFirstTry:
           validIterations.length - iterationsNeedingFixes,
         all: fixCounts,
-        autofixToolUsage: {
-          attemptsMeasured: autofixAttemptsCovered,
-          attemptsWithCall: autofixAttemptsWithCall,
-          totalCalls: autofixTotalCalls,
-          callRate:
-            autofixAttemptsCovered > 0
-              ? round(autofixAttemptsWithCall / autofixAttemptsCovered)
-              : null,
-        },
         perIteration: validIterations.map((r) => ({
           iteration: r.iteration,
           fixAttempts: r.fixAttempts ?? 0,
           errors: (r.fixLog || []).map((entry) => ({
             attempt: entry.attempt,
             fatalError: entry.fatalError,
-            autofixToolCalls: entry.autofixToolCalls ?? null,
           })),
         })),
       },
@@ -567,17 +542,6 @@ function renderMarkdown(report) {
     md += `| Iterations needing fixes | ${f.iterationsNeedingFixes}/${data.successfulIterations} |\n`;
     md += `| All | ${f.all.join(", ")} |\n\n`;
 
-    // Autofix tool usage (API runner only — `attemptsMeasured` is 0 for
-    // CLI runs, in which case we omit the section).
-    const aft = f.autofixToolUsage;
-    if (aft && aft.attemptsMeasured > 0) {
-      const pct = aft.callRate !== null ? round(aft.callRate * 100, 0) : 0;
-      md += `**ESLint autofix tool usage** (API runner):\n\n`;
-      md += `| Metric | Value |\n|--------|-------|\n`;
-      md += `| Fix attempts that invoked autofix | ${aft.attemptsWithCall}/${aft.attemptsMeasured} (${pct}%) |\n`;
-      md += `| Total autofix invocations | ${aft.totalCalls} |\n\n`;
-    }
-
     if (f.perIteration.some((p) => p.fixAttempts > 0)) {
       md += `**Fix details:**\n\n`;
       for (const p of f.perIteration) {
@@ -589,11 +553,7 @@ function renderMarkdown(report) {
             const shortErr = (err.fatalError || "unknown")
               .split("\n")[0]
               .slice(0, 120);
-            const autofixNote =
-              err.autofixToolCalls != null
-                ? ` _(autofix called: ${err.autofixToolCalls}×)_`
-                : "";
-            md += `  - Fix #${err.attempt}: \`${shortErr}\`${autofixNote}\n`;
+            md += `  - Fix #${err.attempt}: \`${shortErr}\`\n`;
           }
         }
       }
