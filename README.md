@@ -152,7 +152,7 @@ mcp: {
 }
 ```
 
-Inside templates, `{{#if requiresMcp}}` is true whenever an `mcp` block is present, so prompts can branch on MCP availability without duplicating the check.
+Inside templates, `{{#if requiresMcp}}` is true whenever an `mcp` block is present. Prompts can branch on MCP availability without duplicating the check.
 
 ### Disable a test
 
