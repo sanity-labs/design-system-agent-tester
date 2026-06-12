@@ -99,8 +99,18 @@ const configJs = `export default {
   },
   // Optional fields — uncomment and edit as needed:
   // reactVersion: "^19.2",
-  // requiresMcp: false,
   // docsPath: "docs.md",
+  //
+  // MCP server config — presence of this block turns MCP on for the test.
+  // (\`args\` gets the server directory; add
+  // \`import { resolve } from "node:path";\` at the top if you use it.)
+  // mcp: {
+  //   command: "node",
+  //   args: (directory) => [resolve(directory, "src/index.js")],
+  //   defaultDirectory: "/absolute/path/to/your-mcp-server",
+  //   env: {},
+  //   toolPrefix: "mcp__yourserver",
+  // },
   prompts: {
     system: "system.md",
     user: "user.md",
@@ -171,4 +181,4 @@ console.log("Next steps:");
 console.log(`  1. Edit tests/${label}/config.js — set packages and optional flags.`);
 console.log(`  2. Edit tests/${label}/system.md and user.md — write the prompts.`);
 console.log(`  3. Run the test:`);
-console.log(`     npm start -- --prompt ${label}`);
+console.log(`     npm start -- --test ${label}`);
