@@ -31,15 +31,11 @@
     "puppeteer": "^24.2.0"
   },
   "devDependencies": {
-    "@typescript-eslint/parser": "^8.60.0",
     "@vitest/coverage-v8": "^4.1.6",
-    "eslint": "^10.4.0",
-    "eslint-plugin-sanity-ui": "file:../../eslint-plugin-sanity-ui",
-    "eslint-plugin-unused-imports": "^4.4.1",
     "typescript": "^5.8.3",
     "vitest": "^4.1.6"
   },
   "engines": {
-    "node": ">=22.11.0"
+    "node": ">=22.12.0"
   }
 }
