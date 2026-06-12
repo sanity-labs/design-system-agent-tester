@@ -251,9 +251,9 @@ async function generateWithMcp({
           tool: toolName,
           input: toolInput,
           // Full response text so post-hoc analysis can correlate
-          // findings (e.g. `dsds_lint_code` issues) with the agent's
-          // subsequent code changes. `resultLength` is retained as
-          // a quick-look field for filtering.
+          // tool findings with the agent's subsequent code changes.
+          // `resultLength` is retained as a quick-look field for
+          // filtering.
           resultText,
           resultLength: resultText.length,
           isDuplicate,
