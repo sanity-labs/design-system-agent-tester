@@ -5,7 +5,7 @@
  * arguments — this file does not bake in a specific test.
  */
 import { writeFile, mkdir, rm, readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { resolve, sep } from "node:path";
 import { existsSync } from "node:fs";
 import { extractComponentImports } from "../evaluation/extract-component-imports.js";
 import { extractInlineStyles } from "../evaluation/extract-inline-styles.js";
@@ -30,6 +30,23 @@ export function getFixSystemPrompt(testLabel) {
 }
 
 // ─── File I/O ────────────────────────────────────────────────────────
+
+/**
+ * Resolve a file path inside the project directory, refusing anything
+ * that escapes it. File paths come from agent output (untrusted), so
+ * this is the last line of defense behind the parse-time filter in
+ * `parse-files.js`.
+ */
+export function resolveWithinProject(projectDir, filePath) {
+  const root = resolve(projectDir);
+  const resolved = resolve(root, filePath);
+  if (resolved !== root && !resolved.startsWith(root + sep)) {
+    throw new Error(
+      `Refusing to access path outside the project directory: ${filePath}`,
+    );
+  }
+  return resolved;
+}
 
 /**
  * Write all files to the project directory (clean slate).
@@ -61,7 +78,7 @@ export async function writeProjectFiles(projectDir, files) {
   await mkdir(projectDir, { recursive: true });
 
   for (const file of files) {
-    const filePath = resolve(projectDir, file.path);
+    const filePath = resolveWithinProject(projectDir, file.path);
     const dir = resolve(filePath, "..");
     await mkdir(dir, { recursive: true });
     await writeFile(filePath, file.content, "utf-8");
@@ -71,7 +88,7 @@ export async function writeProjectFiles(projectDir, files) {
 export async function readProjectFiles(projectDir, originalFiles) {
   const updatedFiles = [];
   for (const file of originalFiles) {
-    const filePath = resolve(projectDir, file.path);
+    const filePath = resolveWithinProject(projectDir, file.path);
     if (existsSync(filePath)) {
       const content = await readFile(filePath, "utf-8");
       updatedFiles.push({ path: file.path, content });
@@ -88,7 +105,7 @@ export async function readProjectFiles(projectDir, originalFiles) {
 export async function buildCurrentFilesText(projectDir, files) {
   const parts = [];
   for (const file of files) {
-    const filePath = resolve(projectDir, file.path);
+    const filePath = resolveWithinProject(projectDir, file.path);
     let content = file.content;
     if (existsSync(filePath)) {
       content = await readFile(filePath, "utf-8");

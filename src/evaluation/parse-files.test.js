@@ -1,5 +1,9 @@
-import { describe, it, expect } from "vitest";
-import { parseFiles, isSourceFile } from "./parse-files.js";
+import { describe, it, expect, vi } from "vitest";
+import {
+  parseFiles,
+  isSourceFile,
+  isSafeRelativePath,
+} from "./parse-files.js";
 
 // ---------------------------------------------------------------------------
 // parseFiles
@@ -45,6 +49,40 @@ describe("parseFiles", () => {
   it("returns an empty array when there are no file blocks", () => {
     const text = "Just some plain text with no file markers.";
     expect(parseFiles(text)).toEqual([]);
+  });
+
+  it("drops files whose paths escape the project directory", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const text = [
+      "---FILE: ../../outside.txt---",
+      "escaped",
+      "---END FILE---",
+      "",
+      "---FILE: /etc/passwd---",
+      "absolute",
+      "---END FILE---",
+      "",
+      "---FILE: src/App.jsx---",
+      "function App() {}",
+      "---END FILE---",
+    ].join("\n");
+
+    const result = parseFiles(text);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].path).toBe("src/App.jsx");
+    expect(warn).toHaveBeenCalledTimes(2);
+    warn.mockRestore();
+  });
+
+  it("keeps paths whose `..` segments stay inside the project", () => {
+    const text = [
+      "---FILE: src/../App.jsx---",
+      "function App() {}",
+      "---END FILE---",
+    ].join("\n");
+
+    expect(parseFiles(text)).toHaveLength(1);
   });
 
   it("trims whitespace from file paths", () => {
@@ -276,5 +314,35 @@ describe("isSourceFile", () => {
   it("handles deeply nested paths", () => {
     expect(isSourceFile("src/components/ui/buttons/Primary.tsx")).toBe(true);
     expect(isSourceFile("docs/images/screenshot.png")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isSafeRelativePath
+// ---------------------------------------------------------------------------
+describe("isSafeRelativePath", () => {
+  it.each([
+    ["src/App.jsx", true],
+    ["package.json", true],
+    ["src/components/deep/Nested.tsx", true],
+    ["src/../App.jsx", true],
+    ["../escape.txt", false],
+    ["../../etc/passwd", false],
+    ["src/../../escape.txt", false],
+    ["/etc/passwd", false],
+    ["..", false],
+    ["C:\\Windows\\system32\\evil.dll", false],
+    ["C:/Windows/evil.dll", false],
+    ["\\\\server\\share\\evil.txt", false],
+    ["", false],
+    ["   ", false],
+  ])("%s -> %s", (filePath, expected) => {
+    expect(isSafeRelativePath(filePath)).toBe(expected);
+  });
+
+  it("rejects non-string input", () => {
+    expect(isSafeRelativePath(null)).toBe(false);
+    expect(isSafeRelativePath(undefined)).toBe(false);
+    expect(isSafeRelativePath(42)).toBe(false);
   });
 });
