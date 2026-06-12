@@ -1,4 +1,4 @@
-import { writeFile, mkdtemp, appendFile } from "node:fs/promises";
+import { writeFile, mkdtemp, appendFile, rm } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -84,74 +84,91 @@ async function invokeClaudeCli({
     `[${iterLabel}] Invoking claude CLI (timeout: ${Math.round(timeoutMs / 1000)}s)...`,
   );
 
-  return new Promise((resolvePromise, reject) => {
-    const child = spawn("claude", args, {
-      // When using MCP, we pipe the prompt via stdin (to avoid --allowed-tools
-      // variadic arg consuming the prompt). Otherwise stdin is ignored.
-      stdio: [useMcp ? "pipe" : "ignore", "pipe", "pipe"],
-      cwd,
-      env: {
-        ...process.env,
-        // Prevent the CLI from picking up any project-level config
-        ...(useMcp ? {} : { CLAUDE_CODE_DISABLE_PROJECT_CONFIG: "1" }),
-      },
-    });
-
-    let stdout = "";
-    let stderr = "";
-    let killed = false;
-
-    // Timeout: kill the process if it takes too long
-    const timer = setTimeout(() => {
-      killed = true;
-      child.kill("SIGTERM");
-      setTimeout(() => {
-        if (!child.killed) child.kill("SIGKILL");
-      }, 5000);
-    }, timeoutMs);
-
-    child.stdout.on("data", (data) => {
-      stdout += data.toString();
-    });
-
-    child.stderr.on("data", (data) => {
-      stderr += data.toString();
-    });
-
-    // When using MCP, pipe the combined prompt via stdin then close the stream
-    if (useMcp) {
-      child.stdin.write(combinedPrompt);
-      child.stdin.end();
+  try {
+    return await runClaudeCli();
+  } finally {
+    // The non-MCP path runs in a throwaway temp dir — remove it so
+    // repeated iterations don't accumulate agent-cli-* dirs in tmpdir.
+    if (tempCwd) {
+      await rm(tempCwd, { recursive: true, force: true });
     }
+  }
 
-    child.on("error", (err) => {
-      clearTimeout(timer);
-      reject(
-        new Error(
-          `Failed to spawn claude CLI: ${err.message}. Is it installed? (npm install -g @anthropic-ai/claude-code)`,
-        ),
-      );
-    });
+  function runClaudeCli() {
+    return new Promise((resolvePromise, reject) => {
+      const child = spawn("claude", args, {
+        // When using MCP, we pipe the prompt via stdin (to avoid --allowed-tools
+        // variadic arg consuming the prompt). Otherwise stdin is ignored.
+        stdio: [useMcp ? "pipe" : "ignore", "pipe", "pipe"],
+        cwd,
+        env: {
+          ...process.env,
+          // Prevent the CLI from picking up any project-level config
+          ...(useMcp ? {} : { CLAUDE_CODE_DISABLE_PROJECT_CONFIG: "1" }),
+        },
+      });
 
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      if (killed) {
-        reject(
-          new Error(
-            `claude CLI timed out after ${Math.round(timeoutMs / 1000)}s. stdout: ${stdout.length} bytes, stderr: ${stderr.slice(0, 500)}`,
-          ),
-        );
-      } else if (code !== 0) {
-        reject(
-          new Error(
-            `claude CLI exited with code ${code}.\nstderr: ${stderr.slice(0, 1000)}`,
-          ),
-        );
-      } else {
-        resolvePromise(stdout);
+      let stdout = "";
+      let stderr = "";
+      let killed = false;
+
+      // Timeout: kill the process if it takes too long. `child.killed`
+      // only means a signal was sent, so escalation checks the actual
+      // exit state instead.
+      const timer = setTimeout(() => {
+        killed = true;
+        child.kill("SIGTERM");
+        const escalation = setTimeout(() => {
+          if (child.exitCode === null && child.signalCode === null) {
+            child.kill("SIGKILL");
+          }
+        }, 5000);
+        escalation.unref();
+      }, timeoutMs);
+
+      child.stdout.on("data", (data) => {
+        stdout += data.toString();
+      });
+
+      child.stderr.on("data", (data) => {
+        stderr += data.toString();
+      });
+
+      // When using MCP, pipe the combined prompt via stdin then close the stream
+      if (useMcp) {
+        child.stdin.write(combinedPrompt);
+        child.stdin.end();
       }
+
+      child.on("error", (err) => {
+        clearTimeout(timer);
+        reject(
+          new Error(
+            `Failed to spawn claude CLI: ${err.message}. Is it installed? (npm install -g @anthropic-ai/claude-code)`,
+          ),
+        );
+      });
+
+      child.on("close", (code) => {
+        clearTimeout(timer);
+        if (killed) {
+          reject(
+            new Error(
+              `claude CLI timed out after ${Math.round(timeoutMs / 1000)}s. stdout: ${stdout.length} bytes, stderr: ${stderr.slice(0, 500)}`,
+            ),
+          );
+        } else if (code !== 0) {
+          reject(
+            new Error(
+              `claude CLI exited with code ${code}.\nstderr: ${stderr.slice(0, 1000)}`,
+            ),
+          );
+        } else {
+          resolvePromise(stdout);
+        }
+      });
     });
-  });
+  }
 }
 
 /**

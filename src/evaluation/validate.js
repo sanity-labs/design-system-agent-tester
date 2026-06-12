@@ -103,16 +103,37 @@ export async function validateProject(projectDir, iterLabel) {
 
 /**
  * Kill a dev server process cleanly. Safe to call with `null`.
+ *
+ * Note `child.killed` only records that a signal was *sent*, not that
+ * the process exited — escalation has to check the actual exit state.
+ * The server is `npm run dev`, which spawns Vite as its own child, so
+ * on POSIX the whole detached process group is signalled; signalling
+ * just `npm` leaves Vite holding the port.
  */
 export function killDevServer(devServer) {
-  if (devServer && !devServer.killed) {
-    devServer.kill("SIGTERM");
-    setTimeout(() => {
-      if (!devServer.killed) {
-        devServer.kill("SIGKILL");
+  if (!devServer) return;
+  const exited = () =>
+    devServer.exitCode !== null || devServer.signalCode !== null;
+  if (exited()) return;
+
+  const signalServer = (signal) => {
+    try {
+      if (process.platform !== "win32" && devServer.pid) {
+        process.kill(-devServer.pid, signal);
+      } else {
+        devServer.kill(signal);
       }
-    }, 3000);
-  }
+    } catch {
+      // Process (group) is already gone.
+    }
+  };
+
+  signalServer("SIGTERM");
+  const timer = setTimeout(() => {
+    if (!exited()) signalServer("SIGKILL");
+  }, 3000);
+  timer.unref();
+  devServer.once("exit", () => clearTimeout(timer));
 }
 
 // ─── Internals ──────────────────────────────────────────────────────
@@ -238,6 +259,9 @@ function startDevServer(projectDir, iterLabel, port) {
       cwd: projectDir,
       stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env, BROWSER: "none" },
+      // Own process group on POSIX so killDevServer can signal npm AND
+      // the Vite child it spawns in one shot.
+      detached: process.platform !== "win32",
     },
   );
 }

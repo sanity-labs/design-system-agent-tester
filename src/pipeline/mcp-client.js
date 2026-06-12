@@ -106,15 +106,29 @@ class McpClient extends EventEmitter {
     const proc = this._proc;
     this._proc = null;
 
-    return new Promise((resolve) => {
-      const timer = setTimeout(() => {
-        if (!proc.killed) proc.kill("SIGKILL");
-      }, 5000);
+    const exited = () => proc.exitCode !== null || proc.signalCode !== null;
 
-      proc.on("close", () => {
+    return new Promise((resolve) => {
+      // `proc.killed` only records that a signal was sent, so the
+      // SIGKILL escalation must check the actual exit state.
+      const timer = setTimeout(() => {
+        if (!exited()) proc.kill("SIGKILL");
+      }, 5000);
+      timer.unref();
+
+      proc.once("close", () => {
         clearTimeout(timer);
         resolve();
       });
+
+      // If the process already exited, `close` may have fired before
+      // stop() was called — resolve immediately instead of waiting on
+      // an event that will never come.
+      if (exited()) {
+        clearTimeout(timer);
+        resolve();
+        return;
+      }
 
       proc.kill("SIGTERM");
     });

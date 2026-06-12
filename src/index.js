@@ -7,37 +7,13 @@ import { computeVisualDiff } from "./evaluation/visual-diff.js";
 import { generateAppPrompt, STATIC_PROMPT } from "./config/prompt-generator.js";
 import { TESTS, TEST_LABELS, buildUserPrompt } from "./config/prompts.js";
 import { banner, bold, dim, error, success, tag, warn } from "./util/color.js";
+import { isTransientError } from "./util/retry.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
 
 const MAX_ITERATION_RETRIES = 3;
 const RETRY_DELAY_MS = 30_000; // 30 seconds between retries
-
-/**
- * Check if an error is transient and worth retrying.
- */
-function isTransientError(err) {
-  const msg = (err.message || "").toLowerCase();
-  return (
-    msg.includes("connection error") ||
-    msg.includes("connection reset") ||
-    msg.includes("econnreset") ||
-    msg.includes("econnrefused") ||
-    msg.includes("etimedout") ||
-    msg.includes("socket hang up") ||
-    msg.includes("timed out") ||
-    msg.includes("timeout") ||
-    msg.includes("rate limit") ||
-    msg.includes("429") ||
-    msg.includes("overloaded") ||
-    msg.includes("529") ||
-    msg.includes("500") ||
-    msg.includes("502") ||
-    msg.includes("503") ||
-    msg.includes("internal server error")
-  );
-}
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -321,7 +297,15 @@ async function main() {
     async function processQueue() {
       while (queue.length > 0 || inFlight.size > 0) {
         while (queue.length > 0 && inFlight.size < maxConcurrency) {
-          const promise = runNext();
+          // runNext records its own failures in `results`; a rejection
+          // here is unexpected (e.g. mkdir failed). Catch it so the
+          // tracked promise can't reject — an unhandled rejection in
+          // Promise.race would abort the whole run.
+          const promise = runNext().catch((err) => {
+            console.error(
+              `${tag(label)} ${error("Iteration runner crashed:")} ${err.message}`,
+            );
+          });
           inFlight.add(promise);
           promise.then(() => inFlight.delete(promise));
         }
