@@ -1,5 +1,9 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
+  generateReport,
   mean,
   sum,
   stdDev,
@@ -677,5 +681,119 @@ describe("analyzeSemanticHtml", () => {
     expect(result.globalGenericByTag).toEqual({ div: 11, span: 5 });
     expect(result.globalRolesByValue).toEqual({ button: 3, navigation: 1 });
     expect(result.perIteration).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// generateReport — markdown section regression tests
+// ---------------------------------------------------------------------------
+describe("generateReport markdown sections", () => {
+  it("renders DOM Elements and Semantic HTML when there are zero inline styles", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const dir = await mkdtemp(join(tmpdir(), "at-report-"));
+
+    const iterations = [
+      {
+        iteration: 1,
+        elapsedSeconds: 10,
+        linesOfCode: 50,
+        files: [
+          { path: "src/App.tsx", content: "export default () => null;\n" },
+        ],
+        componentImports: [],
+        fixAttempts: 0,
+        // The desired outcome the harness measures for: no inline styles.
+        // These sections used to be nested inside the inline-styles
+        // conditional and silently vanished from the report in this case.
+        inlineStyles: { total: 0, byComponent: {}, byProperty: {} },
+        domElementCount: 120,
+        domHtmlBytes: 4096,
+        semanticHtml: {
+          total: 20,
+          semanticCount: 12,
+          genericCount: 8,
+          roleCount: 3,
+          semanticRatio: 0.6,
+          semanticByTag: { main: 1, nav: 1 },
+          genericByTag: { div: 8 },
+          rolesByValue: { button: 2 },
+        },
+      },
+    ];
+
+    try {
+      await generateReport({ demo: iterations }, dir);
+      const md = await readFile(join(dir, "report.md"), "utf-8");
+
+      expect(md).toContain("No inline style data available.");
+      expect(md).toContain("### DOM Elements");
+      expect(md).toContain("### Semantic HTML");
+      // Section order: Inline Styles closes before DOM Elements begins.
+      expect(md.indexOf("### DOM Elements")).toBeGreaterThan(
+        md.indexOf("### Inline Styles"),
+      );
+      expect(md.indexOf("### Semantic HTML")).toBeGreaterThan(
+        md.indexOf("### DOM Elements"),
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      log.mockRestore();
+      warn.mockRestore();
+    }
+  });
+
+  it("keeps the Inline Styles section contiguous when inline styles exist", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const dir = await mkdtemp(join(tmpdir(), "at-report-"));
+
+    const iterations = [
+      {
+        iteration: 1,
+        elapsedSeconds: 10,
+        linesOfCode: 50,
+        files: [
+          { path: "src/App.tsx", content: "export default () => null;\n" },
+        ],
+        componentImports: [],
+        fixAttempts: 0,
+        inlineStyles: {
+          total: 2,
+          byComponent: { Card: 2 },
+          byProperty: { color: 2 },
+        },
+        domElementCount: 120,
+        domHtmlBytes: 4096,
+        semanticHtml: {
+          total: 20,
+          semanticCount: 12,
+          genericCount: 8,
+          roleCount: 3,
+          semanticRatio: 0.6,
+          semanticByTag: { main: 1 },
+          genericByTag: { div: 8 },
+          rolesByValue: { button: 2 },
+        },
+      },
+    ];
+
+    try {
+      await generateReport({ demo: iterations }, dir);
+      const md = await readFile(join(dir, "report.md"), "utf-8");
+
+      // The inline-styles property table must come BEFORE the DOM
+      // Elements section — previously DOM/Semantic rendered in the
+      // middle of the Inline Styles section.
+      expect(md).toContain("**Most common inline CSS properties:**");
+      expect(md.indexOf("**Most common inline CSS properties:**")).toBeLessThan(
+        md.indexOf("### DOM Elements"),
+      );
+      expect(md).toContain("### Semantic HTML");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      log.mockRestore();
+      warn.mockRestore();
+    }
   });
 });

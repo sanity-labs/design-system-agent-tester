@@ -772,6 +772,32 @@ function renderMarkdown(report) {
         md += `\n`;
       }
 
+      if (is.topProperties && is.topProperties.length > 0) {
+        md += `**Most common inline CSS properties:**\n\n`;
+        md += `| Property | Occurrences | % of Total |\n|----------|-------------|------------|\n`;
+        for (const { property, count } of is.topProperties.slice(0, 15)) {
+          const pct = is.totalAcrossIterations > 0
+            ? round((count / is.totalAcrossIterations) * 100, 1)
+            : 0;
+          md += `| \`${property}\` | ${count} | ${pct}% |\n`;
+        }
+        md += `\n`;
+      }
+
+      if (is.perIteration.length > 0) {
+        md += `**Per iteration:**\n\n`;
+        md += `| Iteration | Total | Top component |\n|-----------|-------|---------------|\n`;
+        for (const p of is.perIteration) {
+          const top = Object.entries(p.byComponent).sort((a, b) => b[1] - a[1])[0];
+          const topStr = top ? `\`${top[0]}\` (${top[1]})` : "—";
+          md += `| ${p.iteration} | ${p.total} | ${topStr} |\n`;
+        }
+        md += `\n`;
+      }
+    } else {
+      md += `No inline style data available.\n\n`;
+    }
+
     // DOM Elements
     const dom = data.domElements;
     if (dom && dom.iterationsWithData > 0) {
@@ -861,32 +887,6 @@ function renderMarkdown(report) {
         }
         md += `\n`;
       }
-    }
-
-      if (is.topProperties && is.topProperties.length > 0) {
-        md += `**Most common inline CSS properties:**\n\n`;
-        md += `| Property | Occurrences | % of Total |\n|----------|-------------|------------|\n`;
-        for (const { property, count } of is.topProperties.slice(0, 15)) {
-          const pct = is.totalAcrossIterations > 0
-            ? round((count / is.totalAcrossIterations) * 100, 1)
-            : 0;
-          md += `| \`${property}\` | ${count} | ${pct}% |\n`;
-        }
-        md += `\n`;
-      }
-
-      if (is.perIteration.length > 0) {
-        md += `**Per iteration:**\n\n`;
-        md += `| Iteration | Total | Top component |\n|-----------|-------|---------------|\n`;
-        for (const p of is.perIteration) {
-          const top = Object.entries(p.byComponent).sort((a, b) => b[1] - a[1])[0];
-          const topStr = top ? `\`${top[0]}\` (${top[1]})` : "—";
-          md += `| ${p.iteration} | ${p.total} | ${topStr} |\n`;
-        }
-        md += `\n`;
-      }
-    } else {
-      md += `No inline style data available.\n\n`;
     }
 
     // Visual Diff
