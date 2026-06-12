@@ -24,6 +24,7 @@ import {
   buildResult,
 } from "./shared.js";
 import { error, success, tag, warn } from "../util/color.js";
+import { isTransientError } from "../util/retry.js";
 
 // Max tool-use round-trips before we force the model to finish
 const MAX_TOOL_TURNS = 25;
@@ -44,18 +45,7 @@ async function callAnthropicWithRetry(client, params, label = "") {
       const stream = await client.messages.stream(params);
       return await stream.finalMessage();
     } catch (err) {
-      const msg = (err.message || "").toLowerCase();
-      const isTransient =
-        msg.includes("connection error") ||
-        msg.includes("connection reset") ||
-        msg.includes("econnreset") ||
-        msg.includes("socket hang up") ||
-        msg.includes("timeout") ||
-        msg.includes("overloaded") ||
-        msg.includes("529") ||
-        msg.includes("503");
-
-      if (isTransient && attempt < API_CALL_MAX_RETRIES) {
+      if (isTransientError(err) && attempt < API_CALL_MAX_RETRIES) {
         const delaySec = Math.round(API_CALL_RETRY_DELAY_MS / 1000);
         console.warn(
           `${label ? `[${label}] ` : ""}API call failed (attempt ${attempt}/${API_CALL_MAX_RETRIES}): ${err.message}. Retrying in ${delaySec}s...`,
@@ -150,42 +140,17 @@ async function generateWithMcp({
           ? `\n\nYou have done enough research.${feedbackTool ? ` Call ${feedbackTool.name} now, then` : ""} produce ALL project files using ---FILE: path--- blocks. No other tool calls.`
           : "";
 
-      // Use streaming to keep the connection alive during long generation turns.
-      // Non-streaming holds a silent TCP connection open for 100+ seconds on the
-      // final code-generation turn, which causes infrastructure-level timeouts.
-      let response;
-      for (let attempt = 1; attempt <= API_CALL_MAX_RETRIES; attempt++) {
-        try {
-          const stream = await client.messages.stream({
-            model,
-            max_tokens: 32000,
-            system: systemPrompt + nudge,
-            tools: mcpTools,
-            messages,
-          });
-          response = await stream.finalMessage();
-          break;
-        } catch (err) {
-          const msg = (err.message || "").toLowerCase();
-          const isTransient =
-            msg.includes("connection error") ||
-            msg.includes("connection reset") ||
-            msg.includes("econnreset") ||
-            msg.includes("socket hang up") ||
-            msg.includes("timeout") ||
-            msg.includes("overloaded") ||
-            msg.includes("529") ||
-            msg.includes("503");
-          if (isTransient && attempt < API_CALL_MAX_RETRIES) {
-            console.warn(
-              `[${iterLabel}] API stream failed (attempt ${attempt}/${API_CALL_MAX_RETRIES}): ${err.message}. Retrying in ${Math.round(API_CALL_RETRY_DELAY_MS / 1000)}s...`,
-            );
-            await new Promise((r) => setTimeout(r, API_CALL_RETRY_DELAY_MS));
-          } else {
-            throw err;
-          }
-        }
-      }
+      const response = await callAnthropicWithRetry(
+        client,
+        {
+          model,
+          max_tokens: 32000,
+          system: systemPrompt + nudge,
+          tools: mcpTools,
+          messages,
+        },
+        iterLabel,
+      );
 
       inputTokens += response.usage?.input_tokens ?? 0;
       outputTokens += response.usage?.output_tokens ?? 0;
