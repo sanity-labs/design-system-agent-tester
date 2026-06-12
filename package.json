@@ -25,7 +25,7 @@
   ],
   "license": "MIT",
   "scripts": {
-    "start": "node --env-file=.env src/index.js",
+    "start": "node --env-file-if-exists=.env src/index.js",
     "summarize": "node src/reporting/summarize.js",
     "new-test": "node src/scripts/new-test.js",
     "test": "vitest run",

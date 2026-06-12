@@ -6,16 +6,21 @@ Test AI agents' ability to use a design system. The harness spins up one or more
 
 This isn't published to npm. Clone, install, and run from the working tree.
 
+Prerequisites:
+
+- Node.js ≥ 22.12
+- An Anthropic API key for the default `api` runner — or the [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) (`npm install -g @anthropic-ai/claude-code`) for `--runner cli`, which needs no key.
+
 ```sh
 npm install
 cp agent-tester.config.example.js agent-tester.config.js   # then edit it
-echo 'ANTHROPIC_API_KEY=sk-ant-...' > .env
+echo 'ANTHROPIC_API_KEY=sk-ant-...' > .env                 # api runner only
 ```
 
 Notes:
 
 - Puppeteer downloads Chromium on first install (~150MB).
-- The `.env` approach above is convenient but not ideal — prefer `direnv` or a shell-level export so the key never ends up on disk in the project directory.
+- The `.env` approach above is convenient but not ideal — prefer `direnv` or a shell-level export to keep the key off disk. (`.env` is optional; the cli runner doesn't need one.)
 - Pass `--yes` to skip the 5-second cost-warning delay at startup.
 
 ## Run it
@@ -43,10 +48,11 @@ Output lands in `output/<date>/<time>/`. Open `report.md` to see the comparison.
 | `--test`, `-t` | `all` | Which test(s) to run. A label, `all`, or a comma list. |
 | `--iterations`, `-n` | `3` | How many times to run each test. |
 | `--model`, `-m` | `claude-sonnet-4-20250514` | Claude model ID. |
-| `--runner`, `-r` | `api` | `api` (SDK) or `cli` (Claude CLI). |
+| `--runner`, `-r` | `api` | `api` (SDK, needs `ANTHROPIC_API_KEY`) or `cli` (Claude Code CLI, no key). |
 | `--max-fixes`, `-f` | `5` | Max error→fix cycles per iteration. |
-| `--concurrency`, `-c` | `2` | Max parallel agent calls. |
-| `--agent-prompt` | off | Generate a fresh brief from Claude. |
+| `--concurrency`, `-c` | auto | Max parallel agent calls. Default: `min(iterations, 2)`. |
+| `--no-screenshot` | — | Skip browser validation and all browser-based metrics. |
+| `--agent-prompt` | off | Generate a fresh brief from Claude (see Briefs below). |
 | `--yes`, `-y` | off | Skip the cost-warning startup delay. |
 
 ### Models
@@ -55,14 +61,19 @@ See [Anthropic's documentation](https://docs.anthropic.com/en/docs/about-claude/
 
 ## Tests
 
-The `tests/` directory ships with four reference examples covering universal design systems:
+The `tests/` directory ships with nine reference examples covering public design systems:
 
+- `atlaskit` — Atlassian Design System
 - `carbon` — IBM Carbon Design System
 - `gestalt` — Pinterest Gestalt
+- `lightning` — Salesforce Lightning
+- `nord` — Nordhealth Nord
+- `polaris` — Shopify Polaris
 - `shad-cn` — shadcn/ui
 - `spectrum` — Adobe Spectrum
+- `zendesk-garden` — Zendesk Garden
 
-These are reference examples. Add your own to test the systems you care about.
+These are reference examples. Add your own to test the systems you care about. This project has no affiliation with these vendors. The names identify which public npm packages each test installs.
 
 ## Add a test
 
@@ -147,6 +158,15 @@ Inside templates, `{{#if requiresMcp}}` is true whenever an `mcp` block is prese
 
 Rename `tests/foo/` to `tests/foo.disabled/` (or prefix with `_`). The engine skips it.
 
+## Briefs
+
+Every test in a run gets the same interface brief. That keeps results comparable. `briefs/default.js` defines it (wired up via `briefGenerator` in `agent-tester.config.js`):
+
+- By default, `staticBrief` is used — one fixed sentence describing the app to build.
+- With `--agent-prompt`, Claude generates a fresh PRD-style brief per run using the `systemPrompt`, `domains`, and `buildUserMessage` fields.
+
+Edit `briefs/default.js` (or point `briefGenerator` at your own module) to change what the agents are asked to build.
+
 ## What the report measures
 
 | Section | Metric |
@@ -182,3 +202,7 @@ npm run summarize -- --count 5                      # Last 5 runs
 npm run summarize -- --test shad-cn                 # One test only
 npm run summarize -- --from 2026-05-14/14.00 --save # Since a date
 ```
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Security issues: see [SECURITY.md](SECURITY.md).

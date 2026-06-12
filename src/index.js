@@ -71,6 +71,9 @@ const { values } = parseArgs({
       default: false,
     },
   },
+  // Lets boolean flags be turned off (e.g. --no-screenshot) — without
+  // this, a default-true boolean like --screenshot can never be unset.
+  allowNegative: true,
 });
 
 // Resolve --test/--prompt with deprecation warning for --prompt.

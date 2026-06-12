@@ -13,7 +13,7 @@
  *   --output,  -o  Directory containing run folders to scan  (default: ./output)
  *   --count,   -n  Number of most-recent runs to include     (default: all)
  *   --from,    -f  Include runs at-or-after this folder name (e.g. 2026-04-14/13.00)
- *   --prompt,  -p  Test labels to include: a single label, a comma-separated list,
+ *   --test,    -t  Test labels to include: a single label, a comma-separated list,
  *                  or `all` (default: all)
  *   --save,    -s  Write output to a file instead of stdout
  *   --help,    -h  Print this help message
@@ -22,7 +22,7 @@
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { resolve, join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import {
   extractMetrics,
@@ -43,12 +43,20 @@ async function main() {
       output: { type: "string", short: "o", default: resolve(ROOT, "output") },
       count: { type: "string", short: "n", default: "0" }, // 0 = all
       from: { type: "string", short: "f", default: "" },
-      prompt: { type: "string", short: "p", default: "all" },
+      test: { type: "string", short: "t", default: "all" },
+      // Deprecated alias for --test, kept for old scripts.
+      prompt: { type: "string", short: "p" },
       save: { type: "boolean", short: "s", default: false },
       help: { type: "boolean", short: "h", default: false },
     },
     allowPositionals: false,
   });
+
+  // Resolve --test/--prompt with deprecation warning, same as index.js.
+  if (values.test === "all" && values.prompt !== undefined) {
+    console.error("Warning: --prompt is deprecated, use --test instead");
+    values.test = values.prompt;
+  }
 
   if (values.help) {
     console.log(`
@@ -61,7 +69,7 @@ Options:
   --output,  -o  Directory containing run folders to scan  (default: ./output)
   --count,   -n  Number of most-recent runs to include     (default: all)
   --from,    -f  Include runs at-or-after this folder name (e.g. 2026-04-14/13.00)
-  --prompt,  -p  Test labels to include: a single label, a comma-separated list,
+  --test,    -t  Test labels to include: a single label, a comma-separated list,
                  or \`all\` (default: all)
   --save,    -s  Write output to a file instead of stdout
   --help,    -h  Print this help message
@@ -69,7 +77,7 @@ Options:
 Examples:
   node src/reporting/summarize.js --count 5
   node src/reporting/summarize.js --from 2026-04-14/14.20 --save
-  node src/reporting/summarize.js --prompt variant --count 8
+  node src/reporting/summarize.js --test shad-cn --count 8
 `);
     process.exit(0);
   }
@@ -77,7 +85,7 @@ Examples:
   const outputDir = resolve(values.output);
   const maxCount = parseInt(values.count, 10) || 0;
   const fromFilter = values.from.trim();
-  const promptFilter = values.prompt.trim();
+  const promptFilter = values.test.trim();
   const saveToFile = values.save;
 
   // 1. Enumerate timestamped run directories
@@ -183,7 +191,7 @@ Examples:
     const unknown = requested.filter((l) => !discoveredLabels.includes(l));
     if (requested.length === 0 || unknown.length > 0) {
       console.error(
-        `Error: --prompt must be one of: ${[...discoveredLabels, "all"].join(", ")}.\n` +
+        `Error: --test must be one of: ${[...discoveredLabels, "all"].join(", ")}.\n` +
           `Got: "${promptFilter}"${unknown.length ? `\nUnknown labels: ${unknown.join(", ")}` : ""}`,
       );
       process.exit(1);
@@ -311,8 +319,10 @@ function renderVarianceSection(promptKeys, agg) {
 
 // ─── Entry point ────────────────────────────────────────────────────
 
-// Only run as CLI when invoked directly via `node`.
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Only run as CLI when invoked directly via `node`. Compare via
+// pathToFileURL so paths with spaces (or Windows paths) match too —
+// naive string interpolation never URL-encodes them.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((err) => {
     console.error("Fatal error:", err);
     process.exit(1);
