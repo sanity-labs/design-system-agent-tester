@@ -154,4 +154,60 @@ describe("extractComponentUsageCounts", () => {
     expect(result.total).toBe(3);
     expect(result.byComponent.Button).toBe(3);
   });
+
+  it("does not count TypeScript generic type arguments", () => {
+    const files = [
+      {
+        path: "src/App.tsx",
+        content: [
+          "const [filter, setFilter] = useState<FilterState>('all');",
+          "const ref = useRef<HTMLDivElement>(null);",
+          "const items: Array<Item> = [];",
+          "const lookup: Record<string, Member> = {};",
+          "async function load(): Promise<Response> {}",
+          "interface Props extends BaseProps<Config> {}",
+          "return <Card><Button>Go</Button></Card>;",
+        ].join("\n"),
+      },
+    ];
+
+    const result = extractComponentUsageCounts(files);
+
+    expect(result.byComponent).toEqual({ Card: 1, Button: 1 });
+    expect(result.total).toBe(2);
+  });
+
+  it("does not count generic parameter lists in arrow functions", () => {
+    const files = [
+      {
+        path: "src/util.tsx",
+        content: "const identity = <T,>(value: T): T => value;",
+      },
+    ];
+
+    const result = extractComponentUsageCounts(files);
+    expect(result.total).toBe(0);
+  });
+
+  it("still counts JSX tags in expressions and multi-line tags", () => {
+    const files = [
+      {
+        path: "src/App.tsx",
+        content: [
+          "{open && <Modal onClose={close} />}",
+          "const el = condition ? <Spinner/> : null;",
+          "return (",
+          "  <Flex",
+          "    direction='column'>",
+          "  </Flex>",
+          ");",
+        ].join("\n"),
+      },
+    ];
+
+    const result = extractComponentUsageCounts(files);
+
+    expect(result.byComponent).toEqual({ Modal: 1, Spinner: 1, Flex: 1 });
+    expect(result.total).toBe(3);
+  });
 });

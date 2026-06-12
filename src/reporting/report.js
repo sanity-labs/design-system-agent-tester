@@ -45,13 +45,14 @@ export async function generateReport(allResults, outputDir, promptText = null) {
       .map((r) => r.screenshotPath)
       .filter(Boolean);
 
-    // Token usage
+    // Token usage. `!= null` rather than truthiness — a recorded 0 is a
+    // legitimate value and should count toward the average.
     const inputTokens = validIterations
       .map((r) => r.inputTokens)
-      .filter(Boolean);
+      .filter((v) => v != null);
     const outputTokens = validIterations
       .map((r) => r.outputTokens)
-      .filter(Boolean);
+      .filter((v) => v != null);
 
     // 6. Fix attempts
     const fixCounts = validIterations.map((r) => r.fixAttempts ?? 0);
@@ -118,27 +119,29 @@ export async function generateReport(allResults, outputDir, promptText = null) {
       successfulIterations: validIterations.length,
       failedIterations: failedCount,
       timing: {
-        averageSeconds: round(avgTime),
-        stdDevSeconds: round(stdDevTime),
-        minSeconds: round(Math.min(...times)),
-        maxSeconds: round(Math.max(...times)),
+        // Guard the empty case (every iteration failed): Math.min() of
+        // an empty spread is Infinity, which would render literally.
+        averageSeconds: times.length ? round(avgTime) : null,
+        stdDevSeconds: times.length ? round(stdDevTime) : null,
+        minSeconds: times.length ? round(Math.min(...times)) : null,
+        maxSeconds: times.length ? round(Math.max(...times)) : null,
         allTimesSeconds: times.map((t) => round(t)),
       },
       linesOfCode: {
-        average: round(avgLOC),
-        stdDev: round(stdDevLOC),
-        min: Math.min(...locs),
-        max: Math.max(...locs),
+        average: locs.length ? round(avgLOC) : null,
+        stdDev: locs.length ? round(stdDevLOC) : null,
+        min: locs.length ? Math.min(...locs) : null,
+        max: locs.length ? Math.max(...locs) : null,
         all: locs,
       },
       codeVariance: varianceAnalysis,
       componentImports: componentAnalysis,
       screenshots,
       fixAttempts: {
-        average: round(avgFixes),
-        stdDev: round(stdDevFixes),
-        min: Math.min(...fixCounts),
-        max: Math.max(...fixCounts),
+        average: fixCounts.length ? round(avgFixes) : null,
+        stdDev: fixCounts.length ? round(stdDevFixes) : null,
+        min: fixCounts.length ? Math.min(...fixCounts) : null,
+        max: fixCounts.length ? Math.max(...fixCounts) : null,
         total: sum(fixCounts),
         iterationsNeedingFixes,
         iterationsCleanOnFirstTry:
@@ -218,6 +221,11 @@ export async function generateReport(allResults, outputDir, promptText = null) {
  * Uses Jaccard similarity on line-level n-grams for each source file.
  */
 export function computeCodeVariance(iterations) {
+  // Iterations with no files would compare as identical — the Jaccard
+  // index of two empty n-gram sets is 1 — inflating average similarity.
+  // Only compare iterations that produced content.
+  iterations = iterations.filter((iter) => iter.files?.length > 0);
+
   if (iterations.length < 2) {
     return {
       pairwiseContentSimilarity: [],
@@ -229,10 +237,9 @@ export function computeCodeVariance(iterations) {
   }
 
   // Flatten all source content from each iteration into a single string
-  const iterContents = iterations.map((iter) => {
-    if (!iter.files || iter.files.length === 0) return "";
-    return iter.files.map((f) => f.content).join("\n");
-  });
+  const iterContents = iterations.map((iter) =>
+    iter.files.map((f) => f.content).join("\n"),
+  );
 
   // Compute pairwise similarities
   const pairs = [];
@@ -392,13 +399,25 @@ export function analyzeComponents(iterations) {
  * Analyze accessibility results across iterations.
  */
 export function analyzeAccessibility(iterations) {
-  const withA11y = iterations.filter((r) => r.a11yResults != null);
+  // Skipped scans (axe failed to load/inject — summary.skipped) carry
+  // axeViolationCount: 0 but measured nothing. Counting them as tested
+  // iterations would deflate averageViolations and corrupt passRate.
+  const withA11y = iterations.filter(
+    (r) => r.a11yResults != null && !r.a11yResults.summary?.skipped,
+  );
+  const skippedCount = iterations.filter(
+    (r) => r.a11yResults?.summary?.skipped,
+  ).length;
 
   if (withA11y.length === 0) {
     return {
       iterationsWithResults: 0,
+      skippedIterations: skippedCount,
       totalIterations: iterations.length,
-      description: "No accessibility results collected",
+      description:
+        skippedCount > 0
+          ? `No accessibility results collected (${skippedCount} scan(s) skipped)`
+          : "No accessibility results collected",
     };
   }
 
@@ -448,6 +467,7 @@ export function analyzeAccessibility(iterations) {
 
   return {
     iterationsWithResults: withA11y.length,
+    skippedIterations: skippedCount,
     totalIterations: iterations.length,
     totalViolations,
     averageViolations: round(totalViolations / withA11y.length),
@@ -460,6 +480,12 @@ export function analyzeAccessibility(iterations) {
 /**
  * Render report as Markdown.
  */
+// Render a possibly-null metric cell: null (e.g. every iteration
+// failed, so there's nothing to aggregate) shows as a dash.
+function cell(value, suffix = "") {
+  return value == null ? "—" : `${value}${suffix}`;
+}
+
 function renderMarkdown(report) {
   let md = `# Agent Test Report\n\n`;
   md += `**Generated:** ${report.generatedAt}\n\n`;
@@ -494,19 +520,19 @@ function renderMarkdown(report) {
     // Timing
     md += `### Timing\n\n`;
     md += `| Metric | Value |\n|--------|-------|\n`;
-    md += `| Average | ${data.timing.averageSeconds}s |\n`;
-    md += `| Std Dev | ${data.timing.stdDevSeconds}s |\n`;
-    md += `| Min | ${data.timing.minSeconds}s |\n`;
-    md += `| Max | ${data.timing.maxSeconds}s |\n`;
+    md += `| Average | ${cell(data.timing.averageSeconds, "s")} |\n`;
+    md += `| Std Dev | ${cell(data.timing.stdDevSeconds, "s")} |\n`;
+    md += `| Min | ${cell(data.timing.minSeconds, "s")} |\n`;
+    md += `| Max | ${cell(data.timing.maxSeconds, "s")} |\n`;
     md += `| All | ${data.timing.allTimesSeconds.map((t) => `${t}s`).join(", ")} |\n\n`;
 
     // LOC
     md += `### Lines of Code\n\n`;
     md += `| Metric | Value |\n|--------|-------|\n`;
-    md += `| Average | ${data.linesOfCode.average} |\n`;
-    md += `| Std Dev | ${data.linesOfCode.stdDev} |\n`;
-    md += `| Min | ${data.linesOfCode.min} |\n`;
-    md += `| Max | ${data.linesOfCode.max} |\n`;
+    md += `| Average | ${cell(data.linesOfCode.average)} |\n`;
+    md += `| Std Dev | ${cell(data.linesOfCode.stdDev)} |\n`;
+    md += `| Min | ${cell(data.linesOfCode.min)} |\n`;
+    md += `| Max | ${cell(data.linesOfCode.max)} |\n`;
     md += `| All | ${data.linesOfCode.all.join(", ")} |\n\n`;
 
     // Variance
@@ -533,10 +559,10 @@ function renderMarkdown(report) {
     md += `### Fix Attempts\n\n`;
     const f = data.fixAttempts;
     md += `| Metric | Value |\n|--------|-------|\n`;
-    md += `| Average fixes per iteration | ${f.average} |\n`;
-    md += `| Std Dev | ${f.stdDev} |\n`;
-    md += `| Min | ${f.min} |\n`;
-    md += `| Max | ${f.max} |\n`;
+    md += `| Average fixes per iteration | ${cell(f.average)} |\n`;
+    md += `| Std Dev | ${cell(f.stdDev)} |\n`;
+    md += `| Min | ${cell(f.min)} |\n`;
+    md += `| Max | ${cell(f.max)} |\n`;
     md += `| Total fixes across all iterations | ${f.total} |\n`;
     md += `| Iterations clean on first try | ${f.iterationsCleanOnFirstTry}/${data.successfulIterations} |\n`;
     md += `| Iterations needing fixes | ${f.iterationsNeedingFixes}/${data.successfulIterations} |\n`;

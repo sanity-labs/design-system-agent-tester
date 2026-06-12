@@ -234,8 +234,9 @@ describe("computeCodeVariance", () => {
       { iteration: 1, files: [] },
       { iteration: 2, files: [] },
     ]);
-    // Two empty strings → identical n-gram sets (both empty) → similarity = 1
-    expect(result.averageContentSimilarity).toBe(1);
+    // File-less iterations are excluded — two empty n-gram sets would
+    // otherwise compare as identical (similarity = 1).
+    expect(result.averageContentSimilarity).toBeNull();
   });
 });
 
@@ -449,6 +450,54 @@ describe("analyzeAccessibility", () => {
     expect(result.passRate).toBe(0.5);
     expect(result.perIteration[0].passed).toBe(true);
     expect(result.perIteration[1].passed).toBe(false);
+  });
+
+  it("excludes skipped scans from averages and pass rate", () => {
+    const iters = [
+      {
+        iteration: 1,
+        a11yResults: {
+          summary: { totalViolations: 4, passed: false },
+          axeViolationCount: 4,
+          axeViolations: [
+            { id: "color-contrast", impact: "serious", modes: ["light"] },
+          ],
+        },
+      },
+      {
+        // axe failed to inject — recorded as skipped with zero count.
+        iteration: 2,
+        a11yResults: {
+          summary: { skipped: true, passed: false },
+          axeViolationCount: 0,
+          axeViolations: [],
+        },
+      },
+    ];
+    const result = analyzeAccessibility(iters);
+    // Only the real scan counts: avg 4/1, not 4/2.
+    expect(result.iterationsWithResults).toBe(1);
+    expect(result.skippedIterations).toBe(1);
+    expect(result.averageViolations).toBe(4);
+    expect(result.passRate).toBe(0);
+    expect(result.perIteration).toHaveLength(1);
+  });
+
+  it("reports skip count when every scan was skipped", () => {
+    const iters = [
+      {
+        iteration: 1,
+        a11yResults: {
+          summary: { skipped: true, passed: false },
+          axeViolationCount: 0,
+          axeViolations: [],
+        },
+      },
+    ];
+    const result = analyzeAccessibility(iters);
+    expect(result.iterationsWithResults).toBe(0);
+    expect(result.skippedIterations).toBe(1);
+    expect(result.description).toMatch(/skipped/i);
   });
 });
 
@@ -790,6 +839,67 @@ describe("generateReport markdown sections", () => {
         md.indexOf("### DOM Elements"),
       );
       expect(md).toContain("### Semantic HTML");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      log.mockRestore();
+      warn.mockRestore();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Empty-input guards
+// ---------------------------------------------------------------------------
+describe("computeCodeVariance with file-less iterations", () => {
+  it("does not score two file-less iterations as identical", () => {
+    const result = computeCodeVariance([
+      { iteration: 1, files: [] },
+      { iteration: 2, files: [] },
+    ]);
+    // Jaccard of two empty n-gram sets is 1 — these must be excluded,
+    // leaving fewer than 2 comparable iterations.
+    expect(result.averageContentSimilarity).toBeNull();
+    expect(result.pairwiseContentSimilarity).toEqual([]);
+  });
+
+  it("compares only iterations that produced files", () => {
+    const file = { path: "a.tsx", content: "export const x = 1;" };
+    const result = computeCodeVariance([
+      { iteration: 1, files: [file] },
+      { iteration: 2, files: [] },
+      { iteration: 3, files: [file] },
+    ]);
+    expect(result.pairwiseContentSimilarity).toHaveLength(1);
+    expect(result.averageContentSimilarity).toBe(1);
+  });
+});
+
+describe("generateReport with all iterations failed", () => {
+  it("renders dashes instead of Infinity", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const dir = await mkdtemp(join(tmpdir(), "at-report-"));
+
+    const iterations = [
+      {
+        iteration: 1,
+        elapsedSeconds: 12,
+        testLabel: "demo",
+        error: "All 3 generation attempts returned no parseable files.",
+        linesOfCode: 0,
+        files: [],
+        componentImports: [],
+      },
+    ];
+
+    try {
+      const report = await generateReport({ demo: iterations }, dir);
+      const md = await readFile(join(dir, "report.md"), "utf-8");
+
+      expect(md).not.toContain("Infinity");
+      expect(report.prompts.demo.timing.minSeconds).toBeNull();
+      expect(report.prompts.demo.linesOfCode.max).toBeNull();
+      expect(report.prompts.demo.fixAttempts.min).toBeNull();
     } finally {
       await rm(dir, { recursive: true, force: true });
       log.mockRestore();
