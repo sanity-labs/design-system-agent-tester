@@ -2,8 +2,18 @@
   "name": "design-system-agent-tester",
   "version": "1.0.0",
   "description": "Test harness for measuring how well AI agents use a given design system. Runs many agents in parallel against the same brief and aggregates the results.",
+  "private": true,
   "type": "module",
   "main": "src/index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sanity-io/design-system-agent-tester.git"
+  },
+  "bugs": {
+    "url": "https://github.com/sanity-io/design-system-agent-tester/issues"
+  },
+  "homepage": "https://github.com/sanity-io/design-system-agent-tester#readme",
+  "author": "Sanity.io <hello@sanity.io>",
   "keywords": [
     "ai",
     "agents",
