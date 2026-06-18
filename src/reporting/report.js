@@ -688,18 +688,23 @@ function renderMarkdown(report) {
     md += `### Lighthouse\n\n`;
     const lh = data.lighthouse;
     if (lh && lh.iterationsWithResults > 0) {
-      md += `| Metric | Value |\n|--------|-------|\n`;
-      md += `| Iterations measured | ${lh.iterationsWithResults}/${data.successfulIterations} |\n`;
-      md += `| Lighthouse runs / iteration | ${lh.runsPerIteration} |\n`;
-      if (lh.avgFcpMs !== null) md += `| Avg FCP | ${lh.avgFcpMs}ms |\n`;
-      if (lh.avgLcpMs !== null) md += `| Avg LCP | ${lh.avgLcpMs}ms |\n`;
-      if (lh.avgTbtMs !== null) md += `| Avg TBT (Total Blocking Time) | ${lh.avgTbtMs}ms |\n`;
-      if (lh.avgTtiMs !== null) md += `| Avg TTI (Time to Interactive) | ${lh.avgTtiMs}ms |\n`;
-      if (lh.avgSpeedIndex !== null) md += `| Avg Speed Index | ${lh.avgSpeedIndex}ms |\n`;
-      if (lh.avgPerformanceScore !== null) md += `| Avg Lighthouse score | ${lh.avgPerformanceScore} |\n`;
+      md += `| Metric | Median | Mean |\n|--------|--------|------|\n`;
+      const row = (label, med, mn, unit = "") => {
+        const m = med != null ? `${med}${unit}` : "—";
+        const a = mn != null ? `${mn}${unit}` : "—";
+        return `| ${label} | ${m} | ${a} |\n`;
+      };
+      md += row("FCP", lh.medianFcpMs, lh.meanFcpMs, "ms");
+      md += row("LCP", lh.medianLcpMs, lh.meanLcpMs, "ms");
+      md += row("TBT (Total Blocking Time)", lh.medianTbtMs, lh.meanTbtMs, "ms");
+      md += row("TTI (Time to Interactive)", lh.medianTtiMs, lh.meanTtiMs, "ms");
+      md += row("Speed Index", lh.medianSpeedIndex, lh.meanSpeedIndex, "ms");
+      md += row("Lighthouse score", lh.medianPerformanceScore, lh.meanPerformanceScore);
       md += `\n`;
+      md += `_Median and mean both aggregate across ${lh.iterationsWithResults} iteration(s). Each iteration's number is itself the median (Median column) or mean (Mean column) of ${lh.runsPerIteration} intra-iteration Lighthouse runs. Large median↔mean gaps indicate a slow outlier in the lighthouse runs — usually CPU contention or a cold dev-server start._\n\n`;
 
       if (lh.perIteration.length > 0) {
+        md += `**Per iteration** (median values):\n\n`;
         md += `| Iteration | FCP (ms) | LCP (ms) | TBT (ms) | TTI (ms) | Score |\n`;
         md += `|-----------|----------|----------|----------|----------|-------|\n`;
         for (const p of lh.perIteration) {
@@ -976,55 +981,130 @@ function renderMarkdown(report) {
 
 /**
  * Aggregate Lighthouse results across iterations.
+ *
+ * Each iteration's Lighthouse run produces a median + mean per metric
+ * (computed across N intra-iteration lighthouse runs — typically 3).
+ * This function rolls both upwards to a single number per metric:
+ *
+ *   - `medianFcpMs` — mean of per-iteration **medians** (robust)
+ *   - `meanFcpMs`   — mean of per-iteration **means**   (sensitive to outliers)
+ *
+ * Backward-compat: `avgFcpMs` is kept as an alias for `medianFcpMs`
+ * since the historic top-level `lighthouseResults.fcpMs` was a mean,
+ * and old reports' "Avg FCP" cell maps onto today's median.
  */
 export function analyzeLighthouse(iterations) {
   const withResults = iterations.filter(
     (r) => r.lighthouseResults && !r.lighthouseResults.error,
   );
 
-  if (withResults.length === 0) {
-    return {
-      iterationsWithResults: 0,
-      totalIterations: iterations.length,
-      avgFcpMs: null,
-      avgLcpMs: null,
-      avgTbtMs: null,
-      avgTtiMs: null,
-      avgSpeedIndex: null,
-      avgPerformanceScore: null,
-      runsPerIteration: 0,
-      perIteration: [],
-    };
-  }
+  const empty = {
+    iterationsWithResults: 0,
+    totalIterations: iterations.length,
+    medianFcpMs: null,
+    meanFcpMs: null,
+    medianLcpMs: null,
+    meanLcpMs: null,
+    medianTbtMs: null,
+    meanTbtMs: null,
+    medianTtiMs: null,
+    meanTtiMs: null,
+    medianSpeedIndex: null,
+    meanSpeedIndex: null,
+    medianPerformanceScore: null,
+    meanPerformanceScore: null,
+    avgFcpMs: null,
+    avgLcpMs: null,
+    avgTbtMs: null,
+    avgTtiMs: null,
+    avgSpeedIndex: null,
+    avgPerformanceScore: null,
+    runsPerIteration: 0,
+    perIteration: [],
+  };
 
-  const fcpValues   = withResults.map((r) => r.lighthouseResults.fcpMs).filter((v) => v !== null);
-  const lcpValues   = withResults.map((r) => r.lighthouseResults.lcpMs).filter((v) => v !== null);
-  const tbtValues   = withResults.map((r) => r.lighthouseResults.tbtMs).filter((v) => v !== null);
-  const ttiValues   = withResults.map((r) => r.lighthouseResults.ttiMs).filter((v) => v !== null);
-  const siValues    = withResults.map((r) => r.lighthouseResults.speedIndex).filter((v) => v !== null);
-  const scoreValues = withResults.map((r) => r.lighthouseResults.performanceScore).filter((v) => v !== null);
+  if (withResults.length === 0) return empty;
+
+  // Per-metric: pull the median (top-level field, kept for backward
+  // compat) and the mean (under `metrics.<name>.mean` when emitted by
+  // newer lighthouse.js; falls back to the top-level for old runs).
+  const pickMedian = (r, key) => r.lighthouseResults[key] ?? null;
+  const pickMean = (r, metricName) =>
+    r.lighthouseResults.metrics?.[metricName]?.mean ??
+    r.lighthouseResults[`${metricName}Ms`] ??
+    null;
+
+  const fcpMedians = withResults.map((r) => pickMedian(r, "fcpMs")).filter((v) => v !== null);
+  const fcpMeans   = withResults.map((r) => pickMean(r, "fcp")).filter((v) => v !== null);
+  const lcpMedians = withResults.map((r) => pickMedian(r, "lcpMs")).filter((v) => v !== null);
+  const lcpMeans   = withResults.map((r) => pickMean(r, "lcp")).filter((v) => v !== null);
+  const tbtMedians = withResults.map((r) => pickMedian(r, "tbtMs")).filter((v) => v !== null);
+  const tbtMeans   = withResults.map((r) => pickMean(r, "tbt")).filter((v) => v !== null);
+  const ttiMedians = withResults.map((r) => pickMedian(r, "ttiMs")).filter((v) => v !== null);
+  const ttiMeans   = withResults.map((r) => pickMean(r, "tti")).filter((v) => v !== null);
+  const siMedians  = withResults.map((r) => pickMedian(r, "speedIndex")).filter((v) => v !== null);
+  const siMeans    = withResults.map((r) => r.lighthouseResults.metrics?.speedIndex?.mean ?? r.lighthouseResults.speedIndex ?? null).filter((v) => v !== null);
+  const scoreMedians = withResults.map((r) => pickMedian(r, "performanceScore")).filter((v) => v !== null);
+  const scoreMeans = withResults.map((r) => r.lighthouseResults.metrics?.performanceScore?.mean ?? r.lighthouseResults.performanceScore ?? null).filter((v) => v !== null);
 
   const perIteration = withResults.map((r) => ({
     iteration:        r.iteration,
+    // Median values per metric (top-level fields are medians in v2 runs)
     fcpMs:            r.lighthouseResults.fcpMs,
     lcpMs:            r.lighthouseResults.lcpMs,
     tbtMs:            r.lighthouseResults.tbtMs ?? null,
     ttiMs:            r.lighthouseResults.ttiMs ?? null,
     speedIndex:       r.lighthouseResults.speedIndex ?? null,
     performanceScore: r.lighthouseResults.performanceScore ?? null,
+    // Means from the nested `metrics` block (newer runs only)
+    fcpMean:            r.lighthouseResults.metrics?.fcp?.mean ?? null,
+    lcpMean:            r.lighthouseResults.metrics?.lcp?.mean ?? null,
+    tbtMean:            r.lighthouseResults.metrics?.tbt?.mean ?? null,
+    ttiMean:            r.lighthouseResults.metrics?.tti?.mean ?? null,
+    speedIndexMean:     r.lighthouseResults.metrics?.speedIndex?.mean ?? null,
+    performanceScoreMean: r.lighthouseResults.metrics?.performanceScore?.mean ?? null,
     runCount:         r.lighthouseResults.runs ?? 0,
   }));
 
+  const ofMean = (vals) => (vals.length > 0 ? round(mean(vals)) : null);
+
+  const medianFcpMs = ofMean(fcpMedians);
+  const meanFcpMs = ofMean(fcpMeans);
+  const medianLcpMs = ofMean(lcpMedians);
+  const meanLcpMs = ofMean(lcpMeans);
+  const medianTbtMs = ofMean(tbtMedians);
+  const meanTbtMs = ofMean(tbtMeans);
+  const medianTtiMs = ofMean(ttiMedians);
+  const meanTtiMs = ofMean(ttiMeans);
+  const medianSpeedIndex = ofMean(siMedians);
+  const meanSpeedIndex = ofMean(siMeans);
+  const medianPerformanceScore = ofMean(scoreMedians);
+  const meanPerformanceScore = ofMean(scoreMeans);
+
   return {
     iterationsWithResults: withResults.length,
-    totalIterations:       iterations.length,
-    avgFcpMs:              fcpValues.length   > 0 ? round(mean(fcpValues))   : null,
-    avgLcpMs:              lcpValues.length   > 0 ? round(mean(lcpValues))   : null,
-    avgTbtMs:              tbtValues.length   > 0 ? round(mean(tbtValues))   : null,
-    avgTtiMs:              ttiValues.length   > 0 ? round(mean(ttiValues))   : null,
-    avgSpeedIndex:         siValues.length    > 0 ? round(mean(siValues))    : null,
-    avgPerformanceScore:   scoreValues.length > 0 ? round(mean(scoreValues)) : null,
-    runsPerIteration:      withResults[0]?.lighthouseResults?.runs ?? 0,
+    totalIterations: iterations.length,
+    medianFcpMs,
+    meanFcpMs,
+    medianLcpMs,
+    meanLcpMs,
+    medianTbtMs,
+    meanTbtMs,
+    medianTtiMs,
+    meanTtiMs,
+    medianSpeedIndex,
+    meanSpeedIndex,
+    medianPerformanceScore,
+    meanPerformanceScore,
+    // Backward-compat aliases (downstream report rendering + aggregate.js
+    // historically read `avg*` fields). Treat them as the median-of-medians.
+    avgFcpMs: medianFcpMs,
+    avgLcpMs: medianLcpMs,
+    avgTbtMs: medianTbtMs,
+    avgTtiMs: medianTtiMs,
+    avgSpeedIndex: medianSpeedIndex,
+    avgPerformanceScore: medianPerformanceScore,
+    runsPerIteration: withResults[0]?.lighthouseResults?.runs ?? 0,
     perIteration,
   };
 }

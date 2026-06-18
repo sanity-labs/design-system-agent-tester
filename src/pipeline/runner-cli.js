@@ -255,8 +255,10 @@ export async function runAgent({
       "utf-8",
     );
 
-    // Parse files from the response
-    files = parseFiles(fullText);
+    // Parse files from the response, deduplicating by path (keep last occurrence).
+    const rawFiles = parseFiles(fullText);
+    const seenPaths = new Set();
+    files = [...rawFiles].reverse().filter(f => seenPaths.has(f.path) ? false : seenPaths.add(f.path)).reverse();
 
     if (files.length > 0) {
       break;
@@ -292,6 +294,10 @@ export async function runAgent({
   // Track fix attempts
   let fixAttempts = 0;
   const fixLog = [];
+
+  // Per-iteration snapshot of file hashes from the previous fix
+  // attempt — see buildCurrentFilesText for usage.
+  let previousFileHashes = null;
 
   // --- Step 2: Validate → Fix loop ---
   if (takeScreenshots && files.some((f) => f.path === "package.json")) {
@@ -416,8 +422,29 @@ export async function runAgent({
           fatalError: validation.fatalError,
         });
 
-        // Build the fix prompt with current files + errors
-        const currentFilesText = await buildCurrentFilesText(projectDir, files);
+        // Pull file paths mentioned in the error output so they're
+        // always included even when their hash hasn't changed since
+        // the previous attempt.
+        const errorText = [
+          validation.fatalError || "",
+          ...validation.consoleErrors,
+        ].join("\n");
+        const errorReferencedPaths = [
+          ...new Set(
+            (errorText.match(/(?:^|[\s(])([a-zA-Z0-9._/-]+\.(?:tsx?|jsx?|css|json|html))/g) || [])
+              .map((m) => m.replace(/^[\s(]/, "")),
+          ),
+        ];
+
+        // Build the fix prompt with current files + errors. On attempts
+        // ≥ 2, unchanged-and-not-error-referenced files become a
+        // manifest entry instead of full content.
+        const { text: currentFilesText, newHashes } = await buildCurrentFilesText(
+          projectDir,
+          files,
+          { previousHashes: previousFileHashes, errorReferencedPaths },
+        );
+        previousFileHashes = newHashes;
         const fixPrompt = buildFixPrompt(
           currentFilesText,
           validation.consoleErrors,

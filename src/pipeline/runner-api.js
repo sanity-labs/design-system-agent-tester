@@ -60,12 +60,20 @@ async function callAnthropicWithRetry(client, params, label = "") {
 
 /**
  * Simple single-shot generation (no MCP tools).
+ *
+ * The system prompt is wrapped as a single text block with
+ * `cache_control: { type: "ephemeral" }` — for fix-loop calls, the same
+ * fix-system prompt is used for every attempt within an iteration, so
+ * subsequent attempts within the ~5-minute cache TTL hit the cached
+ * prefix and are billed at ~10% of the normal input rate.
  */
 async function generateSimple({ client, model, promptContent, systemPrompt }) {
   const response = await callAnthropicWithRetry(client, {
     model,
     max_tokens: 32000,
-    system: systemPrompt,
+    system: [
+      { type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } },
+    ],
     messages: [{ role: "user", content: promptContent }],
   });
 
@@ -114,8 +122,21 @@ async function generateWithMcp({
     // Build system prompt with MCP instructions appended.
     const systemPrompt = baseSystemPrompt + "\n\n" + mcpInstructions;
 
-    // Conversation messages — we'll append tool results as the loop progresses
-    const messages = [{ role: "user", content: promptContent }];
+    // Conversation messages — we'll append tool results as the loop
+    // progresses. The initial user message is wrapped in a content
+    // array with `cache_control: ephemeral` so Anthropic caches the
+    // (system prompt + first user message) prefix across the many
+    // turns in this conversation. With MCP tool round-trips routinely
+    // hitting 10+ turns, this is the single highest-leverage caching
+    // breakpoint.
+    const messages = [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: promptContent, cache_control: { type: "ephemeral" } },
+        ],
+      },
+    ];
 
     let inputTokens = 0;
     let outputTokens = 0;
@@ -140,12 +161,23 @@ async function generateWithMcp({
           ? `\n\nYou have done enough research.${feedbackTool ? ` Call ${feedbackTool.name} now, then` : ""} produce ALL project files using ---FILE: path--- blocks. No other tool calls.`
           : "";
 
+      // Split the system field so the stable part is cached and the
+      // per-turn nudge (which changes when turns approach the limit or
+      // a duplicate streak triggers) lives in a separate non-cached
+      // block at the end. Cache-control on the stable block creates a
+      // cacheable prefix that survives across turns within this
+      // conversation.
+      const systemBlocks = [
+        { type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } },
+      ];
+      if (nudge) systemBlocks.push({ type: "text", text: nudge });
+
       const response = await callAnthropicWithRetry(
         client,
         {
           model,
           max_tokens: 32000,
-          system: systemPrompt + nudge,
+          system: systemBlocks,
           tools: mcpTools,
           messages,
         },
@@ -365,8 +397,13 @@ export async function runAgent({
       "utf-8",
     );
 
-    // Parse files from the response
-    files = parseFiles(fullText);
+    // Parse files from the response, deduplicating by path (keep last occurrence).
+    // The agent sometimes emits a file twice mid-response when it revises its work.
+    // Normalising here means the fix-merge loop (which uses findIndex) always sees
+    // exactly one entry per path, so a fixed version is never silently overwritten.
+    const rawFiles = parseFiles(fullText);
+    const seenPaths = new Set();
+    files = [...rawFiles].reverse().filter(f => seenPaths.has(f.path) ? false : seenPaths.add(f.path)).reverse();
 
     if (files.length > 0) {
       break;
@@ -401,6 +438,11 @@ export async function runAgent({
   // Track fix attempts
   let fixAttempts = 0;
   const fixLog = [];
+
+  // Per-iteration snapshot of file hashes from the previous fix
+  // attempt. Used by buildCurrentFilesText to elide unchanged-and-
+  // not-error-referenced files into a manifest on attempts ≥ 2.
+  let previousFileHashes = null;
 
   // --- Step 2: Validate → Fix loop ---
   if (takeScreenshots && files.some((f) => f.path === "package.json")) {
@@ -530,8 +572,30 @@ export async function runAgent({
         };
         fixLog.push(fixLogEntry);
 
-        // Build the fix prompt with current files + errors
-        const currentFilesText = await buildCurrentFilesText(projectDir, files);
+        // Pull file paths mentioned in the error output so they're
+        // always included in the fix prompt even when their hash
+        // hasn't changed since the previous attempt. Matches `src/...`
+        // and similar relative paths up to the next paren or colon.
+        const errorText = [
+          validation.fatalError || "",
+          ...validation.consoleErrors,
+        ].join("\n");
+        const errorReferencedPaths = [
+          ...new Set(
+            (errorText.match(/(?:^|[\s(])([a-zA-Z0-9._/-]+\.(?:tsx?|jsx?|css|json|html))/g) || [])
+              .map((m) => m.replace(/^[\s(]/, "")),
+          ),
+        ];
+
+        // Build the fix prompt with current files + errors. On attempts
+        // ≥ 2, unchanged-and-not-error-referenced files become a
+        // manifest entry instead of full content.
+        const { text: currentFilesText, newHashes } = await buildCurrentFilesText(
+          projectDir,
+          files,
+          { previousHashes: previousFileHashes, errorReferencedPaths },
+        );
+        previousFileHashes = newHashes;
         const fixPrompt = buildFixPrompt(
           currentFilesText,
           validation.consoleErrors,

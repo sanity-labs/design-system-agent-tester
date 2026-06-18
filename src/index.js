@@ -120,8 +120,11 @@ async function main() {
   const iterations = parseInt(values.iterations, 10);
   const model = values.model;
   const runnerType = values.runner;
-  const maxConcurrency =
-    parseInt(values.concurrency, 10) || Math.min(iterations, 2);
+  // Default to 1 (sequential) so Lighthouse / DOM / screenshot measurements
+  // aren't biased by CPU contention between parallel iterations. Pass an
+  // explicit `--concurrency 2+` for runs that prioritise wall-clock time
+  // over measurement precision.
+  const maxConcurrency = parseInt(values.concurrency, 10) || 1;
   const takeScreenshots = values.screenshot;
   const maxFixes = parseInt(values["max-fixes"], 10);
   const useAgentPrompt = values["agent-prompt"];
@@ -370,6 +373,19 @@ async function main() {
 
   console.log(`\n${success("Done!")} See ${runDir} for results and report.`);
 }
+
+// Swallow unhandled promise rejections from libraries that leak
+// orphan promises after their main API has returned. Lighthouse's
+// internal `checkForQuiet` polling can outlive `lighthouse()`'s
+// resolved promise: when we close the browser, the next poll fires
+// against a dead CDP session and rejects unhandled. Without this
+// handler Node crashes the whole harness mid-iteration. Log and keep
+// going — the iteration's main loop is the source of truth for
+// success/failure, not orphan background promises.
+process.on("unhandledRejection", (reason) => {
+  const msg = reason instanceof Error ? reason.message : String(reason);
+  console.warn(warn(`Unhandled promise rejection (ignored): ${msg}`));
+});
 
 main().catch((err) => {
   console.error(error("Fatal error:"), err);

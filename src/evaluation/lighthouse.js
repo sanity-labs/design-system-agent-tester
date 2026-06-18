@@ -43,7 +43,24 @@ export async function measureLighthouse({ serverUrl, iterDir, iterLabel }) {
       try {
         const { lhr } = await lighthouse(
           serverUrl,
-          { port, output: "json", logLevel: "error", throttlingMethod: "provided" },
+          {
+            // `port` reuses the Puppeteer-launched Chrome instance —
+            // without it, lighthouse tries to spawn its own Chrome at
+            // the default port 9222 and fails on a busy host (the
+            // "Failed to fetch browser webSocket URL ... 9222" error).
+            port,
+            output: "json",
+            logLevel: "error",
+            // `provided` reports raw wall-clock timing, which is
+            // sensitive to CPU contention — but the harness now
+            // defaults to `--concurrency 1`, so concurrent iterations
+            // don't compete and the numbers are stable. Switching to
+            // `simulated` here doesn't work with lighthouse's
+            // `desktopConfig` preset (the override leaves the rest of
+            // the lantern pipeline misconfigured and audits return
+            // null numeric values).
+            throttlingMethod: "provided",
+          },
           desktopConfig,
         );
         lhRuns.push(lhr);
@@ -67,30 +84,61 @@ export async function measureLighthouse({ serverUrl, iterDir, iterLabel }) {
         .map((lhr) => lhr.audits[key]?.numericValue ?? null)
         .filter((v) => v !== null);
 
-    const avg = (vals) =>
+    const mean = (vals) =>
       vals.length
         ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length)
         : null;
+
+    const median = (vals) => {
+      if (!vals.length) return null;
+      const sorted = [...vals].sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      return sorted.length % 2
+        ? Math.round(sorted[mid])
+        : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+    };
+
+    /** Build a `{mean, median, runs}` block for one metric. */
+    const summary = (vals) => ({
+      mean: mean(vals),
+      median: median(vals),
+      runs: vals,
+    });
 
     const fcpVals = pick("first-contentful-paint");
     const lcpVals = pick("largest-contentful-paint");
     const tbtVals = pick("total-blocking-time");
     const ttiVals = pick("interactive");
     const siVals = pick("speed-index");
-    const scores = lhRuns.map((lhr) =>
+    const scoreVals = lhRuns.map((lhr) =>
       Math.round((lhr.categories.performance?.score ?? 0) * 100),
     );
+
+    const metrics = {
+      fcp: summary(fcpVals),
+      lcp: summary(lcpVals),
+      tbt: summary(tbtVals),
+      tti: summary(ttiVals),
+      speedIndex: summary(siVals),
+      performanceScore: summary(scoreVals),
+    };
 
     const results = {
       label: iterLabel,
       timestamp: new Date().toISOString(),
       runs: LIGHTHOUSE_RUNS,
-      fcpMs: avg(fcpVals),
-      lcpMs: avg(lcpVals),
-      tbtMs: avg(tbtVals),
-      ttiMs: avg(ttiVals),
-      speedIndex: avg(siVals),
-      performanceScore: avg(scores),
+      throttlingMethod: "provided",
+      // Top-level scalar fields preserve backward-compat with older
+      // consumers. They report the **median** across the lighthouse
+      // runs (robust to outliers). The `metrics` block exposes the
+      // mean / median / per-run values for each metric explicitly.
+      fcpMs: metrics.fcp.median,
+      lcpMs: metrics.lcp.median,
+      tbtMs: metrics.tbt.median,
+      ttiMs: metrics.tti.median,
+      speedIndex: metrics.speedIndex.median,
+      performanceScore: metrics.performanceScore.median,
+      metrics,
       perRun: lhRuns.map((lhr, i) => ({
         run: i + 1,
         fcpMs: Math.round(lhr.audits["first-contentful-paint"]?.numericValue ?? 0),
@@ -104,7 +152,7 @@ export async function measureLighthouse({ serverUrl, iterDir, iterLabel }) {
     await writeResults(iterDir, results);
 
     console.log(
-      `[${iterLabel}] FCP=${results.fcpMs}ms TBT=${results.tbtMs}ms score=${results.performanceScore}`,
+      `[${iterLabel}] FCP median=${metrics.fcp.median}ms mean=${metrics.fcp.mean}ms | TBT median=${metrics.tbt.median}ms | score=${metrics.performanceScore.median}`,
     );
 
     return results;
@@ -114,6 +162,15 @@ export async function measureLighthouse({ serverUrl, iterDir, iterLabel }) {
     await writeResults(iterDir, results);
     return results;
   } finally {
+    // Let any pending Lighthouse microtasks settle before tearing
+    // down the CDP session. Lighthouse's internal `checkForQuiet`
+    // polling can re-fire one more time after `lighthouse()` resolves,
+    // and if we close the browser too eagerly its evaluate call hits
+    // a dead session and rejects unhandled. A short flush gives those
+    // tasks a chance to finish on a live session. The global
+    // unhandledRejection handler in src/index.js catches anything
+    // that still slips through.
+    await new Promise((r) => setTimeout(r, 100));
     await browser.close();
   }
 }

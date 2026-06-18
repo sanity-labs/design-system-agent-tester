@@ -50,7 +50,7 @@ Output lands in `output/<date>/<time>/`. Open `report.md` to see the comparison.
 | `--model`, `-m` | `claude-sonnet-4-20250514` | Claude model ID. |
 | `--runner`, `-r` | `api` | `api` (SDK, needs `ANTHROPIC_API_KEY`) or `cli` (Claude Code CLI, no key). |
 | `--max-fixes`, `-f` | `5` | Max error→fix cycles per iteration. |
-| `--concurrency`, `-c` | auto | Max parallel agent calls. Default: `min(iterations, 2)`. |
+| `--concurrency`, `-c` | `1` | Max parallel agent iterations. Default is sequential so Lighthouse / DOM measurements aren't biased by CPU contention. Pass `2+` to trade precision for wall-clock speed. |
 | `--no-screenshot` | — | Skip browser validation and all browser-based metrics. |
 | `--agent-prompt` | off | Generate a fresh brief from Claude (see Briefs below). |
 | `--yes`, `-y` | off | Skip the cost-warning startup delay. |
