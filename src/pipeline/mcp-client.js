@@ -2,6 +2,46 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 
+// Module-level registry of every spawned MCP child process. The
+// per-client `stop()` runs from `finally` blocks and handles the
+// happy path, but Ctrl-C (SIGINT) and unhandled crashes skip
+// `finally` in Node, leaving children orphaned. Each run before this
+// fix accumulated ~6 dsds-mcp processes; over weeks of usage that
+// reached 45+ on the test machine. The handlers below SIGTERM every
+// tracked child on any abnormal exit signal.
+const _liveProcs = new Set();
+let _exitHandlersInstalled = false;
+function _ensureExitHandlers() {
+  if (_exitHandlersInstalled) return;
+  _exitHandlersInstalled = true;
+  const killAll = () => {
+    for (const proc of _liveProcs) {
+      try {
+        if (proc.exitCode === null && proc.signalCode === null) {
+          proc.kill("SIGTERM");
+        }
+      } catch {
+        // ignore — process may have already exited between the check
+        // and the kill call (a race we can't avoid without locking).
+      }
+    }
+    _liveProcs.clear();
+  };
+  // `exit` runs after Ctrl-C if stdin's been closed and after a
+  // normal return from main. SIGINT/SIGTERM run before Node would
+  // otherwise terminate without firing `exit`.
+  process.on("exit", killAll);
+  for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+    process.on(sig, () => {
+      killAll();
+      // Re-raise the signal so the default handler runs and exits
+      // with the standard 128 + signal code. Without this, the
+      // process would just sit there.
+      process.kill(process.pid, sig);
+    });
+  }
+}
+
 /**
  * Lightweight MCP stdio client.
  *
@@ -48,10 +88,13 @@ class McpClient extends EventEmitter {
   async start() {
     if (this._proc) return;
 
+    _ensureExitHandlers();
+
     this._proc = spawn(this._command, this._args, {
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env, ...this._env },
     });
+    _liveProcs.add(this._proc);
 
     // Accumulate stdout and split on newlines (each line is one JSON-RPC message)
     this._proc.stdout.on("data", (chunk) => {
@@ -70,6 +113,7 @@ class McpClient extends EventEmitter {
     });
 
     this._proc.on("close", (code) => {
+      _liveProcs.delete(this._proc);
       this._rejectAll(new Error(`MCP server exited with code ${code}`));
       this._proc = null;
       this.emit("close", code);
