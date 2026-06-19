@@ -4,6 +4,7 @@ import { createMcpClient } from "./mcp-client.js";
 import {
   writeFile,
   appendFile,
+  mkdir,
 } from "node:fs/promises";
 import { resolve } from "node:path";
 import { validateProject, killDevServer } from "../evaluation/validate.js";
@@ -106,11 +107,24 @@ async function generateWithMcp({
   iterDir,
   iterLabel,
   mcpConfig,
+  projectDir,
 }) {
   let mcpClient;
   try {
     console.log(`[${iterLabel}] Starting MCP server...`);
-    mcpClient = await createMcpClient(mcpConfig);
+    // The project directory must exist before the MCP starts so it can read
+    // files the agent writes (lint-by-path). The MCP is told where the agent's
+    // files live via LINT_SOURCE_DIR so `dsds_lint_code({ path })` resolves
+    // against the project, not the dsds-mcp install dir.
+    await mkdir(projectDir, { recursive: true });
+    const mcpConfigWithSource = {
+      ...mcpConfig,
+      env: (dir) => ({
+        ...(typeof mcpConfig.env === "function" ? mcpConfig.env(dir) : mcpConfig.env ?? {}),
+        LINT_SOURCE_DIR: projectDir,
+      }),
+    };
+    mcpClient = await createMcpClient(mcpConfigWithSource);
 
     const mcpTools = mcpClient.getToolsForAnthropic();
     const mcpInstructions = mcpClient.getInstructions() || "";
@@ -192,6 +206,17 @@ async function generateWithMcp({
         .filter((block) => block.type === "text")
         .map((block) => block.text);
       allTextParts.push(...textBlocks);
+
+      // Write any ---FILE: path--- blocks the agent has emitted so far to disk
+      // immediately, so a subsequent `dsds_lint_code({ path })` call in this
+      // (or a later) turn can read them instead of the agent re-pasting the
+      // full source as a `code` argument. parseFiles() reads the cumulative
+      // text, so revised files overwrite earlier versions; writeProjectFiles
+      // rewrites the whole set each call.
+      const emittedSoFar = parseFiles(allTextParts.join("\n"));
+      if (emittedSoFar.length > 0) {
+        await writeProjectFiles(projectDir, emittedSoFar);
+      }
 
       // Extract tool_use blocks
       const toolUseBlocks = response.content.filter(
@@ -348,6 +373,9 @@ export async function runAgent({
   let totalOutputTokens = 0;
 
   const agentLogPath = resolve(iterDir, "_agent_log.txt");
+  // Computed up front so the MCP-enabled generation can write the agent's
+  // files here as they are emitted, enabling lint-by-path during generation.
+  const projectDir = resolve(iterDir, "project");
 
   while (generationAttempt < maxGenerationRetries) {
     generationAttempt++;
@@ -368,6 +396,7 @@ export async function runAgent({
         iterDir,
         iterLabel,
         mcpConfig,
+        projectDir,
       });
     } else {
       result = await generateSimple({
@@ -430,7 +459,6 @@ export async function runAgent({
       "utf-8",
     );
   }
-  const projectDir = resolve(iterDir, "project");
   await writeProjectFiles(projectDir, files);
 
 
