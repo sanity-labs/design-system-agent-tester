@@ -46,13 +46,18 @@ export async function generateReport(allResults, outputDir, promptText = null) {
       .filter(Boolean);
 
     // Token usage. `!= null` rather than truthiness — a recorded 0 is a
-    // legitimate value and should count toward the average.
-    const inputTokens = validIterations
-      .map((r) => r.inputTokens)
-      .filter((v) => v != null);
-    const outputTokens = validIterations
-      .map((r) => r.outputTokens)
-      .filter((v) => v != null);
+    // legitimate value and should count toward the average. Four input
+    // buckets are tracked separately so the report can show the
+    // prompt-cache breakdown. `inputTokens` is the raw sum (back-compat);
+    // `effectiveInputTokens` weights buckets by billing rate.
+    const pick = (key) =>
+      validIterations.map((r) => r[key]).filter((v) => v != null);
+    const inputTokens = pick("inputTokens");
+    const uncachedInputTokens = pick("uncachedInputTokens");
+    const cacheReadInputTokens = pick("cacheReadInputTokens");
+    const cacheCreationInputTokens = pick("cacheCreationInputTokens");
+    const effectiveInputTokens = pick("effectiveInputTokens");
+    const outputTokens = pick("outputTokens");
 
     // 6. Fix attempts
     const fixCounts = validIterations.map((r) => r.fixAttempts ?? 0);
@@ -174,10 +179,36 @@ export async function generateReport(allResults, outputDir, promptText = null) {
       domElements: domElementAnalysis,
       semanticHtml: semanticHtmlAnalysis,
       tokenUsage: {
+        // `avgInputTokens` is the raw sum (uncached + cache_read +
+        // cache_creation). Useful for "how much did the model see"
+        // but does NOT reflect billing — cache reads are ~10% the
+        // cost of uncached input. Use `avgEffectiveInputTokens` for
+        // billed-cost comparisons.
         avgInputTokens: inputTokens.length ? round(mean(inputTokens)) : null,
+        avgUncachedInputTokens: uncachedInputTokens.length ? round(mean(uncachedInputTokens)) : null,
+        avgCacheReadInputTokens: cacheReadInputTokens.length ? round(mean(cacheReadInputTokens)) : null,
+        avgCacheCreationInputTokens: cacheCreationInputTokens.length ? round(mean(cacheCreationInputTokens)) : null,
+        avgEffectiveInputTokens: effectiveInputTokens.length ? round(mean(effectiveInputTokens)) : null,
         avgOutputTokens: outputTokens.length ? round(mean(outputTokens)) : null,
         totalInputTokens: sum(inputTokens),
+        totalUncachedInputTokens: sum(uncachedInputTokens),
+        totalCacheReadInputTokens: sum(cacheReadInputTokens),
+        totalCacheCreationInputTokens: sum(cacheCreationInputTokens),
+        totalEffectiveInputTokens: sum(effectiveInputTokens),
         totalOutputTokens: sum(outputTokens),
+        // Cache hit rate: fraction of total input tokens served from
+        // cache_read. Computed directly from the three buckets so it
+        // stays accurate even when older runs have only the raw
+        // `inputTokens` field populated (which historically excluded
+        // cache reads).
+        cacheHitRate: (() => {
+          const u = sum(uncachedInputTokens);
+          const cr = sum(cacheReadInputTokens);
+          const cc = sum(cacheCreationInputTokens);
+          const denom = u + cr + cc;
+          if (denom === 0) return null;
+          return round(cr / denom);
+        })(),
       },
     };
   }
@@ -965,12 +996,23 @@ function renderMarkdown(report) {
 
     // Token usage
     if (data.tokenUsage.avgInputTokens !== null) {
+      const tu = data.tokenUsage;
       md += `### Token Usage\n\n`;
-      md += `| Metric | Value |\n|--------|-------|\n`;
-      md += `| Avg input tokens | ${data.tokenUsage.avgInputTokens} |\n`;
-      md += `| Avg output tokens | ${data.tokenUsage.avgOutputTokens} |\n`;
-      md += `| Total input tokens | ${data.tokenUsage.totalInputTokens} |\n`;
-      md += `| Total output tokens | ${data.tokenUsage.totalOutputTokens} |\n\n`;
+      md += `Input breakdown (per iteration averages):\n\n`;
+      md += `| Bucket | Avg / iter | Total | Billing weight |\n|---|---|---|---|\n`;
+      md += `| Uncached input | ${tu.avgUncachedInputTokens ?? 0} | ${tu.totalUncachedInputTokens ?? 0} | 1.0× |\n`;
+      md += `| Cache reads | ${tu.avgCacheReadInputTokens ?? 0} | ${tu.totalCacheReadInputTokens ?? 0} | 0.1× |\n`;
+      md += `| Cache creations | ${tu.avgCacheCreationInputTokens ?? 0} | ${tu.totalCacheCreationInputTokens ?? 0} | 1.25× |\n`;
+      md += `| **Effective input** (weighted) | **${tu.avgEffectiveInputTokens ?? 0}** | **${tu.totalEffectiveInputTokens ?? 0}** | — |\n`;
+      md += `| Raw sum (all three input buckets) | ${tu.avgInputTokens} | ${tu.totalInputTokens} | — |\n`;
+      md += `\n`;
+      md += `Output:\n\n`;
+      md += `| Metric | Avg / iter | Total |\n|---|---|---|\n`;
+      md += `| Output tokens | ${tu.avgOutputTokens} | ${tu.totalOutputTokens} |\n\n`;
+      if (tu.cacheHitRate != null) {
+        const pct = round(tu.cacheHitRate * 100, 1);
+        md += `_Cache hit rate: ${pct}% of input tokens served from cache (billed at ~10% of full input rate)._\n\n`;
+      }
     }
   }
 

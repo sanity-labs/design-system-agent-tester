@@ -83,10 +83,13 @@ async function generateSimple({ client, model, promptContent, systemPrompt }) {
     .map((block) => block.text)
     .join("\n");
 
+  const u = response.usage ?? {};
   return {
     fullText,
-    inputTokens: response.usage?.input_tokens ?? 0,
-    outputTokens: response.usage?.output_tokens ?? 0,
+    uncachedInputTokens: u.input_tokens ?? 0,
+    cacheReadInputTokens: u.cache_read_input_tokens ?? 0,
+    cacheCreationInputTokens: u.cache_creation_input_tokens ?? 0,
+    outputTokens: u.output_tokens ?? 0,
   };
 }
 
@@ -152,7 +155,14 @@ async function generateWithMcp({
       },
     ];
 
-    let inputTokens = 0;
+    // Track all four token buckets separately. Anthropic's prompt
+    // caching splits an API response's input into three parallel
+    // counters; we keep them apart so the report can show whether the
+    // sliding cache breakpoint is doing its job (and what the
+    // effective billed cost is) instead of papering over it.
+    let uncachedInputTokens = 0;
+    let cacheReadInputTokens = 0;
+    let cacheCreationInputTokens = 0;
     let outputTokens = 0;
     let allTextParts = [];
     let turns = 0;
@@ -162,9 +172,30 @@ async function generateWithMcp({
     // Track seen tool calls to detect retry loops
     const seenToolCalls = new Set();
     let duplicateStreak = 0;
+    // The block currently carrying the sliding conversation cache breakpoint.
+    let cacheMarker = null;
 
     while (turns < MAX_TOOL_TURNS) {
       turns++;
+
+      // Sliding cache breakpoint: mark the last block of the latest message so
+      // Anthropic caches the ENTIRE conversation prefix up to here. Without this,
+      // only the system prompt + first user message are cached and every grown
+      // turn re-bills all accumulated tool results at full input price. We move
+      // the breakpoint each turn (clearing the previous one) and never touch
+      // messages[0], keeping us within the 4-breakpoint limit (system + first
+      // user + this slider).
+      if (messages.length > 1) {
+        if (cacheMarker) delete cacheMarker.cache_control;
+        const lastContent = messages[messages.length - 1].content;
+        if (Array.isArray(lastContent) && lastContent.length > 0) {
+          const lastBlock = lastContent[lastContent.length - 1];
+          if (lastBlock && typeof lastBlock === "object") {
+            lastBlock.cache_control = { type: "ephemeral" };
+            cacheMarker = lastBlock;
+          }
+        }
+      }
 
       // When approaching the limit or stuck in a loop, nudge the model to stop researching.
       // If the MCP server exposes a feedback tool, name it explicitly so the
@@ -198,8 +229,18 @@ async function generateWithMcp({
         iterLabel,
       );
 
-      inputTokens += response.usage?.input_tokens ?? 0;
-      outputTokens += response.usage?.output_tokens ?? 0;
+      const u = response.usage ?? {};
+      uncachedInputTokens += u.input_tokens ?? 0;
+      cacheReadInputTokens += u.cache_read_input_tokens ?? 0;
+      cacheCreationInputTokens += u.cache_creation_input_tokens ?? 0;
+      outputTokens += u.output_tokens ?? 0;
+
+      // Per-turn usage incl. cache hits, so we can confirm the sliding cache
+      // breakpoint is working (cache_read should grow across turns).
+      console.log(
+        `[${iterLabel}] turn ${turns} usage: in=${u.input_tokens ?? 0} out=${u.output_tokens ?? 0} ` +
+        `cache_read=${u.cache_read_input_tokens ?? 0} cache_write=${u.cache_creation_input_tokens ?? 0}`,
+      );
 
       // Extract text blocks from this turn
       const textBlocks = response.content
@@ -309,7 +350,9 @@ async function generateWithMcp({
 
     return {
       fullText: allTextParts.join("\n"),
-      inputTokens,
+      uncachedInputTokens,
+      cacheReadInputTokens,
+      cacheCreationInputTokens,
       outputTokens,
     };
   } finally {
@@ -368,8 +411,12 @@ export async function runAgent({
   let files = [];
   let generationAttempt = 0;
 
-  // Track token usage across all calls (including generation retries)
-  let totalInputTokens = 0;
+  // Track token usage across all calls (including generation retries
+  // and fix attempts). Four buckets, kept separate so the report can
+  // show the prompt-cache breakdown rather than collapsing it.
+  let totalUncachedInputTokens = 0;
+  let totalCacheReadInputTokens = 0;
+  let totalCacheCreationInputTokens = 0;
   let totalOutputTokens = 0;
 
   const agentLogPath = resolve(iterDir, "_agent_log.txt");
@@ -407,7 +454,9 @@ export async function runAgent({
       });
     }
 
-    totalInputTokens += result.inputTokens;
+    totalUncachedInputTokens += result.uncachedInputTokens;
+    totalCacheReadInputTokens += result.cacheReadInputTokens;
+    totalCacheCreationInputTokens += result.cacheCreationInputTokens;
     totalOutputTokens += result.outputTokens;
     fullText = result.fullText;
 
@@ -563,7 +612,9 @@ export async function runAgent({
             iterLabel,
             testLabel,
             screenshotPath,
-            totalInputTokens,
+            totalUncachedInputTokens,
+            totalCacheReadInputTokens,
+            totalCacheCreationInputTokens,
             totalOutputTokens,
             fixAttempts,
             fixLog,
@@ -649,7 +700,9 @@ export async function runAgent({
           systemPrompt: fixSystemPrompt,
         });
 
-        totalInputTokens += fixResponse.inputTokens;
+        totalUncachedInputTokens += fixResponse.uncachedInputTokens;
+        totalCacheReadInputTokens += fixResponse.cacheReadInputTokens;
+        totalCacheCreationInputTokens += fixResponse.cacheCreationInputTokens;
         totalOutputTokens += fixResponse.outputTokens;
 
         const fixText = fixResponse.fullText;
@@ -754,7 +807,9 @@ export async function runAgent({
       iterLabel,
       testLabel,
       screenshotPath,
-      totalInputTokens,
+      totalUncachedInputTokens,
+      totalCacheReadInputTokens,
+      totalCacheCreationInputTokens,
       totalOutputTokens,
       fixAttempts,
       fixLog,

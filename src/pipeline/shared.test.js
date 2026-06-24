@@ -50,7 +50,7 @@ describe("buildFixPrompt", () => {
     expect(prompt).toContain("--- app.tsx ---");
     expect(prompt).toContain("console.log('hi')");
     expect(prompt).toContain("## Current Project Files");
-    expect(prompt).toContain("Please fix all errors");
+    expect(prompt).toContain("Fix all errors");
   });
 
   it("includes a fatal error when provided", () => {

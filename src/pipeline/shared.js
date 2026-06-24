@@ -200,7 +200,7 @@ export function buildFixPrompt(currentFilesText, consoleErrors, fatalError) {
     }
   }
 
-  prompt += `Please fix all errors and output the corrected files. Only output files that need to change.`;
+  prompt += `Fix all errors. Output ONLY the files you actually changed, each as a complete \`---FILE: path---\` block. Do NOT re-output files you did not modify — unchanged files are kept automatically. Re-emitting the whole project wastes output tokens and risks regressions.`;
   return prompt;
 }
 
@@ -217,7 +217,9 @@ export async function buildResult({
   iterLabel,
   testLabel,
   screenshotPath,
-  totalInputTokens,
+  totalUncachedInputTokens,
+  totalCacheReadInputTokens,
+  totalCacheCreationInputTokens,
   totalOutputTokens,
   fixAttempts,
   fixLog,
@@ -230,6 +232,19 @@ export async function buildResult({
   semanticHtml,
   runner,
 }) {
+  // Token-usage breakdown. Prompt caching splits input tokens across
+  // three buckets billed at different rates: uncached at 1.0×,
+  // cache_read at ~0.1×, cache_creation at ~1.25×. We persist each
+  // bucket separately and a derived "effective input" that weights
+  // them so the report can compare runs fairly. `inputTokens` is kept
+  // as the raw sum for backward compat with older reports.
+  const uncachedIn = totalUncachedInputTokens || 0;
+  const cacheReadIn = totalCacheReadInputTokens || 0;
+  const cacheCreationIn = totalCacheCreationInputTokens || 0;
+  const rawInputSum = uncachedIn + cacheReadIn + cacheCreationIn;
+  const effectiveInputTokens = Math.round(
+    uncachedIn + cacheReadIn * 0.1 + cacheCreationIn * 1.25,
+  );
   const linesOfCode = files.reduce(
     (sum, f) => sum + f.content.split("\n").length,
     0,
@@ -269,7 +284,11 @@ export async function buildResult({
     semanticHtml,
     componentUsage,
     screenshotPath,
-    inputTokens: totalInputTokens || null,
+    inputTokens: rawInputSum || null,
+    uncachedInputTokens: uncachedIn || null,
+    cacheReadInputTokens: cacheReadIn || null,
+    cacheCreationInputTokens: cacheCreationIn || null,
+    effectiveInputTokens: effectiveInputTokens || null,
     outputTokens: totalOutputTokens || null,
     fixAttempts,
     fixLog,
@@ -297,7 +316,11 @@ export async function buildResult({
     semanticHtml,
     componentUsage,
     screenshotPath,
-    inputTokens: totalInputTokens || null,
+    inputTokens: rawInputSum || null,
+    uncachedInputTokens: uncachedIn || null,
+    cacheReadInputTokens: cacheReadIn || null,
+    cacheCreationInputTokens: cacheCreationIn || null,
+    effectiveInputTokens: effectiveInputTokens || null,
     outputTokens: totalOutputTokens || null,
     fixAttempts,
     fixLog,

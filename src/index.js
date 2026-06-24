@@ -105,14 +105,45 @@ async function resolvePromptBrief(useAgentPrompt, model) {
 }
 
 /**
- * Build a timestamped run path in the format YYYY-MM-DD/HH.MM
+ * Atomically claim a fresh run directory in the format
+ * `YYYY-MM-DD/HH.MM`, falling back to `HH.MM.1`, `HH.MM.2`, … if the
+ * minute-precision path is already taken by another concurrent run.
+ *
+ * Non-recursive `mkdir` is the race-safe primitive — it errors with
+ * `EEXIST` if the directory already exists, even when two processes
+ * try simultaneously. We loop on that error to pick the next suffix.
+ * Without this, a second run started in the same wall-clock minute
+ * silently shared an output directory with the first and overwrote
+ * its iteration artifacts.
+ *
+ * Returns the relative path (e.g. `"2026-06-23/13.42"` or
+ * `"2026-06-23/13.42.1"`). The directory has already been created on
+ * disk; callers should not `mkdir` it again.
  */
-function buildTimestampedRunPath() {
+async function buildTimestampedRunPath() {
   const now = new Date();
   const pad = (n) => String(n).padStart(2, "0");
   const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
   const time = `${pad(now.getHours())}.${pad(now.getMinutes())}`;
-  return `${date}/${time}`;
+
+  // The date directory is shared across all runs on a given day —
+  // create it idempotently.
+  const dateDir = resolve(ROOT, "output", date);
+  await mkdir(dateDir, { recursive: true });
+
+  // Try `HH.MM` first, then `HH.MM.1`, `HH.MM.2`, … until atomic
+  // mkdir succeeds.
+  for (let suffix = 0; ; suffix++) {
+    const name = suffix === 0 ? time : `${time}.${suffix}`;
+    const full = resolve(dateDir, name);
+    try {
+      await mkdir(full, { recursive: false });
+      return `${date}/${name}`;
+    } catch (err) {
+      if (err.code !== "EEXIST") throw err;
+      // Directory was claimed by another process — try the next suffix.
+    }
+  }
 }
 
 async function main() {
@@ -173,10 +204,12 @@ async function main() {
     testLabels = parts;
   }
 
-  // Create a timestamped run directory: output/2025-03-18/14.30/
-  const runDirPath = buildTimestampedRunPath();
+  // Atomically claim a timestamped run directory:
+  // `output/2025-03-18/14.30/` (or `…/14.30.1/` if another concurrent
+  // run already owns 14.30). The directory is created by
+  // buildTimestampedRunPath, so no separate mkdir is needed here.
+  const runDirPath = await buildTimestampedRunPath();
   const runDir = resolve(ROOT, "output", runDirPath);
-  await mkdir(runDir, { recursive: true });
 
   // Resolve the interface brief once — both prompt variants receive the same text.
   const promptBrief = await resolvePromptBrief(useAgentPrompt, model);

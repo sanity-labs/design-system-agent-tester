@@ -54,9 +54,15 @@ export function extractMetrics(data) {
     componentAvg: data.componentUsageCounts?.averagePerIteration ?? null,
     visualDiffAvg: data.visualDiff?.averageDiffPercent ?? null,
     inputTokensAvg: data.tokenUsage?.avgInputTokens ?? null,
+    uncachedInputTokensAvg: data.tokenUsage?.avgUncachedInputTokens ?? null,
+    cacheReadInputTokensAvg: data.tokenUsage?.avgCacheReadInputTokens ?? null,
+    cacheCreationInputTokensAvg: data.tokenUsage?.avgCacheCreationInputTokens ?? null,
+    effectiveInputTokensAvg: data.tokenUsage?.avgEffectiveInputTokens ?? null,
     outputTokensAvg: data.tokenUsage?.avgOutputTokens ?? null,
     inputTokensTotal: data.tokenUsage?.totalInputTokens ?? null,
+    effectiveInputTokensTotal: data.tokenUsage?.totalEffectiveInputTokens ?? null,
     outputTokensTotal: data.tokenUsage?.totalOutputTokens ?? null,
+    cacheHitRate: data.tokenUsage?.cacheHitRate ?? null,
   };
 }
 
@@ -89,9 +95,15 @@ const AGGREGATABLE_KEYS = [
   "componentAvg",
   "visualDiffAvg",
   "inputTokensAvg",
+  "uncachedInputTokensAvg",
+  "cacheReadInputTokensAvg",
+  "cacheCreationInputTokensAvg",
+  "effectiveInputTokensAvg",
   "outputTokensAvg",
   "inputTokensTotal",
+  "effectiveInputTokensTotal",
   "outputTokensTotal",
+  "cacheHitRate",
 ];
 
 // ─── Stats helpers ──────────────────────────────────────────────────
@@ -278,10 +290,28 @@ const METRIC_GROUPS = [
   {
     heading: "Token usage",
     rows: [
-      ["Input tokens / iter", "inputTokensAvg", true, 0],
-      ["Output tokens / iter", "outputTokensAvg", true, 0],
-      ["Input tokens total", "inputTokensTotal", true, 0],
-      ["Output tokens total", "outputTokensTotal", true, 0],
+      // Effective input is the headline number — weights uncached at
+      // 1.0×, cache_read at 0.1×, cache_create at 1.25× so the
+      // comparison reflects actual billed cost.
+      ["Effective input / iter", "effectiveInputTokensAvg", true, 0],
+      ["Output / iter", "outputTokensAvg", true, 0],
+      // Breakdown of how the input was sourced, for visibility into
+      // whether prompt caching is doing its job.
+      ["Uncached input / iter", "uncachedInputTokensAvg", true, 0],
+      ["Cache reads / iter", "cacheReadInputTokensAvg", false, 0],
+      ["Cache creations / iter", "cacheCreationInputTokensAvg", true, 0],
+      [
+        "Cache hit rate",
+        "cacheHitRate",
+        false,
+        2,
+        (agg) =>
+          agg?.cacheHitRate == null
+            ? "—"
+            : `${(agg.cacheHitRate * 100).toFixed(1)}%`,
+      ],
+      ["Effective input total", "effectiveInputTokensTotal", true, 0],
+      ["Output total", "outputTokensTotal", true, 0],
     ],
   },
 ];

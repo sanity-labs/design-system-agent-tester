@@ -28,6 +28,8 @@
     "start": "node --env-file-if-exists=.env src/index.js",
     "summarize": "node src/reporting/summarize.js",
     "new-test": "node src/scripts/new-test.js",
+    "clean-output": "node src/scripts/clean-output.js",
+    "clean-diff-images": "node src/scripts/clean-diff-images.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
