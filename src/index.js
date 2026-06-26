@@ -1,43 +1,21 @@
-import { parseArgs } from "node:util";
-import { resolve, dirname } from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { mkdir } from "node:fs/promises";
-import { generateReport } from "./reporting/report.js";
-import { computeVisualDiff } from "./evaluation/visual-diff.js";
+import { parseArgs } from "node:util";
 import { generateAppPrompt, STATIC_PROMPT } from "./config/prompt-generator.js";
-import { TESTS, TEST_LABELS, buildUserPrompt } from "./config/prompts.js";
+import { buildUserPrompt, TEST_LABELS, TESTS } from "./config/prompts.js";
+import { computeVisualDiff } from "./evaluation/visual-diff.js";
+import { iterationBuilt } from "./reporting/aggregators.js";
+import { generateReport } from "./reporting/report.js";
 import { banner, bold, dim, error, success, tag, warn } from "./util/color.js";
+import { loadEnvFile, requireApiKey } from "./util/load-env.js";
+import { isTransientError } from "./util/retry.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
 
 const MAX_ITERATION_RETRIES = 3;
 const RETRY_DELAY_MS = 30_000; // 30 seconds between retries
-
-/**
- * Check if an error is transient and worth retrying.
- */
-function isTransientError(err) {
-  const msg = (err.message || "").toLowerCase();
-  return (
-    msg.includes("connection error") ||
-    msg.includes("connection reset") ||
-    msg.includes("econnreset") ||
-    msg.includes("econnrefused") ||
-    msg.includes("etimedout") ||
-    msg.includes("socket hang up") ||
-    msg.includes("timed out") ||
-    msg.includes("timeout") ||
-    msg.includes("rate limit") ||
-    msg.includes("429") ||
-    msg.includes("overloaded") ||
-    msg.includes("529") ||
-    msg.includes("500") ||
-    msg.includes("502") ||
-    msg.includes("503") ||
-    msg.includes("internal server error")
-  );
-}
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -62,12 +40,7 @@ const { values } = parseArgs({
     model: {
       type: "string",
       short: "m",
-      default: "claude-sonnet-4-20250514",
-    },
-    runner: {
-      type: "string",
-      short: "r",
-      default: "api",
+      default: "claude-sonnet-4-6",
     },
     concurrency: {
       type: "string",
@@ -88,6 +61,10 @@ const { values } = parseArgs({
       type: "boolean",
       default: false,
     },
+    genui: {
+      type: "boolean",
+      default: false,
+    },
 
     yes: {
       type: "boolean",
@@ -95,6 +72,9 @@ const { values } = parseArgs({
       default: false,
     },
   },
+  // Lets boolean flags be turned off (e.g. --no-screenshot) — without
+  // this, a default-true boolean like --screenshot can never be unset.
+  allowNegative: true,
 });
 
 // Resolve --test/--prompt with deprecation warning for --prompt.
@@ -126,26 +106,66 @@ async function resolvePromptBrief(useAgentPrompt, model) {
 }
 
 /**
- * Build a timestamped run path in the format YYYY-MM-DD/HH.MM
+ * Atomically claim a fresh run directory in the format
+ * `YYYY-MM-DD/HH.MM`, falling back to `HH.MM.1`, `HH.MM.2`, … if the
+ * minute-precision path is already taken by another concurrent run.
+ *
+ * Non-recursive `mkdir` is the race-safe primitive — it errors with
+ * `EEXIST` if the directory already exists, even when two processes
+ * try simultaneously. We loop on that error to pick the next suffix.
+ * Without this, a second run started in the same wall-clock minute
+ * silently shared an output directory with the first and overwrote
+ * its iteration artifacts.
+ *
+ * Returns the relative path (e.g. `"2026-06-23/13.42"` or
+ * `"2026-06-23/13.42.1"`). The directory has already been created on
+ * disk; callers should not `mkdir` it again.
  */
-function buildTimestampedRunPath() {
+async function buildTimestampedRunPath() {
   const now = new Date();
   const pad = (n) => String(n).padStart(2, "0");
   const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
   const time = `${pad(now.getHours())}.${pad(now.getMinutes())}`;
-  return `${date}/${time}`;
+
+  // The date directory is shared across all runs on a given day —
+  // create it idempotently.
+  const dateDir = resolve(ROOT, "output", date);
+  await mkdir(dateDir, { recursive: true });
+
+  // Try `HH.MM` first, then `HH.MM.1`, `HH.MM.2`, … until atomic
+  // mkdir succeeds.
+  for (let suffix = 0; ; suffix++) {
+    const name = suffix === 0 ? time : `${time}.${suffix}`;
+    const full = resolve(dateDir, name);
+    try {
+      await mkdir(full, { recursive: false });
+      return `${date}/${name}`;
+    } catch (err) {
+      if (err.code !== "EEXIST") throw err;
+      // Directory was claimed by another process — try the next suffix.
+    }
+  }
 }
 
 async function main() {
   const testArg = values.test;
   const iterations = parseInt(values.iterations, 10);
   const model = values.model;
-  const runnerType = values.runner;
-  const maxConcurrency =
-    parseInt(values.concurrency, 10) || Math.min(iterations, 2);
+  // Default to 1 (sequential) so Lighthouse / DOM / screenshot measurements
+  // aren't biased by CPU contention between parallel iterations. Pass an
+  // explicit `--concurrency 2+` for runs that prioritise wall-clock time
+  // over measurement precision.
+  const maxConcurrency = parseInt(values.concurrency, 10) || 1;
+  const genui = values.genui;
+  // genui still compiles to a real React app, so the full build/screenshot/
+  // measure pipeline runs exactly like a normal test.
   const takeScreenshots = values.screenshot;
   const maxFixes = parseInt(values["max-fixes"], 10);
   const useAgentPrompt = values["agent-prompt"];
+
+  // Load .env ourselves — Node's --env-file parser silently drops some keys.
+  loadEnvFile(resolve(ROOT, ".env"));
+  requireApiKey();
 
   if (isNaN(maxFixes) || maxFixes < 0) {
     console.error("Error: --max-fixes must be a non-negative integer");
@@ -157,18 +177,9 @@ async function main() {
     process.exit(1);
   }
 
-  if (!["api", "cli"].includes(runnerType)) {
-    console.error(
-      `Error: --runner must be "api" or "cli". Got "${runnerType}"`,
-    );
-    process.exit(1);
-  }
-
-  // Dynamically import the selected runner
-  const { runAgent } =
-    runnerType === "cli"
-      ? await import("./pipeline/runner-cli.js")
-      : await import("./pipeline/runner-api.js");
+  // The runner is imported lazily so `--help`-style fast paths don't pull in
+  // the Anthropic SDK and the browser-heavy evaluation modules.
+  const { runAgent } = await import("./pipeline/runner-api.js");
 
   // Determine which tests to run.
   //   --test all  (or `both`)    — run every test
@@ -179,7 +190,10 @@ async function main() {
   if (testValue === "all" || testValue === "both") {
     testLabels = [...TEST_LABELS];
   } else {
-    const parts = testValue.split(",").map((s) => s.trim()).filter(Boolean);
+    const parts = testValue
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
     const unknown = parts.filter((p) => !TEST_LABELS.includes(p));
     if (parts.length === 0 || unknown.length > 0) {
       const valid = [...TEST_LABELS, "all"].join(", ");
@@ -191,20 +205,22 @@ async function main() {
     testLabels = parts;
   }
 
-  // Create a timestamped run directory: output/2025-03-18/14.30/
-  const runDirPath = buildTimestampedRunPath();
+  // Atomically claim a timestamped run directory:
+  // `output/2025-03-18/14.30/` (or `…/14.30.1/` if another concurrent
+  // run already owns 14.30). The directory is created by
+  // buildTimestampedRunPath, so no separate mkdir is needed here.
+  const runDirPath = await buildTimestampedRunPath();
   const runDir = resolve(ROOT, "output", runDirPath);
-  await mkdir(runDir, { recursive: true });
 
   // Resolve the interface brief once — both prompt variants receive the same text.
   const promptBrief = await resolvePromptBrief(useAgentPrompt, model);
 
   console.log(banner("=== Agent Tester ==="));
   const field = (k) => dim(k.padEnd(13));
+  console.log(`${field("Model:")} ${model} (Anthropic SDK — requires ANTHROPIC_API_KEY)`);
   console.log(
-    `${field("Runner:")} ${runnerType}${runnerType === "cli" ? " (claude CLI — no API key needed)" : " (Anthropic SDK — requires ANTHROPIC_API_KEY)"}`,
+    `${field("Mode:")} ${genui ? "genui — EXPERIMENTAL (agent writes JSON → compiled to React)" : "build (agent writes React)"}`,
   );
-  console.log(`${field("Model:")} ${model}`);
   console.log(`${field("Iterations:")} ${iterations}`);
   console.log(`${field("Max fixes:")} ${maxFixes}`);
   console.log(`${field("Concurrency:")} ${maxConcurrency}`);
@@ -212,16 +228,18 @@ async function main() {
   console.log(`${field("Agent prompt:")} ${useAgentPrompt}`);
   console.log(`${field("Tests:")} ${testLabels.join(", ")}`);
   console.log(`${field("Output:")} ${runDir}`);
-  console.log(`${field("Brief:")} ${promptBrief.split("\n")[0]}${promptBrief.includes("\n") ? " …" : ""}`);
+  console.log(
+    `${field("Brief:")} ${promptBrief.split("\n")[0]}${promptBrief.includes("\n") ? " …" : ""}`,
+  );
   console.log("");
 
   if (!values.yes) {
     const total = iterations * testLabels.length;
     const low = (0.05 * total).toFixed(2);
-    const high = (1.00 * total).toFixed(2);
+    const high = (1.0 * total).toFixed(2);
     console.log(
       warn(
-        `About to run ${total} agent iterations against ${model}. Each iteration consumes\nAPI tokens (typically $0.05–$1.00 depending on model + iteration count).\nTotal cost for this run is approximately $${low}–$${high}. Press Ctrl-C within 5\nseconds to abort, or pass --yes to skip this warning.`,
+        `About to run ${total} agent iterations against ${model}. Each iteration spends\nAPI tokens; the cost depends heavily on the model. As a rough guide for a\nmid-tier model (e.g. Sonnet), expect ~$0.05–$1.00 per iteration, so roughly\n$${low}–$${high} for this run. Higher-tier models (e.g. Opus) cost several times\nmore. Press Ctrl-C within 5 seconds to abort, or pass --yes to skip this warning.`,
       ),
     );
     await new Promise((r) => setTimeout(r, 5000));
@@ -231,11 +249,15 @@ async function main() {
 
   for (const label of testLabels) {
     const test = TESTS.find((t) => t.label === label);
-    const promptContent = buildUserPrompt(label, promptBrief);
+    if (genui && !test.mcp) {
+      console.error(error(`--genui requires a test with an \`mcp\` block; "${label}" has none.`));
+      process.exit(1);
+    }
+    // In genui mode the system prompt carries the catalog + format rules, so the
+    // user message is the raw brief; the React path wraps it with test framing.
+    const promptContent = genui ? promptBrief : buildUserPrompt(label, promptBrief);
 
-    console.log(
-      bold(`\n--- Running "${label}" test (${iterations} iterations) ---\n`),
-    );
+    console.log(bold(`\n--- Running "${label}" test (${iterations} iterations) ---\n`));
 
     const outputDir = resolve(runDir, label);
     await mkdir(outputDir, { recursive: true });
@@ -269,6 +291,7 @@ async function main() {
             takeScreenshots,
             maxFixes,
             mcpConfig: test.mcp,
+            genui,
           });
 
           const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
@@ -289,23 +312,37 @@ async function main() {
             console.warn(
               `${tag(iterLabel)} ${warn(`Transient error after ${elapsed}s (attempt ${attempt}/${MAX_ITERATION_RETRIES}):`)} ${err.message}`,
             );
-            console.warn(
-              `${tag(iterLabel)} ${warn(`Waiting ${delaySec}s before retry...`)}`,
-            );
+            console.warn(`${tag(iterLabel)} ${warn(`Waiting ${delaySec}s before retry...`)}`);
             await sleep(RETRY_DELAY_MS);
             continue;
           }
 
           // Non-transient error or final attempt — give up
-          console.error(
-            `${tag(iterLabel)} ${error(`Failed after ${elapsed}s:`)} ${err.message}`,
-          );
+          console.error(`${tag(iterLabel)} ${error(`Failed after ${elapsed}s:`)} ${err.message}`);
           break;
         }
       }
 
       // All retries exhausted or non-transient error
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+      // Persist the failure to the iteration directory. Without this a
+      // failed iteration leaves only `_prompt.txt`, so the cause is lost
+      // once the terminal scrolls — and the bug-report template asks for
+      // artifacts that wouldn't exist. Best-effort: never let a write
+      // error mask the original failure.
+      try {
+        await writeFile(
+          resolve(iterDir, "_error.txt"),
+          `${new Date().toISOString()} — iteration failed after ${elapsed}s\n\n` +
+            (lastError?.stack || lastError?.message || String(lastError)) +
+            "\n",
+          "utf-8",
+        );
+      } catch {
+        // ignore — the in-memory result below still records the message
+      }
+
       results[idx] = {
         iteration: idx + 1,
         elapsedSeconds: parseFloat(elapsed),
@@ -321,7 +358,13 @@ async function main() {
     async function processQueue() {
       while (queue.length > 0 || inFlight.size > 0) {
         while (queue.length > 0 && inFlight.size < maxConcurrency) {
-          const promise = runNext();
+          // runNext records its own failures in `results`; a rejection
+          // here is unexpected (e.g. mkdir failed). Catch it so the
+          // tracked promise can't reject — an unhandled rejection in
+          // Promise.race would abort the whole run.
+          const promise = runNext().catch((err) => {
+            console.error(`${tag(label)} ${error("Iteration runner crashed:")} ${err.message}`);
+          });
           inFlight.add(promise);
           promise.then(() => inFlight.delete(promise));
         }
@@ -341,8 +384,12 @@ async function main() {
     console.log(banner("\n\n=== Computing Visual Diffs ===\n"));
 
     for (const [label, iterations] of Object.entries(allResults)) {
+      // Only diff screenshots from iterations that produced a working
+      // build. A broken render's screenshot still lives on disk, but
+      // comparing it to a healthy one inflates the diff percentage with
+      // pixels that reflect failure, not design variance.
       const validIterations = iterations.filter(
-        (r) => !r.error && r.screenshotPath,
+        (r) => !r.error && r.screenshotPath && iterationBuilt(r),
       );
 
       if (validIterations.length < 2) {
@@ -352,16 +399,11 @@ async function main() {
         continue;
       }
 
-      console.log(
-        `${tag(label)} Comparing ${validIterations.length} screenshots...`,
-      );
+      console.log(`${tag(label)} Comparing ${validIterations.length} screenshots...`);
       const promptOutputDir = resolve(runDir, label);
 
       try {
-        const visualDiff = await computeVisualDiff(
-          validIterations,
-          promptOutputDir,
-        );
+        const visualDiff = await computeVisualDiff(validIterations, promptOutputDir);
 
         // Attach visual diff results to each iteration set for the report
         for (const iter of iterations) {
@@ -377,12 +419,40 @@ async function main() {
     }
   }
 
-  // Generate report
+  // Generate report — the same report for both modes; genui just got its files
+  // by compiling a JSON spec instead of the agent hand-writing React.
   console.log(banner("\n\n=== Generating Report ===\n"));
   await generateReport(allResults, runDir, promptBrief);
 
   console.log(`\n${success("Done!")} See ${runDir} for results and report.`);
 }
+
+// Tolerate a *narrow* class of orphan-promise rejections from libraries
+// that leak background promises after their main API has resolved.
+// Lighthouse's internal `checkForQuiet` polling can outlive
+// `lighthouse()`'s resolved promise: when we close the browser, the next
+// poll fires against a dead CDP session and rejects unhandled. Without
+// tolerance, Node crashes the whole harness mid-iteration.
+//
+// We do NOT swallow everything — a blanket handler hides real bugs
+// (e.g. a genuine ReferenceError surfaces as a silent "iteration
+// failed"). Only the known CDP/teardown signatures are ignored; any
+// other rejection is logged with its stack and crashes the process, the
+// same as Node's default.
+const TOLERATED_REJECTION_RE =
+  /Target closed|Protocol error|Session closed|checkForQuiet|WebSocket is not open|Most likely the page has been closed/i;
+
+process.on("unhandledRejection", (reason) => {
+  const msg = reason instanceof Error ? reason.message : String(reason);
+  if (TOLERATED_REJECTION_RE.test(msg)) {
+    console.warn(warn(`Unhandled promise rejection (ignored, orphan teardown): ${msg}`));
+    return;
+  }
+  // Unexpected rejection — surface it loudly and exit non-zero.
+  const stack = reason instanceof Error ? reason.stack : msg;
+  console.error(error("Unhandled promise rejection (fatal):"), stack);
+  process.exit(1);
+});
 
 main().catch((err) => {
   console.error(error("Fatal error:"), err);

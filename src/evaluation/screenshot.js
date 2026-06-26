@@ -23,7 +23,7 @@
 
 import { appendFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { launchBrowser, waitForRenderedContent } from "./puppeteer-helpers.js";
+import { launchBrowser, NAV_TIMEOUT_MS, waitForRenderedContent } from "./puppeteer-helpers.js";
 
 /** Breakpoints for responsive screenshots. */
 export const SCREENSHOT_BREAKPOINTS = [
@@ -48,9 +48,7 @@ export const COLOR_SCHEMES = [
  */
 export async function captureScreenshots(serverUrl, iterDir, iterLabel) {
   const logPath = resolve(iterDir, "_screenshot.txt");
-  const lines = [
-    `\n--- screenshots [${new Date().toISOString()}] serverUrl=${serverUrl} ---`,
-  ];
+  const lines = [`\n--- screenshots [${new Date().toISOString()}] serverUrl=${serverUrl} ---`];
   const log = (msg) => lines.push(msg);
 
   let browser;
@@ -61,12 +59,12 @@ export async function captureScreenshots(serverUrl, iterDir, iterLabel) {
   try {
     browser = await launchBrowser();
     const page = await browser.newPage();
+    page.setDefaultTimeout(NAV_TIMEOUT_MS);
+    page.setDefaultNavigationTimeout(NAV_TIMEOUT_MS);
 
     for (const cs of COLOR_SCHEMES) {
       try {
-        await page.emulateMediaFeatures([
-          { name: "prefers-color-scheme", value: cs.scheme },
-        ]);
+        await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: cs.scheme }]);
       } catch (err) {
         log(`[scheme=${cs.name}] emulateMediaFeatures failed: ${err.message}`);
         continue;
@@ -75,16 +73,14 @@ export async function captureScreenshots(serverUrl, iterDir, iterLabel) {
       for (const bp of SCREENSHOT_BREAKPOINTS) {
         const tag = `${bp.name}-${cs.name}`;
         const isDefault = bp.name === "laptop" && cs.name === "light";
-        const filename = isDefault
-          ? "screenshot.png"
-          : `screenshot-${tag}.png`;
+        const filename = isDefault ? "screenshot.png" : `screenshot-${tag}.png`;
         const filepath = resolve(iterDir, filename);
 
         try {
           await page.setViewport({ width: bp.width, height: bp.height });
           await page.goto(serverUrl, {
             waitUntil: "networkidle2",
-            timeout: 30_000,
+            timeout: NAV_TIMEOUT_MS,
           });
           await waitForRenderedContent(page, { iterLabel });
           // Extra breathing room for CSS transitions / font loading.
@@ -103,9 +99,7 @@ export async function captureScreenshots(serverUrl, iterDir, iterLabel) {
 
     log(`Summary: ${okCount}/${total} screenshots saved.`);
     if (iterLabel) {
-      console.log(
-        `[${iterLabel}] ${okCount}/${total} screenshots saved (see _screenshot.txt)`,
-      );
+      console.log(`[${iterLabel}] ${okCount}/${total} screenshots saved (see _screenshot.txt)`);
     }
     return primaryPath;
   } catch (err) {

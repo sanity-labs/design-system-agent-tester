@@ -12,8 +12,7 @@
  */
 
 export default {
-  staticBrief:
-    "Create an web app interface that uses a wide range of UI components.",
+  staticBrief: "Create an web app interface that uses a wide range of UI components.",
 
   systemPrompt: `You are a senior product manager writing a one-page interface brief for a frontend engineering team.
 

@@ -11,6 +11,14 @@
  * same: per-test aggregated metrics keyed by label.
  */
 
+import { delta, fmt, fmtInt, formatBytes, mdTable } from "./format.js";
+import { maxVal, mean, minVal, stdDev } from "./stats.js";
+
+export { delta, fmt, fmtInt, formatBytes, mdTable } from "./format.js";
+// Re-export the shared stats/format helpers so existing importers of
+// `aggregate.js` keep working unchanged.
+export { maxVal, mean, minVal, stdDev } from "./stats.js";
+
 // ─── Metric extraction ──────────────────────────────────────────────
 
 /**
@@ -30,10 +38,17 @@ export function extractMetrics(data) {
     boxInline: data.inlineStyles?.byComponent?.Box ?? 0,
     axeTotal: data.accessibility?.totalViolations ?? null,
     axeAvg: data.accessibility?.averageViolations ?? null,
-    fcpMs: data.lighthouse?.avgFcpMs ?? null,
-    tbtMs: data.lighthouse?.avgTbtMs ?? null,
-    ttiMs: data.lighthouse?.avgTtiMs ?? null,
-    performanceScore: data.lighthouse?.avgPerformanceScore ?? null,
+    // Median-based (robust to outliers in lighthouse runs)
+    fcpMs: data.lighthouse?.medianFcpMs ?? data.lighthouse?.avgFcpMs ?? null,
+    tbtMs: data.lighthouse?.medianTbtMs ?? data.lighthouse?.avgTbtMs ?? null,
+    ttiMs: data.lighthouse?.medianTtiMs ?? data.lighthouse?.avgTtiMs ?? null,
+    performanceScore:
+      data.lighthouse?.medianPerformanceScore ?? data.lighthouse?.avgPerformanceScore ?? null,
+    // Mean-based (for comparison with median in the summary tables)
+    fcpMsMean: data.lighthouse?.meanFcpMs ?? null,
+    tbtMsMean: data.lighthouse?.meanTbtMs ?? null,
+    ttiMsMean: data.lighthouse?.meanTtiMs ?? null,
+    performanceScoreMean: data.lighthouse?.meanPerformanceScore ?? null,
     reactMountMs: data.reactProfile?.avgMountMs ?? null,
     domAvg: data.domElements?.average ?? null,
     domHtmlBytesAvg: data.domElements?.htmlBytesAverage ?? null,
@@ -45,9 +60,15 @@ export function extractMetrics(data) {
     componentAvg: data.componentUsageCounts?.averagePerIteration ?? null,
     visualDiffAvg: data.visualDiff?.averageDiffPercent ?? null,
     inputTokensAvg: data.tokenUsage?.avgInputTokens ?? null,
+    uncachedInputTokensAvg: data.tokenUsage?.avgUncachedInputTokens ?? null,
+    cacheReadInputTokensAvg: data.tokenUsage?.avgCacheReadInputTokens ?? null,
+    cacheCreationInputTokensAvg: data.tokenUsage?.avgCacheCreationInputTokens ?? null,
+    effectiveInputTokensAvg: data.tokenUsage?.avgEffectiveInputTokens ?? null,
     outputTokensAvg: data.tokenUsage?.avgOutputTokens ?? null,
     inputTokensTotal: data.tokenUsage?.totalInputTokens ?? null,
+    effectiveInputTokensTotal: data.tokenUsage?.totalEffectiveInputTokens ?? null,
     outputTokensTotal: data.tokenUsage?.totalOutputTokens ?? null,
+    cacheHitRate: data.tokenUsage?.cacheHitRate ?? null,
   };
 }
 
@@ -62,9 +83,13 @@ const AGGREGATABLE_KEYS = [
   "axeTotal",
   "axeAvg",
   "fcpMs",
+  "fcpMsMean",
   "tbtMs",
+  "tbtMsMean",
   "ttiMs",
+  "ttiMsMean",
   "performanceScore",
+  "performanceScoreMean",
   "reactMountMs",
   "domAvg",
   "domHtmlBytesAvg",
@@ -76,37 +101,18 @@ const AGGREGATABLE_KEYS = [
   "componentAvg",
   "visualDiffAvg",
   "inputTokensAvg",
+  "uncachedInputTokensAvg",
+  "cacheReadInputTokensAvg",
+  "cacheCreationInputTokensAvg",
+  "effectiveInputTokensAvg",
   "outputTokensAvg",
   "inputTokensTotal",
+  "effectiveInputTokensTotal",
   "outputTokensTotal",
+  "cacheHitRate",
 ];
 
-// ─── Stats helpers ──────────────────────────────────────────────────
-
-export function mean(arr) {
-  const valid = arr.filter((x) => x !== null && x !== undefined && !isNaN(x));
-  if (valid.length === 0) return null;
-  return valid.reduce((a, b) => a + b, 0) / valid.length;
-}
-
-export function stdDev(arr) {
-  const valid = arr.filter((x) => x !== null && x !== undefined && !isNaN(x));
-  if (valid.length < 2) return null;
-  const m = mean(valid);
-  const variance =
-    valid.reduce((sum, x) => sum + (x - m) ** 2, 0) / valid.length;
-  return Math.sqrt(variance);
-}
-
-export function minVal(arr) {
-  const valid = arr.filter((x) => x !== null && x !== undefined && !isNaN(x));
-  return valid.length ? Math.min(...valid) : null;
-}
-
-export function maxVal(arr) {
-  const valid = arr.filter((x) => x !== null && x !== undefined && !isNaN(x));
-  return valid.length ? Math.max(...valid) : null;
-}
+// ─── Aggregation ────────────────────────────────────────────────────
 
 /**
  * Aggregate a list of metric sets (one per run) into a single mean / sd /
@@ -123,58 +129,6 @@ export function aggregateMetrics(metricSets) {
   }
   result.totalIterations = metricSets[0]?.totalIterations ?? null;
   return result;
-}
-
-// ─── Formatting helpers ─────────────────────────────────────────────
-
-export function fmt(n, decimals = 1) {
-  if (n === null || n === undefined) return "—";
-  return Number(n).toFixed(decimals);
-}
-
-export function fmtInt(n) {
-  if (n === null || n === undefined) return "—";
-  return String(Math.round(n));
-}
-
-/**
- * Format a byte count as a short human-readable string (`12 KB`,
- * `1.4 MB`). Used for HTML-tree size, which spans roughly 5 KB to
- * a few hundred KB across the runs we've seen.
- */
-export function formatBytes(n) {
-  if (n === null || n === undefined || isNaN(n)) return "—";
-  if (n < 1024) return `${Math.round(n)} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / (1024 * 1024)).toFixed(2)} MB`;
-}
-
-/**
- * Format a delta between two values as `+15% worse` / `-30% better`.
- * Returns '' if either value is missing, or if the baseline is 0
- * (no meaningful percentage).
- *
- * `lowerIsBetter` controls the better/worse direction.
- */
-export function delta(baseline, candidate, lowerIsBetter = true) {
-  if (baseline === null || candidate === null || baseline === 0) return "";
-  const pct = ((candidate - baseline) / Math.abs(baseline)) * 100;
-  if (pct === 0) return "0%";
-  const improved = lowerIsBetter ? pct < 0 : pct > 0;
-  const sign = pct >= 0 ? "+" : "";
-  return `${sign}${pct.toFixed(0)}% ${improved ? "better" : "worse"}`;
-}
-
-// ─── Markdown table renderer ────────────────────────────────────────
-
-export function mdTable(headers, rows) {
-  const sep = headers.map(() => "---");
-  const lines = [
-    `| ${headers.join(" | ")} |`,
-    `| ${sep.join(" | ")} |`,
-    ...rows.map((r) => `| ${r.join(" | ")} |`),
-  ];
-  return lines.join("\n") + "\n";
 }
 
 // ─── Headline metrics tables ────────────────────────────────────────
@@ -215,10 +169,14 @@ const METRIC_GROUPS = [
   {
     heading: "Performance",
     rows: [
-      ["FCP (ms)", "fcpMs", true, 0],
-      ["TBT (ms)", "tbtMs", true, 1],
-      ["TTI (ms)", "ttiMs", true, 0],
-      ["Lighthouse score", "performanceScore", false, 0],
+      ["FCP median (ms)", "fcpMs", true, 0],
+      ["FCP mean (ms)", "fcpMsMean", true, 0],
+      ["TBT median (ms)", "tbtMs", true, 1],
+      ["TBT mean (ms)", "tbtMsMean", true, 1],
+      ["TTI median (ms)", "ttiMs", true, 0],
+      ["TTI mean (ms)", "ttiMsMean", true, 0],
+      ["Lighthouse score (median)", "performanceScore", false, 0],
+      ["Lighthouse score (mean)", "performanceScoreMean", false, 0],
       ["React mount (ms)", "reactMountMs", true, 1],
     ],
   },
@@ -226,13 +184,7 @@ const METRIC_GROUPS = [
     heading: "DOM & semantic HTML",
     rows: [
       ["DOM elements (avg)", "domAvg", false, 0],
-      [
-        "HTML size (avg)",
-        "domHtmlBytesAvg",
-        true,
-        0,
-        (agg) => formatBytes(agg?.domHtmlBytesAvg),
-      ],
+      ["HTML size (avg)", "domHtmlBytesAvg", true, 0, (agg) => formatBytes(agg?.domHtmlBytesAvg)],
       ["Semantic ratio", "semanticRatio", false, 1],
       ["Semantic elements (avg)", "semanticCount", false, 0],
       ["Generic elements (avg)", "genericCount", true, 0],
@@ -261,10 +213,25 @@ const METRIC_GROUPS = [
   {
     heading: "Token usage",
     rows: [
-      ["Input tokens / iter", "inputTokensAvg", true, 0],
-      ["Output tokens / iter", "outputTokensAvg", true, 0],
-      ["Input tokens total", "inputTokensTotal", true, 0],
-      ["Output tokens total", "outputTokensTotal", true, 0],
+      // Effective input is the headline number — weights uncached at
+      // 1.0×, cache_read at 0.1×, cache_create at 1.25× so the
+      // comparison reflects actual billed cost.
+      ["Effective input / iter", "effectiveInputTokensAvg", true, 0],
+      ["Output / iter", "outputTokensAvg", true, 0],
+      // Breakdown of how the input was sourced, for visibility into
+      // whether prompt caching is doing its job.
+      ["Uncached input / iter", "uncachedInputTokensAvg", true, 0],
+      ["Cache reads / iter", "cacheReadInputTokensAvg", false, 0],
+      ["Cache creations / iter", "cacheCreationInputTokensAvg", true, 0],
+      [
+        "Cache hit rate",
+        "cacheHitRate",
+        false,
+        2,
+        (agg) => (agg?.cacheHitRate == null ? "—" : `${(agg.cacheHitRate * 100).toFixed(1)}%`),
+      ],
+      ["Effective input total", "effectiveInputTokensTotal", true, 0],
+      ["Output total", "outputTokensTotal", true, 0],
     ],
   },
 ];
@@ -314,17 +281,12 @@ function findWinners(labels, aggregatesByLabel, key, lowerBetter) {
   if (labels.length < 2) return new Set();
   const samples = labels
     .map((l) => ({ label: l, value: aggregatesByLabel[l]?.[key] }))
-    .filter(
-      ({ value }) =>
-        value !== null && value !== undefined && !Number.isNaN(value),
-    );
+    .filter(({ value }) => value !== null && value !== undefined && !Number.isNaN(value));
   if (samples.length === 0) return new Set();
   const best = lowerBetter
     ? Math.min(...samples.map((s) => s.value))
     : Math.max(...samples.map((s) => s.value));
-  return new Set(
-    samples.filter((s) => s.value === best).map((s) => s.label),
-  );
+  return new Set(samples.filter((s) => s.value === best).map((s) => s.label));
 }
 
 const WINNER_MARK = " ✓";
@@ -389,7 +351,5 @@ function renderOneGroup(group, labels, aggregatesByLabel, iters) {
  */
 export function renderMetricsTables(labels, aggregatesByLabel) {
   const iters = aggregatesByLabel[labels[0]]?.totalIterations ?? null;
-  return METRIC_GROUPS.map((g) =>
-    renderOneGroup(g, labels, aggregatesByLabel, iters),
-  ).join("");
+  return METRIC_GROUPS.map((g) => renderOneGroup(g, labels, aggregatesByLabel, iters)).join("");
 }

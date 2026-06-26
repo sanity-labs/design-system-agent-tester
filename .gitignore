@@ -9,12 +9,10 @@ claude.md
 # Personal config — copy from agent-tester.config.example.js and edit
 agent-tester.config.js
 
-# Internal-only tests and design-system-specific lint plugin. Keep
-# these gitignored so personal/maintainer-specific content doesn't
-# ship with the OSS distribution. The harness gracefully handles
-# their absence — see README for what's expected to be present.
+# Internal-only tests. Kept gitignored so personal/maintainer-specific
+# content doesn't ship with the OSS distribution. The harness
+# gracefully handles their absence.
 tests.internal/
-eslint/
 
 # Legacy locations / personal notes
 prompts/

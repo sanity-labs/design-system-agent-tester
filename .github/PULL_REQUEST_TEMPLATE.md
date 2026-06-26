@@ -20,4 +20,4 @@ For doc-only changes, render or preview the affected files.
 - [ ] Tests added or updated (not required for doc-only PRs)
 - [ ] Docs updated if behavior changed
 - [ ] No secrets, API keys, or credentials committed
-- [ ] Ran `npm test` locally and all 228+ tests pass
+- [ ] Ran `npm test` locally and all tests pass

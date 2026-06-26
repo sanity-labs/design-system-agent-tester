@@ -1,11 +1,11 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
-  TESTS,
-  TEST_LABELS,
-  getTest,
-  buildSystemPrompt,
   buildFixSystemPrompt,
+  buildSystemPrompt,
   buildUserPrompt,
+  getTest,
+  TEST_LABELS,
+  TESTS,
 } from "./prompts.js";
 
 const BRIEF = "Build a small content management dashboard.";
@@ -56,24 +56,18 @@ describe("prompts engine", () => {
       expect(sys.length).toBeGreaterThan(0);
     });
 
-    it.each(TEST_LABELS)(
-      "%s — engine auto-appends FILE and FEEDBACK output formats",
-      (label) => {
-        const sys = buildSystemPrompt(label);
-        expect(sys).toContain("---FILE:");
-        expect(sys).toContain("---END FILE---");
-        expect(sys).toContain("---FEEDBACK---");
-        expect(sys).toContain("---END FEEDBACK---");
-      },
-    );
+    it.each(TEST_LABELS)("%s — engine auto-appends FILE and FEEDBACK output formats", (label) => {
+      const sys = buildSystemPrompt(label);
+      expect(sys).toContain("---FILE:");
+      expect(sys).toContain("---END FILE---");
+      expect(sys).toContain("---FEEDBACK---");
+      expect(sys).toContain("---END FEEDBACK---");
+    });
 
-    it.each(TEST_LABELS)(
-      "%s — engine auto-appends BASE_RULES",
-      (label) => {
-        const sys = buildSystemPrompt(label);
-        expect(sys).toMatch(/Rules:/);
-      },
-    );
+    it.each(TEST_LABELS)("%s — engine auto-appends BASE_RULES", (label) => {
+      const sys = buildSystemPrompt(label);
+      expect(sys).toMatch(/Rules:/);
+    });
   });
 
   describe("buildFixSystemPrompt", () => {
@@ -83,22 +77,17 @@ describe("prompts engine", () => {
       expect(fix.length).toBeGreaterThan(0);
     });
 
-    it.each(TEST_LABELS)(
-      "%s — engine auto-includes FIX_PREAMBLE and the FILE format",
-      (label) => {
-        const fix = buildFixSystemPrompt(label);
-        expect(fix).toContain("---FILE:");
-        expect(fix).toContain("---END FILE---");
-        expect(fix).toMatch(/debugging a web application/i);
-      },
-    );
+    it.each(TEST_LABELS)("%s — engine auto-includes FIX_PREAMBLE and the FILE format", (label) => {
+      const fix = buildFixSystemPrompt(label);
+      expect(fix).toContain("---FILE:");
+      expect(fix).toContain("---END FILE---");
+      expect(fix).toMatch(/debugging a web application/i);
+    });
   });
 
   describe("buildUserPrompt", () => {
     it("throws for an unknown label", () => {
-      expect(() => buildUserPrompt("does-not-exist", BRIEF)).toThrow(
-        /Unknown test label/,
-      );
+      expect(() => buildUserPrompt("does-not-exist", BRIEF)).toThrow(/Unknown test label/);
     });
 
     it.each(TEST_LABELS)("%s — injects the brief at the top", (label) => {

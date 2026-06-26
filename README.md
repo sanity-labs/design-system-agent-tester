@@ -1,10 +1,16 @@
 # Design system agent tester
 
-Test AI agents' ability to use a design system. The harness spins up one or more defined tests. Each test is populated with a group of agents to perform a task. Each test is given the same prompt to make an interface. Each test's results are averaged and compared against the others. You get one report with each test's results.
+Tests AI agents' ability to use a design system. The harness spins up one or more defined tests. Each test is populated with a group of agents to perform a task—all given the same prompt to make an interface. Each test's results are averaged, compared against the others, and collated in a report.
 
 ## Setup
 
 This isn't published to npm. Clone, install, and run from the working tree.
+
+Prerequisites:
+
+- Node.js ≥ 22.12
+- An Anthropic API key (`ANTHROPIC_API_KEY`).
+- **macOS or Linux.** Windows is untested — the harness shells out to POSIX tools (e.g. `du`) and relies on POSIX process-group signals, so use WSL on Windows.
 
 ```sh
 npm install
@@ -12,11 +18,14 @@ cp agent-tester.config.example.js agent-tester.config.js   # then edit it
 echo 'ANTHROPIC_API_KEY=sk-ant-...' > .env
 ```
 
+> **Safety:** the harness runs AI-generated code and `npm install`s whatever packages the agent decides to import. Run it in a sandbox (a VM or container) when you don't fully trust the output. See [SECURITY.md](SECURITY.md).
+
 Notes:
 
 - Puppeteer downloads Chromium on first install (~150MB).
-- The `.env` approach above is convenient but not ideal — prefer `direnv` or a shell-level export so the key never ends up on disk in the project directory.
+- The `.env` approach above is convenient but not ideal — prefer `direnv` or a shell-level export to keep the key off disk.
 - Pass `--yes` to skip the 5-second cost-warning delay at startup.
+- Output grows quickly — each iteration writes 8 screenshots plus per-stage logs, so `output/` can reach gigabytes over many runs. Prune it with `npm run clean-output` (add `-- --dry-run` to preview first).
 
 ## Run it
 
@@ -42,27 +51,32 @@ Output lands in `output/<date>/<time>/`. Open `report.md` to see the comparison.
 |---|---|---|
 | `--test`, `-t` | `all` | Which test(s) to run. A label, `all`, or a comma list. |
 | `--iterations`, `-n` | `3` | How many times to run each test. |
-| `--model`, `-m` | `claude-sonnet-4-20250514` | Claude model ID. |
-| `--runner`, `-r` | `api` | `api` (SDK) or `cli` (Claude CLI). |
+| `--model`, `-m` | `claude-sonnet-4-6` | Claude model ID. |
 | `--max-fixes`, `-f` | `5` | Max error→fix cycles per iteration. |
-| `--concurrency`, `-c` | `2` | Max parallel agent calls. |
-| `--agent-prompt` | off | Generate a fresh brief from Claude. |
+| `--concurrency`, `-c` | `1` | Max parallel agent iterations. Default is sequential so Lighthouse / DOM measurements aren't biased by CPU contention. Pass `2+` to trade precision for wall-clock speed. |
+| `--no-screenshot` | — | Skip browser validation and all browser-based metrics. |
+| `--agent-prompt` | off | Generate a fresh brief from Claude (see Briefs below). |
 | `--yes`, `-y` | off | Skip the cost-warning startup delay. |
 
 ### Models
 
-See [Anthropic's documentation](https://docs.anthropic.com/en/docs/about-claude/models) for current model IDs. Pass via `--model`. The default is `claude-sonnet-4-20250514`.
+See [Anthropic's documentation](https://docs.anthropic.com/en/docs/about-claude/models) for current model IDs. Pass via `--model`. The default is `claude-sonnet-4-6`. Model IDs are retired over time — if a run fails with a `404 not_found_error: model: …`, pass a current id via `--model`.
 
 ## Tests
 
-The `tests/` directory ships with four reference examples covering universal design systems:
+The `tests/` directory ships with nine reference examples covering public design systems:
 
+- `atlaskit` — Atlassian Design System
 - `carbon` — IBM Carbon Design System
 - `gestalt` — Pinterest Gestalt
+- `lightning` — Salesforce Lightning
+- `nord` — Nordhealth Nord
+- `polaris` — Shopify Polaris
 - `shad-cn` — shadcn/ui
 - `spectrum` — Adobe Spectrum
+- `zendesk-garden` — Zendesk Garden
 
-These are reference examples. Add your own to test the systems you care about.
+These are reference examples. Add your own to test the systems you care about. This project has no affiliation with these vendors. The names identify which public npm packages each test installs.
 
 ## Add a test
 
@@ -137,15 +151,49 @@ mcp: {
   args: (directory) => [resolve(directory, "src/index.js")],  // array or (dir) => array
   defaultDirectory: "/absolute/path/to/your-mcp",   // where the server lives
   env: { DSDS_PATHS: "/abs/path/to/docs.dsds.json" }, // optional; object or (dir) => env
-  toolPrefix: "mcp__your-server",                   // used by the CLI runner's --allowed-tools
+  toolPrefix: "mcp__your-server",                   // optional; reserved for tool-name filtering
 }
 ```
 
-Inside templates, `{{#if requiresMcp}}` is true whenever an `mcp` block is present, so prompts can branch on MCP availability without duplicating the check.
+Inside templates, `{{#if requiresMcp}}` is true whenever an `mcp` block is present. Prompts can branch on MCP availability without duplicating the check.
+
+> **Security:** the `command` and `args` you declare here are spawned as a
+> child process and run verbatim. Treat every test `config.js` as trusted
+> code, and don't run tests whose config you haven't reviewed. See
+> [SECURITY.md](SECURITY.md).
 
 ### Disable a test
 
 Rename `tests/foo/` to `tests/foo.disabled/` (or prefix with `_`). The engine skips it.
+
+## Briefs
+
+Every test in a run gets the same interface brief. That keeps results comparable. `briefs/default.js` defines it (wired up via `briefGenerator` in `agent-tester.config.js`):
+
+- By default, `staticBrief` is used — one fixed sentence describing the app to build.
+- With `--agent-prompt`, Claude generates a fresh PRD-style brief per run using the `systemPrompt`, `domains`, and `buildUserMessage` fields.
+
+Edit `briefs/default.js` (or point `briefGenerator` at your own module) to change what the agents are asked to build.
+
+## Generative UI mode (experimental)
+
+Instead of asking the agent to hand-write React, generative-UI mode asks it to
+emit a JSON UI spec that a server-side renderer turns into components. It needs
+a test with an `mcp` block whose server exposes a component **catalog** and a
+spec **validation** tool, so it only works against a design system documented
+that way — there is no generally-runnable example in this repo. Both entry
+points require such a test and will exit with a clear message if none is found:
+
+- `npm start -- --test <label> --genui` — compiles the spec to a real React app
+  and runs the full build / screenshot / measurement pipeline, producing the
+  same `report.md` as a normal run.
+- `npm run genui` — a lighter standalone runner over the briefs in
+  `src/genui/briefs.js` that measures **spec validity** (not a React build), so
+  it writes no screenshots and starts no dev server. Pass `--test <label>` to
+  pick the MCP test, or it uses the first one it finds.
+
+This mode is experimental and tied to MCP servers that expose a catalog +
+validation tool; treat it as a preview, not a stable surface.
 
 ## What the report measures
 
@@ -172,6 +220,7 @@ Rename `tests/foo/` to `tests/foo.disabled/` (or prefix with `_`). The engine sk
 |---|---|
 | `npm run new-test -- <label>` | Scaffold a new test directory. |
 | `npm run summarize` | Aggregate metrics across runs. |
+| `npm run genui` | Generative-UI spec runner (experimental — needs an MCP test). |
 | `npm test` | Run unit tests. |
 
 ### Summarize across runs
@@ -182,3 +231,7 @@ npm run summarize -- --count 5                      # Last 5 runs
 npm run summarize -- --test shad-cn                 # One test only
 npm run summarize -- --from 2026-05-14/14.00 --save # Since a date
 ```
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Security issues: see [SECURITY.md](SECURITY.md).

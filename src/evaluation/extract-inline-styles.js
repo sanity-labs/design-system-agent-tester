@@ -1,4 +1,4 @@
-import { extname } from "node:path";
+import { isJsxFile } from "./parse-files.js";
 
 /**
  * Extract inline style usage counts from source files, broken down by
@@ -75,12 +75,4 @@ export function extractInlineStyles(files) {
     byProperty: globalByProperty,
     perFile,
   };
-}
-
-/**
- * Check if a file is a JSX/TSX source file (excludes CSS, JSON, HTML).
- */
-function isJsxFile(filePath) {
-  const ext = extname(filePath).toLowerCase();
-  return [".js", ".jsx", ".ts", ".tsx"].includes(ext);
 }

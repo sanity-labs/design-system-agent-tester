@@ -1,4 +1,4 @@
-import { extname } from "node:path";
+import { isJsxFile } from "./parse-files.js";
 
 /**
  * Count actual JSX usage instances of each component across source files.
@@ -27,7 +27,13 @@ export function extractComponentUsageCounts(files) {
     // Match every JSX opening tag: <ComponentName or <ComponentName.Sub
     // Only capture PascalCase names (components) and lowercase HTML tags
     // we care about (skip plain div/span/etc unless explicitly wanted).
-    const tagRegex = /<([A-Z][A-Za-z0-9.]*)/g;
+    //
+    // Two guards keep TypeScript generics out of the count:
+    //  - the `<` must not be preceded by an identifier character, which
+    //    excludes `useState<FilterState>`, `Promise<Response>`, etc.
+    //  - the name must be followed by whitespace, `/`, or `>`, which
+    //    excludes generic parameter lists like `<T,>(x) => ...`.
+    const tagRegex = /(?<![A-Za-z0-9_$])<([A-Z][A-Za-z0-9.]*)(?=[\s/>])/g;
     let m;
 
     while ((m = tagRegex.exec(file.content)) !== null) {
@@ -48,12 +54,4 @@ export function extractComponentUsageCounts(files) {
     byComponent: globalByComponent,
     perFile,
   };
-}
-
-/**
- * Check if a file is a JSX/TSX source file (excludes CSS, JSON, HTML).
- */
-function isJsxFile(filePath) {
-  const ext = extname(filePath).toLowerCase();
-  return [".js", ".jsx", ".ts", ".tsx"].includes(ext);
 }

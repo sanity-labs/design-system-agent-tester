@@ -2,8 +2,18 @@
   "name": "design-system-agent-tester",
   "version": "1.0.0",
   "description": "Test harness for measuring how well AI agents use a given design system. Runs many agents in parallel against the same brief and aggregates the results.",
+  "private": true,
   "type": "module",
   "main": "src/index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sanity-io/design-system-agent-tester.git"
+  },
+  "bugs": {
+    "url": "https://github.com/sanity-io/design-system-agent-tester/issues"
+  },
+  "homepage": "https://github.com/sanity-io/design-system-agent-tester#readme",
+  "author": "Sanity.io <hello@sanity.io>",
   "keywords": [
     "ai",
     "agents",
@@ -15,12 +25,17 @@
   ],
   "license": "MIT",
   "scripts": {
-    "start": "node --env-file=.env src/index.js",
+    "start": "node src/index.js",
+    "genui": "node src/genui/run.js",
     "summarize": "node src/reporting/summarize.js",
     "new-test": "node src/scripts/new-test.js",
+    "clean-output": "node src/scripts/clean-output.js",
+    "clean-diff-images": "node src/scripts/clean-diff-images.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "lint": "biome check .",
+    "format": "biome check --write ."
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
@@ -31,15 +46,12 @@
     "puppeteer": "^24.2.0"
   },
   "devDependencies": {
-    "@typescript-eslint/parser": "^8.60.0",
+    "@biomejs/biome": "2.5.1",
     "@vitest/coverage-v8": "^4.1.6",
-    "eslint": "^10.4.0",
-    "eslint-plugin-sanity-ui": "file:../../eslint-plugin-sanity-ui",
-    "eslint-plugin-unused-imports": "^4.4.1",
     "typescript": "^5.8.3",
     "vitest": "^4.1.6"
   },
   "engines": {
-    "node": ">=22.11.0"
+    "node": ">=22.12.0"
   }
 }

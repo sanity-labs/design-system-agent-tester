@@ -13,16 +13,13 @@ Thanks for filing a bug against `design-system-agent-tester`. Please fill in the
 ## How to reproduce
 
 <!-- Steps to reproduce. Please include the exact `npm start` command you ran, e.g.:
-`npm start -- --runner api --model claude-opus-4-7 --test layout-basics` -->
+`npm start -- --model claude-opus-4-7 --test layout-basics` -->
 
 ## Environment
 
 - Node version (`node -v`):
 - OS:
 - Model (`--model`):
-- Runner (`--runner`):
-  - [ ] `api`
-  - [ ] `cli`
 - Test label (`--test`):
 - Did the run complete?
   - [ ] Yes

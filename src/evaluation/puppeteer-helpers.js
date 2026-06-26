@@ -8,8 +8,42 @@
  */
 import config from "../config/load.js";
 
+/** Navigation / page-default timeout for browser ops (ms). */
+export const NAV_TIMEOUT_MS = 30_000;
+
 /**
- * Launch a fresh headless Chrome instance.
+ * Overall ceiling on a single measurement callback (ms). We run untrusted,
+ * agent-generated code in the page — an infinite loop or a pathological DOM
+ * can make `page.evaluate` hang forever (it has no built-in timeout). Racing
+ * against this lets the caller's `finally` close the browser, which tears
+ * down the wedged page.
+ */
+export const MEASURE_TIMEOUT_MS = 60_000;
+
+/**
+ * Race a promise against a timeout. Does NOT cancel the underlying work
+ * (you can't cancel a `page.evaluate`), but unblocks the caller so it can
+ * close the browser. The timer is `unref`'d so it never keeps Node alive.
+ *
+ * @template T
+ * @param {Promise<T>} promise
+ * @param {number} ms
+ * @param {string} [label]
+ * @returns {Promise<T>}
+ */
+export function withTimeout(promise, ms, label = "operation") {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    timer.unref?.();
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+/**
+ * Launch a fresh headless Chrome instance. Single source of truth for the
+ * launch flags — lighthouse and react-profile also call this so the sandbox
+ * args never drift between evaluators.
  *
  * @returns {Promise<import("puppeteer").Browser>}
  */
@@ -34,11 +68,7 @@ export async function launchBrowser() {
  * @returns {Promise<boolean>} — true if content was detected
  */
 export async function waitForRenderedContent(page, opts = {}) {
-  const {
-    iterLabel,
-    maxWaitMs = 15_000,
-    pollIntervalMs = 500,
-  } = opts;
+  const { iterLabel, maxWaitMs = 15_000, pollIntervalMs = 500 } = opts;
 
   const start = Date.now();
   const rootSelector = config.appRootSelectors.join(", ");
@@ -103,15 +133,21 @@ export async function waitForRenderedContent(page, opts = {}) {
  * @returns {Promise<T>}
  */
 export async function withPage(serverUrl, fn, opts = {}) {
-  const { iterLabel, viewport = { width: 1440, height: 900 } } = opts;
+  const {
+    iterLabel,
+    viewport = { width: 1440, height: 900 },
+    timeoutMs = MEASURE_TIMEOUT_MS,
+  } = opts;
 
   const browser = await launchBrowser();
   try {
     const page = await browser.newPage();
+    page.setDefaultTimeout(NAV_TIMEOUT_MS);
+    page.setDefaultNavigationTimeout(NAV_TIMEOUT_MS);
     await page.setViewport(viewport);
-    await page.goto(serverUrl, { waitUntil: "networkidle2", timeout: 30_000 });
+    await page.goto(serverUrl, { waitUntil: "networkidle2", timeout: NAV_TIMEOUT_MS });
     await waitForRenderedContent(page, { iterLabel });
-    return await fn(page);
+    return await withTimeout(fn(page), timeoutMs, `measurement (${iterLabel ?? serverUrl})`);
   } finally {
     await browser.close();
   }

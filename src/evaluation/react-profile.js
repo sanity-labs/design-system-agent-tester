@@ -23,6 +23,8 @@
 
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { round } from "../util/round.js";
+import { launchBrowser, NAV_TIMEOUT_MS } from "./puppeteer-helpers.js";
 
 /**
  * @typedef {{
@@ -44,16 +46,15 @@ import { resolve } from "node:path";
  * @returns {Promise<ReactProfile | null>}
  */
 export async function measureReactProfile({ serverUrl, iterDir, iterLabel }) {
-  const puppeteer = await import("puppeteer");
-
-  const browser = await puppeteer.default.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
-  });
-
+  // Launch inside the try so a launch/import failure honors the null
+  // contract instead of throwing, and never leaks a half-open browser.
+  let browser = null;
   try {
+    browser = await launchBrowser();
     console.log(`[${iterLabel}] React Profiler...`);
     const page = await browser.newPage();
+    page.setDefaultTimeout(NAV_TIMEOUT_MS);
+    page.setDefaultNavigationTimeout(NAV_TIMEOUT_MS);
     await page.setViewport({ width: 1440, height: 900 });
 
     // Install the hook BEFORE any page scripts execute. React reads
@@ -74,9 +75,16 @@ export async function measureReactProfile({ serverUrl, iterDir, iterLabel }) {
         onCommitFiberUnmount: () => {},
         onPostCommitFiberRoot: () => {},
         onCommitFiberRoot: (_rendererID, root) => {
-          const topFiber = root?.current?.child;
-          if (!topFiber) return;
-          const duration = topFiber.actualDuration;
+          // Prefer the HostRoot fiber's actualDuration — it aggregates the
+          // whole commit (all top-level children / Fragments). Fall back to
+          // the first child fiber for renderer versions that don't populate
+          // it on the root.
+          const rootFiber = root?.current;
+          if (!rootFiber) return;
+          const duration =
+            typeof rootFiber.actualDuration === "number"
+              ? rootFiber.actualDuration
+              : rootFiber.child?.actualDuration;
           if (typeof duration !== "number") return;
           window.__REACT_PROFILER_COMMITS__.push({
             durationMs: duration,
@@ -86,13 +94,11 @@ export async function measureReactProfile({ serverUrl, iterDir, iterLabel }) {
       };
     });
 
-    await page.goto(serverUrl, { waitUntil: "networkidle0", timeout: 30_000 });
+    await page.goto(serverUrl, { waitUntil: "networkidle2", timeout: NAV_TIMEOUT_MS });
     // Allow React to flush deferred useEffect / Suspense work.
     await new Promise((r) => setTimeout(r, 1500));
 
-    const commits = await page.evaluate(
-      () => window.__REACT_PROFILER_COMMITS__ ?? [],
-    );
+    const commits = await page.evaluate(() => window.__REACT_PROFILER_COMMITS__ ?? []);
 
     if (commits.length === 0) {
       console.warn(
@@ -107,9 +113,7 @@ export async function measureReactProfile({ serverUrl, iterDir, iterLabel }) {
     const avgUpdateMs = updates.length
       ? round(updates.reduce((s, c) => s + c.durationMs, 0) / updates.length)
       : 0;
-    const maxUpdateMs = updates.length
-      ? round(Math.max(...updates.map((c) => c.durationMs)))
-      : 0;
+    const maxUpdateMs = updates.length ? round(Math.max(...updates.map((c) => c.durationMs))) : 0;
 
     const profile = {
       mountMs,
@@ -124,9 +128,7 @@ export async function measureReactProfile({ serverUrl, iterDir, iterLabel }) {
 
     await writeResults(iterDir, profile);
 
-    console.log(
-      `[${iterLabel}] React mount=${profile.mountMs}ms commits=${profile.commitCount}`,
-    );
+    console.log(`[${iterLabel}] React mount=${profile.mountMs}ms commits=${profile.commitCount}`);
 
     return profile;
   } catch (err) {
@@ -134,7 +136,7 @@ export async function measureReactProfile({ serverUrl, iterDir, iterLabel }) {
     await writeResults(iterDir, null);
     return null;
   } finally {
-    await browser.close();
+    if (browser) await browser.close();
   }
 }
 
@@ -144,9 +146,4 @@ async function writeResults(iterDir, profile) {
     JSON.stringify(profile, null, 2),
     "utf-8",
   );
-}
-
-function round(n, decimals = 2) {
-  if (n === null || n === undefined || isNaN(n)) return n;
-  return Math.round(n * 10 ** decimals) / 10 ** decimals;
 }

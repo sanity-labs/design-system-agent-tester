@@ -10,18 +10,15 @@
  * "configuration".
  */
 
-import { resolve, dirname, isAbsolute } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
 import { existsSync } from "node:fs";
+import { dirname, isAbsolute, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const PROJECT_ROOT = resolve(__dirname, "..", "..");
 
 const DEFAULT_CONFIG_PATH = resolve(PROJECT_ROOT, "agent-tester.config.js");
-const EXAMPLE_CONFIG_PATH = resolve(
-  PROJECT_ROOT,
-  "agent-tester.config.example.js",
-);
+const EXAMPLE_CONFIG_PATH = resolve(PROJECT_ROOT, "agent-tester.config.example.js");
 
 const envPath = process.env.AGENT_TESTER_CONFIG;
 const resolvedPath = envPath
@@ -34,18 +31,14 @@ if (!existsSync(resolvedPath)) {
   const hint = existsSync(EXAMPLE_CONFIG_PATH)
     ? `Copy \`agent-tester.config.example.js\` to \`agent-tester.config.js\` and edit it.`
     : `Create \`agent-tester.config.js\` at the project root.`;
-  throw new Error(
-    `Agent Tester config not found at ${resolvedPath}.\n${hint}`,
-  );
+  throw new Error(`Agent Tester config not found at ${resolvedPath}.\n${hint}`);
 }
 
 // Use a file:// URL so the dynamic import works with absolute paths on all OSes.
 const { default: config } = await import(pathToFileURL(resolvedPath).href);
 
 if (!config || typeof config !== "object") {
-  throw new Error(
-    `Agent Tester config at ${resolvedPath} must export a default object.`,
-  );
+  throw new Error(`Agent Tester config at ${resolvedPath} must export a default object.`);
 }
 
 export const CONFIG_PATH = resolvedPath;

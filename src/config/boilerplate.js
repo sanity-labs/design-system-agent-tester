@@ -79,9 +79,7 @@ export const FIX_RULES_BASE = `Rules:
  * feedback, and base-rules blocks to the test's intro.
  */
 export function composeSystem(testIntro) {
-  return [testIntro.trim(), OUTPUT_FORMAT, FEEDBACK_FORMAT, BASE_RULES]
-    .join("\n\n")
-    .trim();
+  return [testIntro.trim(), OUTPUT_FORMAT, FEEDBACK_FORMAT, BASE_RULES].join("\n\n").trim();
 }
 
 /**

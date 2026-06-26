@@ -1,28 +1,32 @@
-import { describe, it, expect } from "vitest";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it, vi } from "vitest";
 import {
-  mean,
-  sum,
-  stdDev,
-  round,
-  ngramSet,
-  jaccardSimilarity,
-  computeCodeVariance,
-  analyzeFeedback,
-  analyzeComponents,
   analyzeAccessibility,
+  analyzeComponents,
+  analyzeComponentUsage,
+  analyzeFeedback,
+  analyzeInlineStyles,
   analyzeLighthouse,
   analyzeReactProfile,
-  analyzeComponentUsage,
-  analyzeInlineStyles,
   analyzeSemanticHtml,
+  computeCodeVariance,
+  generateReport,
+  jaccardSimilarity,
+  mean,
+  ngramSet,
+  round,
+  stdDev,
+  sum,
 } from "./report.js";
 
 // ---------------------------------------------------------------------------
 // mean
 // ---------------------------------------------------------------------------
 describe("mean", () => {
-  it("returns 0 for an empty array", () => {
-    expect(mean([])).toBe(0);
+  it("returns null for an empty array", () => {
+    expect(mean([])).toBeNull();
   });
 
   it("returns the single value for a one-element array", () => {
@@ -35,6 +39,14 @@ describe("mean", () => {
 
   it("handles negative numbers", () => {
     expect(mean([-10, 10])).toBe(0);
+  });
+
+  it("ignores non-finite entries instead of propagating NaN", () => {
+    expect(mean([2, null, 4, undefined, 6, NaN])).toBe(4);
+  });
+
+  it("returns null when every entry is non-finite", () => {
+    expect(mean([null, undefined, NaN])).toBeNull();
   });
 });
 
@@ -59,16 +71,20 @@ describe("sum", () => {
 // stdDev
 // ---------------------------------------------------------------------------
 describe("stdDev", () => {
-  it("returns 0 for a single-element array", () => {
-    expect(stdDev([5])).toBe(0);
+  it("returns null for a single-element array (spread is undefined)", () => {
+    expect(stdDev([5])).toBeNull();
   });
 
-  it("returns 0 for an empty array", () => {
-    expect(stdDev([])).toBe(0);
+  it("returns null for an empty array", () => {
+    expect(stdDev([])).toBeNull();
   });
 
   it("returns 0 when all values are identical", () => {
     expect(stdDev([7, 7, 7, 7])).toBe(0);
+  });
+
+  it("ignores non-finite entries", () => {
+    expect(stdDev([7, null, 7, NaN, 7, 7])).toBe(0);
   });
 
   it("computes the population standard deviation", () => {
@@ -90,16 +106,16 @@ describe("round", () => {
     expect(round(3.14159, 1)).toBe(3.1);
   });
 
-  it("passes through null", () => {
+  it("returns null for null", () => {
     expect(round(null)).toBeNull();
   });
 
-  it("passes through undefined", () => {
-    expect(round(undefined)).toBeUndefined();
+  it("returns null for undefined (never leaks it into a report)", () => {
+    expect(round(undefined)).toBeNull();
   });
 
-  it("passes through NaN", () => {
-    expect(round(NaN)).toBeNaN();
+  it("returns null for NaN (never renders the literal 'NaN')", () => {
+    expect(round(NaN)).toBeNull();
   });
 
   it("handles 0 decimals", () => {
@@ -183,7 +199,10 @@ describe("computeCodeVariance", () => {
   });
 
   it("returns perfect similarity for identical iterations", () => {
-    const file = { path: "src/App.tsx", content: "import React from 'react';\nexport default () => <div>Hello</div>;" };
+    const file = {
+      path: "src/App.tsx",
+      content: "import React from 'react';\nexport default () => <div>Hello</div>;",
+    };
     const result = computeCodeVariance([
       { iteration: 1, files: [file] },
       { iteration: 2, files: [file] },
@@ -197,7 +216,16 @@ describe("computeCodeVariance", () => {
   it("returns lower similarity for different content", () => {
     const result = computeCodeVariance([
       { iteration: 1, files: [{ path: "App.tsx", content: "function foo() { return 1; }" }] },
-      { iteration: 2, files: [{ path: "App.tsx", content: "class Bar extends Component { render() { return <span>totally different</span>; } }" }] },
+      {
+        iteration: 2,
+        files: [
+          {
+            path: "App.tsx",
+            content:
+              "class Bar extends Component { render() { return <span>totally different</span>; } }",
+          },
+        ],
+      },
     ]);
     expect(result.averageContentSimilarity).toBeLessThan(1);
     expect(result.averageContentSimilarity).toBeGreaterThanOrEqual(0);
@@ -205,8 +233,20 @@ describe("computeCodeVariance", () => {
 
   it("measures structural similarity via file paths", () => {
     const result = computeCodeVariance([
-      { iteration: 1, files: [{ path: "App.tsx", content: "a" }, { path: "utils.ts", content: "b" }] },
-      { iteration: 2, files: [{ path: "App.tsx", content: "c" }, { path: "helpers.ts", content: "d" }] },
+      {
+        iteration: 1,
+        files: [
+          { path: "App.tsx", content: "a" },
+          { path: "utils.ts", content: "b" },
+        ],
+      },
+      {
+        iteration: 2,
+        files: [
+          { path: "App.tsx", content: "c" },
+          { path: "helpers.ts", content: "d" },
+        ],
+      },
     ]);
     // They share App.tsx but differ on the second file
     // Jaccard of {App.tsx, utils.ts} vs {App.tsx, helpers.ts} = 1/3
@@ -215,11 +255,7 @@ describe("computeCodeVariance", () => {
 
   it("generates pairwise entries for 3 iterations", () => {
     const mkIter = (i, content) => ({ iteration: i, files: [{ path: "a.tsx", content }] });
-    const result = computeCodeVariance([
-      mkIter(1, "aaa"),
-      mkIter(2, "bbb"),
-      mkIter(3, "ccc"),
-    ]);
+    const result = computeCodeVariance([mkIter(1, "aaa"), mkIter(2, "bbb"), mkIter(3, "ccc")]);
     // 3 iterations → 3 pairs (1-2, 1-3, 2-3)
     expect(result.pairwiseContentSimilarity).toHaveLength(3);
     expect(result.pairwiseStructuralSimilarity).toHaveLength(3);
@@ -230,8 +266,9 @@ describe("computeCodeVariance", () => {
       { iteration: 1, files: [] },
       { iteration: 2, files: [] },
     ]);
-    // Two empty strings → identical n-gram sets (both empty) → similarity = 1
-    expect(result.averageContentSimilarity).toBe(1);
+    // File-less iterations are excluded — two empty n-gram sets would
+    // otherwise compare as identical (similarity = 1).
+    expect(result.averageContentSimilarity).toBeNull();
   });
 });
 
@@ -240,10 +277,7 @@ describe("computeCodeVariance", () => {
 // ---------------------------------------------------------------------------
 describe("analyzeFeedback", () => {
   it("returns zeroed summary for iterations with no feedback", () => {
-    const result = analyzeFeedback([
-      { iteration: 1 },
-      { iteration: 2, feedback: [] },
-    ]);
+    const result = analyzeFeedback([{ iteration: 1 }, { iteration: 2, feedback: [] }]);
     expect(result.totalItems).toBe(0);
     expect(result.uniqueItems).toBe(0);
     expect(result.averagePerIteration).toBe(0);
@@ -261,9 +295,7 @@ describe("analyzeFeedback", () => {
       },
       {
         iteration: 2,
-        feedback: [
-          { category: "components", text: "Button needs hover state" },
-        ],
+        feedback: [{ category: "components", text: "Button needs hover state" }],
       },
     ];
     const result = analyzeFeedback(iters);
@@ -375,10 +407,7 @@ describe("analyzeComponents", () => {
 // ---------------------------------------------------------------------------
 describe("analyzeAccessibility", () => {
   it("returns description-only when no iterations have a11y results", () => {
-    const result = analyzeAccessibility([
-      { iteration: 1 },
-      { iteration: 2 },
-    ]);
+    const result = analyzeAccessibility([{ iteration: 1 }, { iteration: 2 }]);
     expect(result.iterationsWithResults).toBe(0);
     expect(result.totalIterations).toBe(2);
     expect(result.description).toMatch(/no accessibility/i);
@@ -392,8 +421,18 @@ describe("analyzeAccessibility", () => {
           summary: { totalViolations: 3, lightViolations: 2, darkOnlyViolations: 1, passed: false },
           axeViolationCount: 3,
           axeViolations: [
-            { id: "color-contrast", impact: "serious", description: "Contrast too low", modes: ["light"] },
-            { id: "color-contrast", impact: "serious", description: "Contrast too low", modes: ["dark"] },
+            {
+              id: "color-contrast",
+              impact: "serious",
+              description: "Contrast too low",
+              modes: ["light"],
+            },
+            {
+              id: "color-contrast",
+              impact: "serious",
+              description: "Contrast too low",
+              modes: ["dark"],
+            },
             { id: "image-alt", impact: "critical", description: "Missing alt", modes: ["light"] },
           ],
         },
@@ -404,7 +443,12 @@ describe("analyzeAccessibility", () => {
           summary: { totalViolations: 1, lightViolations: 1, darkOnlyViolations: 0, passed: false },
           axeViolationCount: 1,
           axeViolations: [
-            { id: "color-contrast", impact: "serious", description: "Contrast too low", modes: ["light"] },
+            {
+              id: "color-contrast",
+              impact: "serious",
+              description: "Contrast too low",
+              modes: ["light"],
+            },
           ],
         },
       },
@@ -446,6 +490,52 @@ describe("analyzeAccessibility", () => {
     expect(result.perIteration[0].passed).toBe(true);
     expect(result.perIteration[1].passed).toBe(false);
   });
+
+  it("excludes skipped scans from averages and pass rate", () => {
+    const iters = [
+      {
+        iteration: 1,
+        a11yResults: {
+          summary: { totalViolations: 4, passed: false },
+          axeViolationCount: 4,
+          axeViolations: [{ id: "color-contrast", impact: "serious", modes: ["light"] }],
+        },
+      },
+      {
+        // axe failed to inject — recorded as skipped with zero count.
+        iteration: 2,
+        a11yResults: {
+          summary: { skipped: true, passed: false },
+          axeViolationCount: 0,
+          axeViolations: [],
+        },
+      },
+    ];
+    const result = analyzeAccessibility(iters);
+    // Only the real scan counts: avg 4/1, not 4/2.
+    expect(result.iterationsWithResults).toBe(1);
+    expect(result.skippedIterations).toBe(1);
+    expect(result.averageViolations).toBe(4);
+    expect(result.passRate).toBe(0);
+    expect(result.perIteration).toHaveLength(1);
+  });
+
+  it("reports skip count when every scan was skipped", () => {
+    const iters = [
+      {
+        iteration: 1,
+        a11yResults: {
+          summary: { skipped: true, passed: false },
+          axeViolationCount: 0,
+          axeViolations: [],
+        },
+      },
+    ];
+    const result = analyzeAccessibility(iters);
+    expect(result.iterationsWithResults).toBe(0);
+    expect(result.skippedIterations).toBe(1);
+    expect(result.description).toMatch(/skipped/i);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -453,10 +543,7 @@ describe("analyzeAccessibility", () => {
 // ---------------------------------------------------------------------------
 describe("analyzeLighthouse", () => {
   it("returns nulls when no iterations have lighthouse results", () => {
-    const result = analyzeLighthouse([
-      { iteration: 1 },
-      { iteration: 2 },
-    ]);
+    const result = analyzeLighthouse([{ iteration: 1 }, { iteration: 2 }]);
     expect(result.iterationsWithResults).toBe(0);
     expect(result.avgFcpMs).toBeNull();
     expect(result.avgLcpMs).toBeNull();
@@ -464,9 +551,7 @@ describe("analyzeLighthouse", () => {
   });
 
   it("skips iterations whose lighthouse run errored", () => {
-    const result = analyzeLighthouse([
-      { iteration: 1, lighthouseResults: { error: "timeout" } },
-    ]);
+    const result = analyzeLighthouse([{ iteration: 1, lighthouseResults: { error: "timeout" } }]);
     expect(result.iterationsWithResults).toBe(0);
   });
 
@@ -677,5 +762,259 @@ describe("analyzeSemanticHtml", () => {
     expect(result.globalGenericByTag).toEqual({ div: 11, span: 5 });
     expect(result.globalRolesByValue).toEqual({ button: 3, navigation: 1 });
     expect(result.perIteration).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// generateReport — markdown section regression tests
+// ---------------------------------------------------------------------------
+describe("generateReport markdown sections", () => {
+  it("renders DOM Elements and Semantic HTML when there are zero inline styles", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const dir = await mkdtemp(join(tmpdir(), "at-report-"));
+
+    const iterations = [
+      {
+        iteration: 1,
+        elapsedSeconds: 10,
+        linesOfCode: 50,
+        files: [{ path: "src/App.tsx", content: "export default () => null;\n" }],
+        componentImports: [],
+        fixAttempts: 0,
+        // The desired outcome the harness measures for: no inline styles.
+        // These sections used to be nested inside the inline-styles
+        // conditional and silently vanished from the report in this case.
+        inlineStyles: { total: 0, byComponent: {}, byProperty: {} },
+        domElementCount: 120,
+        domHtmlBytes: 4096,
+        semanticHtml: {
+          total: 20,
+          semanticCount: 12,
+          genericCount: 8,
+          roleCount: 3,
+          semanticRatio: 0.6,
+          semanticByTag: { main: 1, nav: 1 },
+          genericByTag: { div: 8 },
+          rolesByValue: { button: 2 },
+        },
+      },
+    ];
+
+    try {
+      await generateReport({ demo: iterations }, dir);
+      const md = await readFile(join(dir, "report.md"), "utf-8");
+
+      expect(md).toContain("No inline style data available.");
+      expect(md).toContain("### DOM Elements");
+      expect(md).toContain("### Semantic HTML");
+      // Section order: Inline Styles closes before DOM Elements begins.
+      expect(md.indexOf("### DOM Elements")).toBeGreaterThan(md.indexOf("### Inline Styles"));
+      expect(md.indexOf("### Semantic HTML")).toBeGreaterThan(md.indexOf("### DOM Elements"));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      log.mockRestore();
+      warn.mockRestore();
+    }
+  });
+
+  it("keeps the Inline Styles section contiguous when inline styles exist", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const dir = await mkdtemp(join(tmpdir(), "at-report-"));
+
+    const iterations = [
+      {
+        iteration: 1,
+        elapsedSeconds: 10,
+        linesOfCode: 50,
+        files: [{ path: "src/App.tsx", content: "export default () => null;\n" }],
+        componentImports: [],
+        fixAttempts: 0,
+        inlineStyles: {
+          total: 2,
+          byComponent: { Card: 2 },
+          byProperty: { color: 2 },
+        },
+        domElementCount: 120,
+        domHtmlBytes: 4096,
+        semanticHtml: {
+          total: 20,
+          semanticCount: 12,
+          genericCount: 8,
+          roleCount: 3,
+          semanticRatio: 0.6,
+          semanticByTag: { main: 1 },
+          genericByTag: { div: 8 },
+          rolesByValue: { button: 2 },
+        },
+      },
+    ];
+
+    try {
+      await generateReport({ demo: iterations }, dir);
+      const md = await readFile(join(dir, "report.md"), "utf-8");
+
+      // The inline-styles property table must come BEFORE the DOM
+      // Elements section — previously DOM/Semantic rendered in the
+      // middle of the Inline Styles section.
+      expect(md).toContain("**Most common inline CSS properties:**");
+      expect(md.indexOf("**Most common inline CSS properties:**")).toBeLessThan(
+        md.indexOf("### DOM Elements"),
+      );
+      expect(md).toContain("### Semantic HTML");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      log.mockRestore();
+      warn.mockRestore();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Built-iteration filtering — runtime metrics should NOT count broken builds
+// ---------------------------------------------------------------------------
+describe("generateReport excludes broken builds from runtime metrics", () => {
+  it("does not aggregate DOM / a11y / semantic data from exitStage='build' iterations", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const dir = await mkdtemp(join(tmpdir(), "at-report-"));
+
+    // One healthy iteration and one that exhausted its fix budget on the
+    // build gate. The runner still stamps measurements against the
+    // broken dev server, so the "broken" iteration carries plausible-
+    // looking but wrong-on-purpose values that must be excluded.
+    const iterations = [
+      {
+        iteration: 1,
+        elapsedSeconds: 8,
+        linesOfCode: 30,
+        files: [{ path: "src/App.tsx", content: "export default () => null;\n" }],
+        componentImports: [],
+        fixAttempts: 0,
+        exitStage: "clean",
+        domElementCount: 100,
+        domHtmlBytes: 4096,
+        semanticHtml: {
+          total: 10,
+          semanticCount: 8,
+          genericCount: 2,
+          roleCount: 1,
+          semanticRatio: 0.8,
+          semanticByTag: { main: 1 },
+          genericByTag: { div: 2 },
+          rolesByValue: {},
+        },
+        a11yResults: { axeViolationCount: 0, axeViolations: [], summary: { passed: true } },
+        lighthouseResults: { fcpMs: 200, lcpMs: 400, tbtMs: 0, ttiMs: 500, performanceScore: 95 },
+      },
+      {
+        iteration: 2,
+        elapsedSeconds: 30,
+        linesOfCode: 25,
+        files: [{ path: "src/App.tsx", content: "broken\n" }],
+        componentImports: [],
+        fixAttempts: 5,
+        exitStage: "build",
+        // These values are what the broken-page measurement pass writes —
+        // a half-rendered DOM, a degenerate axe pass, etc.
+        domElementCount: 4,
+        domHtmlBytes: 200,
+        semanticHtml: {
+          total: 1,
+          semanticCount: 0,
+          genericCount: 1,
+          roleCount: 0,
+          semanticRatio: 0,
+          semanticByTag: {},
+          genericByTag: { div: 1 },
+          rolesByValue: {},
+        },
+        a11yResults: { axeViolationCount: 12, axeViolations: [], summary: { passed: false } },
+        lighthouseResults: null,
+      },
+    ];
+
+    try {
+      await generateReport({ demo: iterations }, dir);
+      const reportJson = JSON.parse(await readFile(join(dir, "report.json"), "utf-8"));
+      const data = reportJson.prompts.demo;
+
+      // The "build failed" iteration must NOT contribute to runtime metrics.
+      expect(data.builtIterations).toBe(1);
+      expect(data.unbuiltIterations).toBe(1);
+      expect(data.domElements.average).toBe(100); // not (100 + 4) / 2
+      expect(data.accessibility.totalViolations).toBe(0); // not 12
+      expect(data.accessibility.iterationsWithResults).toBe(1);
+      expect(data.semanticHtml.avgSemanticCount).toBe(8); // not (8 + 0) / 2
+      expect(data.lighthouse.iterationsWithResults).toBe(1);
+      // Source-derived metrics still see both iterations.
+      expect(data.linesOfCode.average).toBe(27.5); // (30 + 25) / 2
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      log.mockRestore();
+      warn.mockRestore();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Empty-input guards
+// ---------------------------------------------------------------------------
+describe("computeCodeVariance with file-less iterations", () => {
+  it("does not score two file-less iterations as identical", () => {
+    const result = computeCodeVariance([
+      { iteration: 1, files: [] },
+      { iteration: 2, files: [] },
+    ]);
+    // Jaccard of two empty n-gram sets is 1 — these must be excluded,
+    // leaving fewer than 2 comparable iterations.
+    expect(result.averageContentSimilarity).toBeNull();
+    expect(result.pairwiseContentSimilarity).toEqual([]);
+  });
+
+  it("compares only iterations that produced files", () => {
+    const file = { path: "a.tsx", content: "export const x = 1;" };
+    const result = computeCodeVariance([
+      { iteration: 1, files: [file] },
+      { iteration: 2, files: [] },
+      { iteration: 3, files: [file] },
+    ]);
+    expect(result.pairwiseContentSimilarity).toHaveLength(1);
+    expect(result.averageContentSimilarity).toBe(1);
+  });
+});
+
+describe("generateReport with all iterations failed", () => {
+  it("renders dashes instead of Infinity", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const dir = await mkdtemp(join(tmpdir(), "at-report-"));
+
+    const iterations = [
+      {
+        iteration: 1,
+        elapsedSeconds: 12,
+        testLabel: "demo",
+        error: "All 3 generation attempts returned no parseable files.",
+        linesOfCode: 0,
+        files: [],
+        componentImports: [],
+      },
+    ];
+
+    try {
+      const report = await generateReport({ demo: iterations }, dir);
+      const md = await readFile(join(dir, "report.md"), "utf-8");
+
+      expect(md).not.toContain("Infinity");
+      expect(report.prompts.demo.timing.minSeconds).toBeNull();
+      expect(report.prompts.demo.linesOfCode.max).toBeNull();
+      expect(report.prompts.demo.fixAttempts.min).toBeNull();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      log.mockRestore();
+      warn.mockRestore();
+    }
   });
 });

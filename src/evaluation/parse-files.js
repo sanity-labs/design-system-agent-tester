@@ -1,4 +1,4 @@
-import { extname } from "node:path";
+import { extname, isAbsolute, normalize, sep } from "node:path";
 
 /**
  * Strip a markdown code fence wrapping the entire file content, if present.
@@ -32,6 +32,33 @@ function stripWrappingFence(content) {
   // (and our own tests/configs) expect files to end with `\n`.
   const trailingNl = /\n$/.test(content) ? "\n" : "";
   return lines.slice(start + 1, end).join("\n") + trailingNl;
+}
+
+/**
+ * Agent-emitted file paths are untrusted input — a model steered by MCP
+ * or doc content could emit `../../x` or an absolute path and read or
+ * write outside the sandbox project directory. Accept only paths that
+ * stay inside the project dir once normalized.
+ */
+export function isSafeRelativePath(filePath) {
+  if (typeof filePath !== "string" || filePath.trim().length === 0) {
+    return false;
+  }
+  // Absolute posix/windows paths, drive letters, and UNC paths.
+  if (isAbsolute(filePath) || /^[a-zA-Z]:[\\/]|^\\\\/.test(filePath)) {
+    return false;
+  }
+  const normalized = normalize(filePath);
+  return normalized !== ".." && !normalized.startsWith(`..${sep}`) && !normalized.startsWith("../");
+}
+
+/** Drop files whose paths would escape the project directory. */
+function rejectUnsafePaths(files) {
+  return files.filter((file) => {
+    if (isSafeRelativePath(file.path)) return true;
+    console.warn(`Skipping agent-emitted file with unsafe path: ${file.path}`);
+    return false;
+  });
 }
 
 /**
@@ -69,7 +96,7 @@ export function parseFiles(text) {
     }
   }
 
-  return files;
+  return rejectUnsafePaths(files);
 }
 
 /**
@@ -78,4 +105,12 @@ export function parseFiles(text) {
 export function isSourceFile(filePath) {
   const exts = [".js", ".jsx", ".ts", ".tsx", ".css", ".html", ".json"];
   return exts.includes(extname(filePath).toLowerCase());
+}
+
+/**
+ * Check if a file is a JSX/TSX source file (excludes CSS, JSON, HTML).
+ */
+export function isJsxFile(filePath) {
+  const ext = extname(filePath).toLowerCase();
+  return [".js", ".jsx", ".ts", ".tsx"].includes(ext);
 }

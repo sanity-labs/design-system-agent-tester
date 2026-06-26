@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { render } from "./template.js";
 
 describe("template engine", () => {
@@ -26,15 +26,11 @@ describe("template engine", () => {
     });
 
     it("throws on missing top-level keys", () => {
-      expect(() => render("{{missing}}", {})).toThrow(
-        /Template references unknown value/,
-      );
+      expect(() => render("{{missing}}", {})).toThrow(/Template references unknown value/);
     });
 
     it("throws on missing nested paths", () => {
-      expect(() => render("{{a.b.c}}", { a: {} })).toThrow(
-        /Template references unknown value/,
-      );
+      expect(() => render("{{a.b.c}}", { a: {} })).toThrow(/Template references unknown value/);
     });
 
     it("throws on null values (don't silently render 'null')", () => {
@@ -56,21 +52,15 @@ describe("template engine", () => {
     });
 
     it("does not error on {{var}} inside a falsy branch", () => {
-      expect(
-        render("a {{#if on}}{{missing}}{{/if}} b", { on: false }),
-      ).toBe("a  b");
+      expect(render("a {{#if on}}{{missing}}{{/if}} b", { on: false })).toBe("a  b");
     });
 
     it("renders {{var}} inside a truthy branch", () => {
-      expect(
-        render("{{#if on}}hi {{name}}{{/if}}", { on: true, name: "you" }),
-      ).toBe("hi you");
+      expect(render("{{#if on}}hi {{name}}{{/if}}", { on: true, name: "you" })).toBe("hi you");
     });
 
     it("supports dot paths in the condition", () => {
-      expect(
-        render("{{#if cfg.flag}}on{{/if}}", { cfg: { flag: 1 } }),
-      ).toBe("on");
+      expect(render("{{#if cfg.flag}}on{{/if}}", { cfg: { flag: 1 } })).toBe("on");
     });
   });
 
@@ -93,9 +83,7 @@ describe("template engine", () => {
       // If variable substitution happened first, {{flag}} would be replaced
       // with "false" inside the {{#if}} which would then never match.
       // Processing conditionals first means the body is correctly stripped.
-      expect(
-        render("{{#if flag}}{{name}}{{/if}}", { flag: false, name: "x" }),
-      ).toBe("");
+      expect(render("{{#if flag}}{{name}}{{/if}}", { flag: false, name: "x" })).toBe("");
     });
 
     it("handles multiple if blocks", () => {

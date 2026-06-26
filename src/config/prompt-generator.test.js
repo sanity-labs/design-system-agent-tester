@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { STATIC_PROMPT, generateAppPrompt } from "./prompt-generator.js";
+import { describe, expect, it } from "vitest";
+import { generateAppPrompt, STATIC_PROMPT } from "./prompt-generator.js";
 
 describe("prompt-generator", () => {
   describe("STATIC_PROMPT", () => {
