@@ -25,14 +25,14 @@
  * no semantic-HTML analysis). Each of those lives in its own module.
  */
 
-import { resolve, dirname } from "node:path";
-import { appendFile } from "node:fs/promises";
-import { createWriteStream } from "node:fs";
 import { execFile, spawn } from "node:child_process";
+import { createWriteStream } from "node:fs";
+import { appendFile } from "node:fs/promises";
 import { createServer } from "node:net";
+import { dirname, resolve } from "node:path";
 import { promisify } from "node:util";
-import { launchBrowser, waitForRenderedContent } from "./puppeteer-helpers.js";
 import { error, tag, warn } from "../util/color.js";
+import { launchBrowser, NAV_TIMEOUT_MS, waitForRenderedContent } from "./puppeteer-helpers.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -72,18 +72,13 @@ export async function validateProject(projectDir, iterLabel) {
     result.devServer = devServer;
     result.serverUrl = await waitForReady(devServer, port, iterDir);
 
-    console.log(
-      `${tag(iterLabel)} Dev server at ${result.serverUrl}, validating...`,
-    );
+    console.log(`${tag(iterLabel)} Dev server at ${result.serverUrl}, validating...`);
 
     const pageResult = await checkPageRender(result.serverUrl, iterLabel);
     result.consoleErrors = pageResult.consoleErrors;
     result.rendered = pageResult.rendered;
 
-    const fatalError = detectFatalError(
-      pageResult.consoleErrors,
-      pageResult.rendered,
-    );
+    const fatalError = detectFatalError(pageResult.consoleErrors, pageResult.rendered);
     if (fatalError) {
       result.fatalError = fatalError;
       result.success = false;
@@ -112,8 +107,7 @@ export async function validateProject(projectDir, iterLabel) {
  */
 export function killDevServer(devServer) {
   if (!devServer) return;
-  const exited = () =>
-    devServer.exitCode !== null || devServer.signalCode !== null;
+  const exited = () => devServer.exitCode !== null || devServer.signalCode !== null;
   if (exited()) return;
 
   const signalServer = (signal) => {
@@ -150,11 +144,10 @@ async function runNpmInstall(projectDir, iterLabel) {
     // surface against incomplete types. If a peer conflict ever surfaces
     // from agent-generated code, that's a real signal worth reporting in
     // the fix loop — not something to mask.
-    const { stdout, stderr } = await execFileAsync(
-      "npm",
-      ["install", "--no-audit", "--no-fund"],
-      { cwd: projectDir, timeout: 120_000 },
-    );
+    const { stdout, stderr } = await execFileAsync("npm", ["install", "--no-audit", "--no-fund"], {
+      cwd: projectDir,
+      timeout: 120_000,
+    });
 
     const ts = new Date().toISOString();
     const log =
@@ -192,11 +185,10 @@ async function runTypeCheck(projectDir, iterLabel) {
   const iterDir = dirname(projectDir);
   try {
     console.log(`${tag(iterLabel)} Running type check...`);
-    const { stdout: tscOut, stderr: tscErr } = await execFileAsync(
-      "npx",
-      ["tsc", "--noEmit"],
-      { cwd: projectDir, timeout: 60_000 },
-    );
+    const { stdout: tscOut, stderr: tscErr } = await execFileAsync("npx", ["tsc", "--noEmit"], {
+      cwd: projectDir,
+      timeout: 60_000,
+    });
 
     const ts = new Date().toISOString();
     const tscLog =
@@ -217,10 +209,14 @@ async function runTypeCheck(projectDir, iterLabel) {
     console.warn(`${tag(iterLabel)} ${warn(`Type check found ${errorCount} error(s)`)}`);
 
     if (errorCount > 0) {
-      throw new Error(
-        `TypeScript type check failed (${errorCount} error(s)):\n${errors}`,
-      );
+      throw new Error(`TypeScript type check failed (${errorCount} error(s)):\n${errors}`);
     }
+
+    // tsc exited non-zero but we couldn't parse any `): error TS` lines.
+    // That's not "types are fine" — it's tsc itself failing (bad tsconfig,
+    // a crash, a timeout, "Cannot find module"). Surface it instead of
+    // letting validation proceed as if the type check passed.
+    throw new Error(`Type check could not run (tsc exited abnormally):\n${errors}`);
   }
 }
 
@@ -252,18 +248,14 @@ function getAvailablePort() {
  */
 function startDevServer(projectDir, iterLabel, port) {
   console.log(`${tag(iterLabel)} Starting dev server on port ${port}...`);
-  return spawn(
-    "npm",
-    ["run", "dev", "--", "--port", String(port), "--strictPort"],
-    {
-      cwd: projectDir,
-      stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, BROWSER: "none" },
-      // Own process group on POSIX so killDevServer can signal npm AND
-      // the Vite child it spawns in one shot.
-      detached: process.platform !== "win32",
-    },
-  );
+  return spawn("npm", ["run", "dev", "--", "--port", String(port), "--strictPort"], {
+    cwd: projectDir,
+    stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, BROWSER: "none" },
+    // Own process group on POSIX so killDevServer can signal npm AND
+    // the Vite child it spawns in one shot.
+    detached: process.platform !== "win32",
+  });
 }
 
 /**
@@ -281,14 +273,9 @@ function startDevServer(projectDir, iterLabel, port) {
 function waitForReady(devServer, port, iterDir) {
   const logPath = resolve(iterDir, "_dev_server.txt");
   const stream = createWriteStream(logPath, { flags: "a" });
-  stream.write(
-    `\n--- dev server [${new Date().toISOString()}] port=${port} ---\n`,
-  );
+  stream.write(`\n--- dev server [${new Date().toISOString()}] port=${port} ---\n`);
 
-  const readyPattern = new RegExp(
-    `https?:\\/\\/localhost:${port}\\b|ready in \\d+\\s*ms`,
-    "i",
-  );
+  const readyPattern = new RegExp(`https?:\\/\\/localhost:${port}\\b|ready in \\d+\\s*ms`, "i");
 
   let resolved = false;
   let preReadyOutput = "";
@@ -357,6 +344,8 @@ async function checkPageRender(serverUrl, iterLabel) {
   const browser = await launchBrowser();
   try {
     const page = await browser.newPage();
+    page.setDefaultTimeout(NAV_TIMEOUT_MS);
+    page.setDefaultNavigationTimeout(NAV_TIMEOUT_MS);
     await page.setViewport({ width: 1440, height: 900 });
 
     const consoleErrors = [];
@@ -371,7 +360,7 @@ async function checkPageRender(serverUrl, iterLabel) {
 
     await page.goto(serverUrl, {
       waitUntil: "networkidle2",
-      timeout: 30_000,
+      timeout: NAV_TIMEOUT_MS,
     });
 
     const rendered = await waitForRenderedContent(page, { iterLabel });
@@ -403,9 +392,7 @@ const FATAL_PATTERNS = [
 ];
 
 function detectFatalError(consoleErrors, rendered) {
-  const fatalErrors = consoleErrors.filter((err) =>
-    FATAL_PATTERNS.some((pat) => pat.test(err)),
-  );
+  const fatalErrors = consoleErrors.filter((err) => FATAL_PATTERNS.some((pat) => pat.test(err)));
 
   if (fatalErrors.length > 0) {
     return fatalErrors.join("\n");

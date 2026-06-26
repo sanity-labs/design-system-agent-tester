@@ -49,13 +49,22 @@ export function render(template, ctx) {
 
   let out = template;
 
-  out = out.replace(UNLESS_RE, (_, path, body) =>
-    resolve(ctx, path) ? "" : body,
-  );
+  out = out.replace(UNLESS_RE, (_, path, body) => (resolve(ctx, path) ? "" : body));
 
-  out = out.replace(IF_RE, (_, path, body) =>
-    resolve(ctx, path) ? body : "",
-  );
+  out = out.replace(IF_RE, (_, path, body) => (resolve(ctx, path) ? body : ""));
+
+  // The conditional regexes are flat and non-nested by design. If any
+  // `{{#if}}` / `{{/if}}` / `{{#unless}}` / `{{/unless}}` token survives the
+  // two passes above, the template nested or unbalanced its conditionals —
+  // which would otherwise render as corrupted output (a stray `{{/if}}`) or a
+  // misleading "unknown value" error. Fail loudly instead.
+  const stray = out.match(/\{\{\s*[#/](?:if|unless)\b[^}]*\}\}/);
+  if (stray) {
+    throw new Error(
+      `Unbalanced or nested conditional in template near "${stray[0]}". ` +
+        `This renderer supports only flat, non-nested {{#if}}/{{#unless}} blocks.`,
+    );
+  }
 
   out = out.replace(VAR_RE, (_, path) => {
     const val = resolve(ctx, path);

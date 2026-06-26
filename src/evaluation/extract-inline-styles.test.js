@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { extractInlineStyles } from "./extract-inline-styles.js";
 
 // ---------------------------------------------------------------------------
@@ -76,10 +76,7 @@ describe("extractInlineStyles", () => {
       },
       {
         path: "src/B.tsx",
-        content: [
-          `<Box style={{ flex: 1 }} />`,
-          `<Box style={{ flex: 2 }} />`,
-        ].join("\n"),
+        content: [`<Box style={{ flex: 1 }} />`, `<Box style={{ flex: 2 }} />`].join("\n"),
       },
     ];
 

@@ -7,6 +7,20 @@
  * dropped connections, timeouts, rate limits, and 5xx server errors.
  */
 export function isTransientError(err) {
+  // Prefer structured fields when present. An HTTP status or a Node
+  // socket error code is unambiguous, unlike substring-matching a message
+  // (where "500" could be a token count, a port, or a file path).
+  const status = err?.status ?? err?.statusCode;
+  if ([408, 409, 429, 500, 502, 503, 529].includes(status)) return true;
+
+  const code = err?.code;
+  if (
+    typeof code === "string" &&
+    /^(ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|EAI_AGAIN|ENOTFOUND)$/.test(code)
+  ) {
+    return true;
+  }
+
   const msg = (err?.message || "").toLowerCase();
   return (
     msg.includes("connection error") ||
@@ -18,12 +32,10 @@ export function isTransientError(err) {
     msg.includes("timed out") ||
     msg.includes("timeout") ||
     msg.includes("rate limit") ||
-    msg.includes("429") ||
     msg.includes("overloaded") ||
-    msg.includes("529") ||
-    msg.includes("500") ||
-    msg.includes("502") ||
-    msg.includes("503") ||
-    msg.includes("internal server error")
+    msg.includes("internal server error") ||
+    // Bare status codes, matched as standalone tokens so an unrelated
+    // number that merely contains "500" doesn't count.
+    /\b(429|500|502|503|529)\b/.test(msg)
   );
 }

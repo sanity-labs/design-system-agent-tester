@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+
 /**
  * new-test.js — Scaffold a new test directory under `tests/`.
  *
@@ -15,9 +16,9 @@
  * field. Refuses to overwrite an existing directory.
  */
 
-import { writeFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -52,7 +53,9 @@ if (args.length === 0 || args.includes("--help") || args.includes("-h")) {
 }
 
 if (args.length > 1) {
-  console.error(`Error: expected exactly one label argument, got ${args.length}: ${args.join(", ")}`);
+  console.error(
+    `Error: expected exactly one label argument, got ${args.length}: ${args.join(", ")}`,
+  );
   usage(1);
 }
 
@@ -84,7 +87,9 @@ if (label.startsWith("_") || label.endsWith(".disabled")) {
 const testDir = resolve(TESTS_DIR, label);
 
 if (existsSync(testDir)) {
-  console.error(`Error: tests/${label}/ already exists. Pick a different label or delete the existing directory.`);
+  console.error(
+    `Error: tests/${label}/ already exists. Pick a different label or delete the existing directory.`,
+  );
   process.exit(1);
 }
 

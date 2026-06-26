@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+
 /**
  * summarize.js — Generate an aggregate summary report across multiple test runs.
  *
@@ -19,14 +20,14 @@
  *   --help,    -h  Print this help message
  */
 
-import { readdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { resolve, join, dirname } from "node:path";
+import { readdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import {
-  extractMetrics,
   aggregateMetrics,
+  extractMetrics,
   fmt,
   mdTable,
   renderMetricsTables,
@@ -135,21 +136,13 @@ Examples:
     process.exit(1);
   }
 
-  // 2. Apply --from filter
-  if (fromFilter) {
-    const idx = runDirNames.findIndex((d) => d >= fromFilter);
-    if (idx === -1) {
-      console.error(`No runs found at or after "${fromFilter}".`);
-      console.error(`Available runs: ${runDirNames.join(", ")}`);
-      process.exit(1);
-    }
-    runDirNames = runDirNames.slice(idx);
+  // 2 + 3. Apply --from and --count.
+  if (fromFilter && !runDirNames.some((d) => d >= fromFilter)) {
+    console.error(`No runs found at or after "${fromFilter}".`);
+    console.error(`Available runs: ${runDirNames.join(", ")}`);
+    process.exit(1);
   }
-
-  // 3. Apply --count (take the N most recent)
-  if (maxCount > 0 && runDirNames.length > maxCount) {
-    runDirNames = runDirNames.slice(-maxCount);
-  }
+  runDirNames = selectRunDirs(runDirNames, { fromFilter, maxCount });
 
   // 4. Load report.json for each selected directory
   const runs = [];
@@ -187,7 +180,10 @@ Examples:
   if (promptFilter === "all" || promptFilter === "both") {
     promptKeys = discoveredLabels;
   } else {
-    const requested = promptFilter.split(",").map((s) => s.trim()).filter(Boolean);
+    const requested = promptFilter
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
     const unknown = requested.filter((l) => !discoveredLabels.includes(l));
     if (requested.length === 0 || unknown.length > 0) {
       console.error(
@@ -205,9 +201,7 @@ Examples:
   }
 
   // Drop runs that don't contain at least one of the requested labels.
-  const filteredRuns = runs.filter((r) =>
-    promptKeys.some((pk) => r.report.prompts?.[pk]),
-  );
+  const filteredRuns = runs.filter((r) => promptKeys.some((pk) => r.report.prompts?.[pk]));
   if (filteredRuns.length === 0) {
     console.error("No runs contain any of the requested test labels.");
     process.exit(1);
@@ -224,6 +218,30 @@ Examples:
   } else {
     process.stdout.write(md);
   }
+}
+
+// ─── Run selection ──────────────────────────────────────────────────
+
+/**
+ * Apply the `--from` and `--count` filters to a sorted list of run-dir
+ * names. `fromFilter` keeps runs at or after that name (lexical compare —
+ * the `YYYY-MM-DD/HH.MM` naming sorts chronologically). `maxCount` keeps
+ * the N most recent. Pure: no I/O, safe to unit test.
+ *
+ * @param {string[]} runDirNames - sorted ascending
+ * @param {{fromFilter?: string, maxCount?: number}} [opts]
+ * @returns {string[]}
+ */
+export function selectRunDirs(runDirNames, { fromFilter = "", maxCount = 0 } = {}) {
+  let names = [...runDirNames];
+  if (fromFilter) {
+    const idx = names.findIndex((d) => d >= fromFilter);
+    names = idx === -1 ? [] : names.slice(idx);
+  }
+  if (maxCount > 0 && names.length > maxCount) {
+    names = names.slice(-maxCount);
+  }
+  return names;
 }
 
 // ─── Markdown rendering ─────────────────────────────────────────────
@@ -262,7 +280,9 @@ export function renderSummary(runs, promptKeys, scannedDir) {
     agg[pk] = aggregateMetrics(sets);
   }
 
-  const iters = agg[promptKeys[0]]?.totalIterations ?? 3;
+  // Iterations-per-run, if every loaded run agrees on it; null otherwise
+  // (renders as "—" rather than baking in this project's old default of 3).
+  const iters = agg[promptKeys[0]]?.totalIterations ?? null;
 
   // ── Header ────────────────────────────────────────────────────────
   let md = `# Agent Test Summary\n\n`;
@@ -270,7 +290,7 @@ export function renderSummary(runs, promptKeys, scannedDir) {
   md += `**Output directory:** \`${scannedDir}\`  \n`;
   md += `**Runs included (${runs.length}):** ${runs.map((r) => r.name).join(", ")}  \n`;
   md += `**Tests:** ${promptKeys.join(", ")}  \n`;
-  md += `**Iterations per run:** ${iters}  \n\n`;
+  md += `**Iterations per run:** ${iters ?? "—"}  \n\n`;
 
   // ── Aggregate averages: one themed table per topic ────────────────
   md += `## Aggregate Averages (${runs.length} runs)\n\n`;
@@ -309,10 +329,7 @@ function renderVarianceSection(promptKeys, agg) {
   const headers = ["Test", ...VARIANCE_COLUMNS.map(([h]) => h)];
   const rows = promptKeys.map((pk) => {
     const a = agg[pk];
-    return [
-      `**${pk}**`,
-      ...VARIANCE_COLUMNS.map(([, key]) => fmt(a?.[`${key}_sd`], 1)),
-    ];
+    return [`**${pk}**`, ...VARIANCE_COLUMNS.map(([, key]) => fmt(a?.[`${key}_sd`], 1))];
   });
   return `## Metric Variance (std dev across runs)\n\n` + mdTable(headers, rows) + "\n";
 }

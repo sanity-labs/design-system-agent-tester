@@ -1,9 +1,5 @@
-import { describe, it, expect, vi } from "vitest";
-import {
-  parseFiles,
-  isSourceFile,
-  isSafeRelativePath,
-} from "./parse-files.js";
+import { describe, expect, it, vi } from "vitest";
+import { isSafeRelativePath, isSourceFile, parseFiles } from "./parse-files.js";
 
 // ---------------------------------------------------------------------------
 // parseFiles
@@ -76,21 +72,13 @@ describe("parseFiles", () => {
   });
 
   it("keeps paths whose `..` segments stay inside the project", () => {
-    const text = [
-      "---FILE: src/../App.jsx---",
-      "function App() {}",
-      "---END FILE---",
-    ].join("\n");
+    const text = ["---FILE: src/../App.jsx---", "function App() {}", "---END FILE---"].join("\n");
 
     expect(parseFiles(text)).toHaveLength(1);
   });
 
   it("trims whitespace from file paths", () => {
-    const text = [
-      "---FILE:   src/Trimmed.jsx  ---",
-      "content",
-      "---END FILE---",
-    ].join("\n");
+    const text = ["---FILE:   src/Trimmed.jsx  ---", "content", "---END FILE---"].join("\n");
 
     const result = parseFiles(text);
     expect(result[0].path).toBe("src/Trimmed.jsx");
@@ -134,12 +122,7 @@ describe("parseFiles", () => {
   });
 
   it("falls back to fenced code blocks with # file: comment", () => {
-    const text = [
-      "```css",
-      "# src/styles.css",
-      "body { margin: 0; }",
-      "```",
-    ].join("\n");
+    const text = ["```css", "# src/styles.css", "body { margin: 0; }", "```"].join("\n");
 
     const result = parseFiles(text);
 
@@ -149,11 +132,7 @@ describe("parseFiles", () => {
 
   // Second fallback: ```filename.ext patterns
   it("falls back to ```filename.ext code blocks", () => {
-    const text = [
-      "```src/App.jsx",
-      "function App() { return <div /> }",
-      "```",
-    ].join("\n");
+    const text = ["```src/App.jsx", "function App() { return <div /> }", "```"].join("\n");
 
     const result = parseFiles(text);
 
@@ -221,19 +200,13 @@ describe("parseFiles", () => {
       "---END FILE---";
 
     const result = parseFiles(text);
-    expect(result[0].content.trim()).toBe(
-      "export default function App() { return null }",
-    );
+    expect(result[0].content.trim()).toBe("export default function App() { return null }");
   });
 
   it("strips an unlabelled wrapping fence", () => {
-    const text = [
-      "---FILE: app.ts---",
-      "```",
-      "console.log('hi')",
-      "```",
-      "---END FILE---",
-    ].join("\n");
+    const text = ["---FILE: app.ts---", "```", "console.log('hi')", "```", "---END FILE---"].join(
+      "\n",
+    );
 
     const result = parseFiles(text);
     expect(result[0].content.trim()).toBe("console.log('hi')");

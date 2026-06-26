@@ -1,4 +1,4 @@
-import { extname } from "node:path";
+import { isJsxFile } from "./parse-files.js";
 
 /**
  * Count actual JSX usage instances of each component across source files.
@@ -54,12 +54,4 @@ export function extractComponentUsageCounts(files) {
     byComponent: globalByComponent,
     perFile,
   };
-}
-
-/**
- * Check if a file is a JSX/TSX source file (excludes CSS, JSON, HTML).
- */
-function isJsxFile(filePath) {
-  const ext = extname(filePath).toLowerCase();
-  return [".js", ".jsx", ".ts", ".tsx"].includes(ext);
 }

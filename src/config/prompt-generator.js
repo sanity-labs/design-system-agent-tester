@@ -31,14 +31,10 @@ function pickDomain() {
  * @param {string} [opts.model] - Claude model to use for generation.
  * @returns {Promise<string>} The generated brief text.
  */
-export async function generateAppPrompt({
-  model = "claude-sonnet-4-20250514",
-} = {}) {
+export async function generateAppPrompt({ model = "claude-sonnet-4-6" } = {}) {
   const bg = config.briefGenerator;
   if (!bg || typeof bg !== "object") {
-    throw new Error(
-      "briefGenerator block is missing from agent-tester.config.js.",
-    );
+    throw new Error("briefGenerator block is missing from agent-tester.config.js.");
   }
   if (typeof bg.systemPrompt !== "string") {
     throw new Error("briefGenerator.systemPrompt must be a string.");

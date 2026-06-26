@@ -17,12 +17,12 @@
  *   - buildUserPrompt(label, brief)
  */
 
-import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { composeFix, composeSystem } from "./boilerplate.js";
 import config, { PROJECT_ROOT } from "./load.js";
 import { render } from "./template.js";
-import { composeSystem, composeFix } from "./boilerplate.js";
 
 // ─── Test discovery ─────────────────────────────────────────────────
 
@@ -59,11 +59,22 @@ if (!existsSync(PRIMARY_TESTS_DIR)) {
  * later code can resolve paths and emit error messages that reference
  * the right parent (`tests/` vs `tests.internal/`).
  */
+const isDirSafe = (p) => {
+  // statSync follows symlinks (so a symlink to a dir still counts), but a
+  // dangling symlink or an entry removed between readdir and statSync throws.
+  // Skip those rather than aborting all test discovery.
+  try {
+    return statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+};
+
 const testEntries = TEST_DISCOVERY_DIRS.flatMap((baseDir) =>
   readdirSync(baseDir)
     .filter((name) => !name.startsWith("_"))
     .filter((name) => !name.endsWith(".disabled"))
-    .filter((name) => statSync(resolve(baseDir, name)).isDirectory())
+    .filter((name) => isDirSafe(resolve(baseDir, name)))
     .map((dirName) => ({ baseDir, dirName })),
 );
 
@@ -95,10 +106,10 @@ function resolveTestPath(testDir, relOrAbsPath) {
  */
 function validateTest(raw, dirName, testDir) {
   // Use the test's actual parent directory in error messages so
-  // `tests.internal/` configs aren't reported under `tests/`.
-  const baseName = testDir.includes("/tests.internal/")
-    ? "tests.internal"
-    : "tests";
+  // `tests.internal/` configs aren't reported under `tests/`. Compare
+  // resolved paths rather than sniffing for "/tests.internal/" — the
+  // latter never matches on Windows, where separators are backslashes.
+  const baseName = testDir.startsWith(INTERNAL_TESTS_DIR) ? "tests.internal" : "tests";
   const where = `${baseName}/${dirName}/config.js`;
 
   if (!raw || typeof raw !== "object") {
@@ -158,9 +169,7 @@ function validateTest(raw, dirName, testDir) {
 
   if (raw.mcp !== undefined) {
     if (!raw.mcp || typeof raw.mcp !== "object") {
-      throw new Error(
-        `${where} ("${raw.label}"): \`mcp\`, when set, must be an object.`,
-      );
+      throw new Error(`${where} ("${raw.label}"): \`mcp\`, when set, must be an object.`);
     }
     if (typeof raw.mcp.command !== "string" || !raw.mcp.command.trim()) {
       throw new Error(
@@ -190,13 +199,8 @@ function validateTest(raw, dirName, testDir) {
         `${where} ("${raw.label}"): \`mcp.env\` must be an object or \`(directory) => env\`.`,
       );
     }
-    if (
-      raw.mcp.toolPrefix !== undefined &&
-      typeof raw.mcp.toolPrefix !== "string"
-    ) {
-      throw new Error(
-        `${where} ("${raw.label}"): \`mcp.toolPrefix\` must be a string.`,
-      );
+    if (raw.mcp.toolPrefix !== undefined && typeof raw.mcp.toolPrefix !== "string") {
+      throw new Error(`${where} ("${raw.label}"): \`mcp.toolPrefix\` must be a string.`);
     }
   }
 
@@ -205,15 +209,11 @@ function validateTest(raw, dirName, testDir) {
     raw.reactVersion !== null &&
     typeof raw.reactVersion !== "string"
   ) {
-    throw new Error(
-      `${where} ("${raw.label}"): \`reactVersion\` must be a string or null.`,
-    );
+    throw new Error(`${where} ("${raw.label}"): \`reactVersion\` must be a string or null.`);
   }
   if (raw.docsPath !== undefined && raw.docsPath !== null) {
     if (typeof raw.docsPath !== "string") {
-      throw new Error(
-        `${where} ("${raw.label}"): \`docsPath\` must be a string or null.`,
-      );
+      throw new Error(`${where} ("${raw.label}"): \`docsPath\` must be a string or null.`);
     }
     const docsAbs = resolveTestPath(testDir, raw.docsPath);
     if (!existsSync(docsAbs)) {
@@ -247,9 +247,7 @@ function normalise(raw, dirName, testDir) {
     prompts: {
       system: resolveTestPath(testDir, raw.prompts.system),
       user: resolveTestPath(testDir, raw.prompts.user),
-      fixSystem: raw.prompts.fixSystem
-        ? resolveTestPath(testDir, raw.prompts.fixSystem)
-        : null,
+      fixSystem: raw.prompts.fixSystem ? resolveTestPath(testDir, raw.prompts.fixSystem) : null,
     },
     derive: raw.derive ?? null,
   };
@@ -264,10 +262,7 @@ for (const { baseDir, dirName } of testEntries) {
   const configPath = resolve(testDir, "config.js");
   // Display path that names the actual parent (tests/ or tests.internal/)
   // so error messages point a maintainer at the right file.
-  const baseName =
-    baseDir === INTERNAL_TESTS_DIR
-      ? "tests.internal"
-      : config.testsDir ?? "tests";
+  const baseName = baseDir === INTERNAL_TESTS_DIR ? "tests.internal" : (config.testsDir ?? "tests");
   const displayPath = `${baseName}/${dirName}`;
 
   if (!existsSync(configPath)) {
@@ -321,9 +316,7 @@ export const TEST_LABELS = Object.freeze(TESTS.map((t) => t.label));
 export function getTest(label) {
   const t = TESTS.find((x) => x.label === label);
   if (!t) {
-    throw new Error(
-      `Unknown test label: "${label}". Valid labels: ${TEST_LABELS.join(", ")}.`,
-    );
+    throw new Error(`Unknown test label: "${label}". Valid labels: ${TEST_LABELS.join(", ")}.`);
   }
   return t;
 }

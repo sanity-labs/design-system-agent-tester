@@ -2,6 +2,16 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 
+/** Keep at most this many bytes of server stderr for diagnostics. */
+const MAX_STDERR_TAIL = 8 * 1024;
+
+/**
+ * Hard cap on the stdout reassembly buffer. A misbehaving server that
+ * never emits a newline (or floods binary) would otherwise grow this
+ * unbounded. 16 MB is far above any real JSON-RPC line.
+ */
+const MAX_BUFFER_BYTES = 16 * 1024 * 1024;
+
 // Module-level registry of every spawned MCP child process. The
 // per-client `stop()` runs from `finally` blocks and handles the
 // happy path, but Ctrl-C (SIGINT) and unhandled crashes skip
@@ -78,6 +88,20 @@ class McpClient extends EventEmitter {
     this._serverInfo = null;
     this._serverCapabilities = null;
     this._tools = null;
+    // Rolling tail of the server's stderr, kept so crashes/timeouts can
+    // report what the server actually said instead of a bare exit code.
+    this._recentStderr = "";
+  }
+
+  /** Append to the capped stderr tail used for diagnostics. */
+  _captureStderr(text) {
+    this._recentStderr = (this._recentStderr + text).slice(-MAX_STDERR_TAIL);
+  }
+
+  /** The last bit of server stderr, for inclusion in error messages. */
+  _stderrSuffix() {
+    const tail = this._recentStderr.trim();
+    return tail ? `\n--- MCP server stderr (tail) ---\n${tail}` : "";
   }
 
   // ── Lifecycle ────────────────────────────────────────────────
@@ -100,21 +124,33 @@ class McpClient extends EventEmitter {
     this._proc.stdout.on("data", (chunk) => {
       this._buffer += chunk.toString();
       this._drainBuffer();
+      // No newline in a buffer this large means the server is not speaking
+      // line-delimited JSON-RPC. Drop it rather than grow without bound.
+      if (this._buffer.length > MAX_BUFFER_BYTES) {
+        console.warn(`MCP: dropping ${this._buffer.length} bytes of unframed stdout (no newline).`);
+        this._buffer = "";
+      }
     });
 
-    // Log stderr but don't crash
+    // Capture stderr for diagnostics and re-emit it. Without the capture,
+    // a server stack trace vanished and a crash showed up as a bare
+    // "exited with code 1".
     this._proc.stderr.on("data", (chunk) => {
-      this.emit("stderr", chunk.toString());
+      const text = chunk.toString();
+      this._captureStderr(text);
+      this.emit("stderr", text);
     });
 
     this._proc.on("error", (err) => {
       this._rejectAll(err);
-      this.emit("error", err);
+      // Only emit "error" when something is listening — an unheard "error"
+      // event throws in Node. Pending requests were already rejected above.
+      if (this.listenerCount("error") > 0) this.emit("error", err);
     });
 
     this._proc.on("close", (code) => {
       _liveProcs.delete(this._proc);
-      this._rejectAll(new Error(`MCP server exited with code ${code}`));
+      this._rejectAll(new Error(`MCP server exited with code ${code}${this._stderrSuffix()}`));
       this._proc = null;
       this.emit("close", code);
     });
@@ -253,7 +289,7 @@ class McpClient extends EventEmitter {
         this._pending.delete(id);
         reject(
           new Error(
-            `MCP request timed out after ${this._requestTimeoutMs}ms: ${method}`,
+            `MCP request timed out after ${this._requestTimeoutMs}ms: ${method}${this._stderrSuffix()}`,
           ),
         );
       }, this._requestTimeoutMs);
@@ -298,9 +334,7 @@ class McpClient extends EventEmitter {
         clearTimeout(timer);
 
         if (msg.error) {
-          reject(
-            new Error(`MCP error ${msg.error.code}: ${msg.error.message}`),
-          );
+          reject(new Error(`MCP error ${msg.error.code}: ${msg.error.message}`));
         } else {
           resolve(msg.result);
         }
@@ -341,9 +375,7 @@ class McpClient extends EventEmitter {
  */
 export async function createMcpClient(mcpConfig, opts = {}) {
   if (!mcpConfig || typeof mcpConfig !== "object") {
-    throw new Error(
-      "createMcpClient requires an mcpConfig argument (the test's `mcp` block).",
-    );
+    throw new Error("createMcpClient requires an mcpConfig argument (the test's `mcp` block).");
   }
 
   const directory = opts.directory ?? mcpConfig.defaultDirectory ?? null;
@@ -351,21 +383,29 @@ export async function createMcpClient(mcpConfig, opts = {}) {
 
   // `args` may be a plain array or `(directory) => string[]`.
   const args =
-    typeof mcpConfig.args === "function"
-      ? mcpConfig.args(directory)
-      : mcpConfig.args ?? [];
+    typeof mcpConfig.args === "function" ? mcpConfig.args(directory) : (mcpConfig.args ?? []);
 
   // `env` may be a plain object or `(directory) => env`.
   const env =
-    typeof mcpConfig.env === "function"
-      ? mcpConfig.env(directory)
-      : mcpConfig.env ?? {};
+    typeof mcpConfig.env === "function" ? mcpConfig.env(directory) : (mcpConfig.env ?? {});
 
   const client = new McpClient({
     command: mcpConfig.command,
     args,
     env,
     requestTimeoutMs,
+  });
+
+  // Surface server stderr so a crashing/misconfigured MCP server is
+  // diagnosable instead of silently dropped. Also attach an "error"
+  // listener so an emitted transport error never becomes an uncaught throw.
+  const prefix = `[mcp:${mcpConfig.command}]`;
+  client.on("stderr", (text) => {
+    const trimmed = text.trimEnd();
+    if (trimmed) console.warn(`${prefix} ${trimmed}`);
+  });
+  client.on("error", (err) => {
+    console.warn(`${prefix} transport error: ${err.message}`);
   });
 
   await client.start();

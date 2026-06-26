@@ -1,8 +1,9 @@
+import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { existsSync } from "node:fs";
-import { PNG } from "pngjs";
 import pixelmatch from "pixelmatch";
+import { PNG } from "pngjs";
+import { round } from "../util/round.js";
 
 /**
  * Compare all screenshots within a prompt's iterations pairwise.
@@ -37,8 +38,7 @@ export async function computeVisualDiff(iterations, promptOutputDir) {
       minDiffPercent: null,
       maxDiffPercent: null,
       iterationsCompared: withScreenshots.length,
-      description:
-        "Need at least 2 iterations with screenshots to compute visual diff",
+      description: "Need at least 2 iterations with screenshots to compute visual diff",
     };
   }
 
@@ -49,9 +49,7 @@ export async function computeVisualDiff(iterations, promptOutputDir) {
       const img = await loadPng(entry.path);
       loaded.push({ ...entry, img });
     } catch (err) {
-      console.warn(
-        `[visual-diff] Failed to load ${entry.path}: ${err.message}`,
-      );
+      console.warn(`[visual-diff] Failed to load ${entry.path}: ${err.message}`);
     }
   }
 
@@ -62,8 +60,7 @@ export async function computeVisualDiff(iterations, promptOutputDir) {
       minDiffPercent: null,
       maxDiffPercent: null,
       iterationsCompared: loaded.length,
-      description:
-        "Need at least 2 loadable screenshots to compute visual diff",
+      description: "Need at least 2 loadable screenshots to compute visual diff",
     };
   }
 
@@ -86,9 +83,7 @@ export async function computeVisualDiff(iterations, promptOutputDir) {
           const buffer = PNG.sync.write(result.diffPng);
           await writeFile(diffImagePath, buffer);
         } catch (err) {
-          console.warn(
-            `[visual-diff] Failed to save diff image: ${err.message}`,
-          );
+          console.warn(`[visual-diff] Failed to save diff image: ${err.message}`);
           diffImagePath = null;
         }
       }
@@ -200,9 +195,4 @@ function padImage(img, targetWidth, targetHeight) {
   }
 
   return data;
-}
-
-function round(n, decimals = 3) {
-  if (n === null || n === undefined || isNaN(n)) return n;
-  return Math.round(n * 10 ** decimals) / 10 ** decimals;
 }

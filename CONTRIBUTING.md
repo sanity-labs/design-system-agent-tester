@@ -17,8 +17,7 @@ npm test
 
 The unit tests run against the example config and need no API key.
 Running the full agent loop (`npm start`) needs an `ANTHROPIC_API_KEY`
-in `.env`, or the `claude` CLI for `--runner cli`. See the README for
-details.
+in `.env`. See the README for details.
 
 ## Making changes
 

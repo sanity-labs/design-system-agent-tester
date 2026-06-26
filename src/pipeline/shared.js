@@ -1,22 +1,26 @@
 /**
- * Shared utilities used by both the API runner and CLI runner.
+ * Shared utilities for the API runner (and the genui standalone runner).
  *
  * Per-test knobs (packages, prompts, MCP flag) are passed in via function
  * arguments — this file does not bake in a specific test.
  */
-import { writeFile, mkdir, rm, readFile, readdir } from "node:fs/promises";
-import { resolve, sep } from "node:path";
-import { existsSync } from "node:fs";
+
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { resolve, sep } from "node:path";
+import { buildFixSystemPrompt, buildSystemPrompt, getTest } from "../config/prompts.js";
+import { runAccessibilityTests } from "../evaluation/accessibility.js";
+import { extractComponentUsageCounts } from "../evaluation/count-component-usage.js";
+import { measureDom } from "../evaluation/dom-count.js";
 import { extractComponentImports } from "../evaluation/extract-component-imports.js";
 import { extractInlineStyles } from "../evaluation/extract-inline-styles.js";
-import { extractComponentUsageCounts } from "../evaluation/count-component-usage.js";
+import { measureLighthouse } from "../evaluation/lighthouse.js";
 import { isSourceFile } from "../evaluation/parse-files.js";
-import {
-  buildSystemPrompt,
-  buildFixSystemPrompt,
-  getTest,
-} from "../config/prompts.js";
+import { measureReactProfile } from "../evaluation/react-profile.js";
+import { captureScreenshots } from "../evaluation/screenshot.js";
+import { analyzeSemanticHtml } from "../evaluation/semantic-html.js";
+import { tag, warn } from "../util/color.js";
 
 // ─── Prompt accessors ────────────────────────────────────────────────
 
@@ -42,9 +46,7 @@ export function resolveWithinProject(projectDir, filePath) {
   const root = resolve(projectDir);
   const resolved = resolve(root, filePath);
   if (resolved !== root && !resolved.startsWith(root + sep)) {
-    throw new Error(
-      `Refusing to access path outside the project directory: ${filePath}`,
-    );
+    throw new Error(`Refusing to access path outside the project directory: ${filePath}`);
   }
   return resolved;
 }
@@ -65,7 +67,10 @@ export async function writeProjectFiles(projectDir, files) {
   // When an agent revises a file mid-output it can appear twice in the array.
   // Keep the last occurrence so the most recent version wins.
   const seen = new Set();
-  files = [...files].reverse().filter(f => seen.has(f.path) ? false : seen.add(f.path)).reverse();
+  files = [...files]
+    .reverse()
+    .filter((f) => (seen.has(f.path) ? false : seen.add(f.path)))
+    .reverse();
 
   if (existsSync(projectDir)) {
     const entries = await readdir(projectDir);
@@ -139,8 +144,7 @@ export async function buildCurrentFilesText(projectDir, files, opts = {}) {
     const hash = createHash("sha256").update(content).digest("hex");
     newHashes.set(file.path, hash);
 
-    const wasUnchanged =
-      previousHashes && previousHashes.get(file.path) === hash;
+    const wasUnchanged = previousHashes && previousHashes.get(file.path) === hash;
     const errorReferenced = errorRefs.has(file.path);
 
     // Show full content if: this is the first call (no previousHashes),
@@ -162,6 +166,65 @@ export async function buildCurrentFilesText(projectDir, files, opts = {}) {
   }
 
   return { text, newHashes };
+}
+
+// ─── Measurement helpers ─────────────────────────────────────────────
+//
+// These three run the browser-based evaluations against a live dev server.
+// The runner calls them from both the success and broken-state paths, so the
+// measurement set and ordering stay identical across both.
+
+/**
+ * Static, render-only measurements: screenshots + DOM count + semantic HTML.
+ * Safe to call even on a broken page (each evaluation degrades to null).
+ *
+ * @returns {Promise<{screenshotPath: string|null, domElementCount: number|null, domHtmlBytes: number|null, semanticHtml: object|null}>}
+ */
+export async function runStaticMeasurements(serverUrl, iterDir, iterLabel) {
+  const screenshotPath = await captureScreenshots(serverUrl, iterDir, iterLabel);
+  const dom = await measureDom(serverUrl, iterLabel);
+  const semanticHtml = await analyzeSemanticHtml(serverUrl, iterLabel);
+  return {
+    screenshotPath,
+    domElementCount: dom?.count ?? null,
+    domHtmlBytes: dom?.htmlBytes ?? null,
+    semanticHtml,
+  };
+}
+
+/**
+ * Run the axe-core accessibility scan, returning null (not throwing) on
+ * failure so a measurement error never aborts the iteration.
+ */
+export async function runAccessibility(serverUrl, iterDir, iterLabel) {
+  try {
+    return await runAccessibilityTests({ serverUrl, iterDir, iterLabel });
+  } catch (err) {
+    console.warn(`${tag(iterLabel)} ${warn("⚠ A11y tests failed:")} ${err.message}`);
+    return null;
+  }
+}
+
+/**
+ * Performance measurements: Lighthouse + React commit profile. Each is
+ * independent and degrades to null on failure.
+ *
+ * @returns {Promise<{lighthouseResults: object|null, reactProfile: object|null}>}
+ */
+export async function runPerformance(serverUrl, iterDir, iterLabel) {
+  let lighthouseResults = null;
+  let reactProfile = null;
+  try {
+    lighthouseResults = await measureLighthouse({ serverUrl, iterDir, iterLabel });
+  } catch (err) {
+    console.warn(`${tag(iterLabel)} ${warn("⚠ Lighthouse measurement failed:")} ${err.message}`);
+  }
+  try {
+    reactProfile = await measureReactProfile({ serverUrl, iterDir, iterLabel });
+  } catch (err) {
+    console.warn(`${tag(iterLabel)} ${warn("⚠ React profile failed:")} ${err.message}`);
+  }
+  return { lighthouseResults, reactProfile };
 }
 
 /**
@@ -231,6 +294,11 @@ export async function buildResult({
   domHtmlBytes,
   semanticHtml,
   runner,
+  exitStage = null,
+  firstTryLint = null,
+  firstTryAxe = null,
+  residualLint = null,
+  residualAxe = null,
 }) {
   // Token-usage breakdown. Prompt caching splits input tokens across
   // three buckets billed at different rates: uncached at 1.0×,
@@ -242,13 +310,8 @@ export async function buildResult({
   const cacheReadIn = totalCacheReadInputTokens || 0;
   const cacheCreationIn = totalCacheCreationInputTokens || 0;
   const rawInputSum = uncachedIn + cacheReadIn + cacheCreationIn;
-  const effectiveInputTokens = Math.round(
-    uncachedIn + cacheReadIn * 0.1 + cacheCreationIn * 1.25,
-  );
-  const linesOfCode = files.reduce(
-    (sum, f) => sum + f.content.split("\n").length,
-    0,
-  );
+  const effectiveInputTokens = Math.round(uncachedIn + cacheReadIn * 0.1 + cacheCreationIn * 1.25);
+  const linesOfCode = files.reduce((sum, f) => sum + f.content.split("\n").length, 0);
 
   // For component extraction, gather all named package references defined
   // by this test (whatever the test author called them — e.g. `ui`, `ds`,
@@ -298,12 +361,13 @@ export async function buildResult({
     reactProfile,
     domElementCount: domElementCount || null,
     domHtmlBytes: domHtmlBytes ?? null,
+    exitStage,
+    firstTryLint,
+    firstTryAxe,
+    residualLint,
+    residualAxe,
   };
-  await writeFile(
-    resolve(iterDir, "_meta.json"),
-    JSON.stringify(meta, null, 2),
-    "utf-8",
-  );
+  await writeFile(resolve(iterDir, "_meta.json"), JSON.stringify(meta, null, 2), "utf-8");
 
   return {
     model,
@@ -330,5 +394,10 @@ export async function buildResult({
     reactProfile,
     domElementCount: domElementCount || null,
     domHtmlBytes: domHtmlBytes ?? null,
+    exitStage,
+    firstTryLint,
+    firstTryAxe,
+    residualLint,
+    residualAxe,
   };
 }

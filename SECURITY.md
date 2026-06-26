@@ -17,3 +17,12 @@ agent-emitted files to a sandbox project directory, runs
 a local dev server. Run it in an environment you trust with that.
 Reports about the harness writing or reading outside its sandbox
 directories are in scope and appreciated.
+
+### Test configs are trusted input
+
+A test's `config.js` can declare an `mcp` block whose `command` and
+`args` are spawned as a child process during a run (see "Per-test MCP"
+in the README). Those values are executed verbatim. Treat every test
+config — your own and any you copy from elsewhere — as trusted code,
+the same as any other file you'd `node`. Do not run tests whose
+`config.js` you have not reviewed.

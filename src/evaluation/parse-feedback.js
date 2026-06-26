@@ -1,12 +1,4 @@
-const VALID_CATEGORIES = [
-  "documentation",
-  "api",
-  "components",
-  "theming",
-  "icons",
-  "dx",
-  "other",
-];
+const VALID_CATEGORIES = ["documentation", "api", "components", "theming", "icons", "dx", "other"];
 
 /**
  * Parse ---FEEDBACK--- / ---END FEEDBACK--- blocks from the agent output.
@@ -29,9 +21,7 @@ export function parseFeedback(text) {
 
     while ((lineMatch = lineRegex.exec(blockContent)) !== null) {
       const rawCategory = lineMatch[1].toLowerCase();
-      const category = VALID_CATEGORIES.includes(rawCategory)
-        ? rawCategory
-        : "other";
+      const category = VALID_CATEGORIES.includes(rawCategory) ? rawCategory : "other";
       const feedbackText = lineMatch[2].trim();
       if (feedbackText) {
         items.push({ category, text: feedbackText });
@@ -57,15 +47,9 @@ export function parseFeedback(text) {
 
         // Try to infer category from bold prefix or content
         let category = "other";
-        if (
-          boldPrefix.includes("doc") ||
-          feedbackText.toLowerCase().includes("documentation")
-        ) {
+        if (boldPrefix.includes("doc") || feedbackText.toLowerCase().includes("documentation")) {
           category = "documentation";
-        } else if (
-          boldPrefix.includes("api") ||
-          feedbackText.toLowerCase().includes("api")
-        ) {
+        } else if (boldPrefix.includes("api") || feedbackText.toLowerCase().includes("api")) {
           category = "api";
         } else if (
           boldPrefix.includes("component") ||
@@ -79,15 +63,9 @@ export function parseFeedback(text) {
           feedbackText.toLowerCase().includes("styling")
         ) {
           category = "theming";
-        } else if (
-          boldPrefix.includes("icon") ||
-          feedbackText.toLowerCase().includes("icon")
-        ) {
+        } else if (boldPrefix.includes("icon") || feedbackText.toLowerCase().includes("icon")) {
           category = "icons";
-        } else if (
-          boldPrefix.includes("dx") ||
-          boldPrefix.includes("developer")
-        ) {
+        } else if (boldPrefix.includes("dx") || boldPrefix.includes("developer")) {
           category = "dx";
         }
 

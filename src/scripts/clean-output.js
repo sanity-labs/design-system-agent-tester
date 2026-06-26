@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { spawn } from "node:child_process";
 /**
  * clean-output.js — Recursively delete every `node_modules` directory
  * under `output/`.
@@ -17,10 +18,9 @@
  * the next run needs them.
  */
 import { readdir, rm } from "node:fs/promises";
-import { resolve, dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { spawn } from "node:child_process";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(__dirname, "..", "..");
@@ -111,9 +111,7 @@ if (found.length === 0) {
   process.exit(0);
 }
 
-console.log(
-  `Found ${found.length} node_modules directories under output/. Measuring…`,
-);
+console.log(`Found ${found.length} node_modules directories under output/. Measuring…`);
 
 // Size with bounded parallelism. 16 concurrent `du` calls keeps the
 // machine busy without hammering the filesystem.
@@ -139,9 +137,7 @@ for (const { p, size } of rows) {
   console.log(`  ${formatBytes(size).padStart(10)}  ${p}`);
 }
 
-console.log(
-  `\nTotal: ${formatBytes(total)} across ${found.length} directories.`,
-);
+console.log(`\nTotal: ${formatBytes(total)} across ${found.length} directories.`);
 
 if (values["dry-run"]) {
   console.log("(dry-run — nothing was deleted)");
@@ -158,6 +154,4 @@ for (const { p } of rows) {
     console.warn(`  failed: ${p} (${err.message})`);
   }
 }
-console.log(
-  `Done. Deleted ${deleted}/${rows.length} directories. Freed ~${formatBytes(total)}.`,
-);
+console.log(`Done. Deleted ${deleted}/${rows.length} directories. Freed ~${formatBytes(total)}.`);

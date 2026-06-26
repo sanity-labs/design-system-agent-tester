@@ -49,20 +49,14 @@ export function isSafeRelativePath(filePath) {
     return false;
   }
   const normalized = normalize(filePath);
-  return (
-    normalized !== ".." &&
-    !normalized.startsWith(`..${sep}`) &&
-    !normalized.startsWith("../")
-  );
+  return normalized !== ".." && !normalized.startsWith(`..${sep}`) && !normalized.startsWith("../");
 }
 
 /** Drop files whose paths would escape the project directory. */
 function rejectUnsafePaths(files) {
   return files.filter((file) => {
     if (isSafeRelativePath(file.path)) return true;
-    console.warn(
-      `Skipping agent-emitted file with unsafe path: ${file.path}`,
-    );
+    console.warn(`Skipping agent-emitted file with unsafe path: ${file.path}`);
     return false;
   });
 }
@@ -111,4 +105,12 @@ export function parseFiles(text) {
 export function isSourceFile(filePath) {
   const exts = [".js", ".jsx", ".ts", ".tsx", ".css", ".html", ".json"];
   return exts.includes(extname(filePath).toLowerCase());
+}
+
+/**
+ * Check if a file is a JSX/TSX source file (excludes CSS, JSON, HTML).
+ */
+export function isJsxFile(filePath) {
+  const ext = extname(filePath).toLowerCase();
+  return [".js", ".jsx", ".ts", ".tsx"].includes(ext);
 }

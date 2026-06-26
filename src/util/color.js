@@ -14,7 +14,6 @@ export const error = (s) => styleText("red", s);
 export const warn = (s) => styleText("yellow", s);
 export const dim = (s) => styleText("dim", s);
 export const bold = (s) => styleText("bold", s);
-export const info = (s) => styleText("cyan", s);
 
 /**
  * `[iter-label]` prefix used at the start of most pipeline log lines.

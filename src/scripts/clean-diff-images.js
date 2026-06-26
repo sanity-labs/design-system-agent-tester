@@ -15,7 +15,7 @@
  *   npm run clean-diff-images -- --dry-run   # just list, don't delete
  */
 import { readdir, stat, unlink } from "node:fs/promises";
-import { resolve, dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
@@ -102,9 +102,7 @@ await Promise.all(
   }),
 );
 
-console.log(
-  `Found ${found.length} diff images totaling ${formatBytes(total)}.`,
-);
+console.log(`Found ${found.length} diff images totaling ${formatBytes(total)}.`);
 
 if (values["dry-run"]) {
   // Show a sample so the user can sanity-check the regex.
@@ -127,6 +125,4 @@ await Promise.all(
     }
   }),
 );
-console.log(
-  `Done. Deleted ${deleted}/${found.length} files. Freed ~${formatBytes(total)}.`,
-);
+console.log(`Done. Deleted ${deleted}/${found.length} files. Freed ~${formatBytes(total)}.`);

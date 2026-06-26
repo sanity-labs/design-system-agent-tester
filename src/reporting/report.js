@@ -1,15 +1,39 @@
 import { writeFile } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
-import dsConfig from "../config/load.js";
-import { extractMetrics, renderMetricsTables, formatBytes } from "./aggregate.js";
+import {
+  analyzeAccessibility,
+  analyzeComponents,
+  analyzeComponentUsage,
+  analyzeFeedback,
+  analyzeInlineStyles,
+  analyzeLighthouse,
+  analyzeReactProfile,
+  analyzeRepairLoop,
+  analyzeSemanticHtml,
+  computeCodeVariance,
+  iterationBuilt,
+} from "./aggregators.js";
+import { renderMarkdown } from "./render-markdown.js";
+import { mean, round, stdDev, sum } from "./stats.js";
 import { renderSummary } from "./summarize.js";
 
-/**
- * Generate a report from all test results.
- *
- * @param {Record<string, Array<object>>} allResults - Keyed by prompt name, array of iteration results
- * @param {string} outputDir - Base output directory
- */
+export {
+  analyzeAccessibility,
+  analyzeComponents,
+  analyzeComponentUsage,
+  analyzeFeedback,
+  analyzeInlineStyles,
+  analyzeLighthouse,
+  analyzeReactProfile,
+  analyzeRepairLoop,
+  analyzeSemanticHtml,
+  computeCodeVariance,
+  iterationBuilt,
+} from "./aggregators.js";
+// Re-export the shared stats and the aggregators so existing importers of
+// report.js (notably report.test.js) keep working against one surface.
+export { jaccardSimilarity, mean, ngramSet, round, stdDev, sum } from "./stats.js";
+
 export async function generateReport(allResults, outputDir, promptText = null) {
   const report = {
     generatedAt: new Date().toISOString(),
@@ -20,6 +44,16 @@ export async function generateReport(allResults, outputDir, promptText = null) {
   for (const [promptKey, iterations] of Object.entries(allResults)) {
     const validIterations = iterations.filter((r) => !r.error);
     const failedCount = iterations.length - validIterations.length;
+
+    // `builtIterations` is the subset that actually produced a working
+    // render. Use it for every metric that's measured *against the
+    // running app* — Lighthouse, axe, DOM counts, semantic HTML, visual
+    // diff. The wider `validIterations` is still right for things
+    // derived from emitted source code (LOC, component imports, inline
+    // styles, code variance, feedback) and for the repair-loop
+    // diagnostic, which exists precisely to surface failed builds.
+    const builtIterations = validIterations.filter(iterationBuilt);
+    const buildFailedCount = validIterations.length - builtIterations.length;
 
     // Extract model name from the first valid iteration (all iterations use the same model)
     const model = validIterations.find((r) => r.model)?.model || null;
@@ -40,18 +74,17 @@ export async function generateReport(allResults, outputDir, promptText = null) {
     // 4. Unique design system components
     const componentAnalysis = analyzeComponents(validIterations);
 
-    // 5. Screenshot paths
-    const screenshots = validIterations
-      .map((r) => r.screenshotPath)
-      .filter(Boolean);
+    // 5. Screenshot paths — only from iterations that actually built.
+    // A broken render's puppeteer screenshot is still a file on disk
+    // but it doesn't belong in the gallery.
+    const screenshots = builtIterations.map((r) => r.screenshotPath).filter(Boolean);
 
     // Token usage. `!= null` rather than truthiness — a recorded 0 is a
     // legitimate value and should count toward the average. Four input
     // buckets are tracked separately so the report can show the
     // prompt-cache breakdown. `inputTokens` is the raw sum (back-compat);
     // `effectiveInputTokens` weights buckets by billing rate.
-    const pick = (key) =>
-      validIterations.map((r) => r[key]).filter((v) => v != null);
+    const pick = (key) => validIterations.map((r) => r[key]).filter((v) => v != null);
     const inputTokens = pick("inputTokens");
     const uncachedInputTokens = pick("uncachedInputTokens");
     const cacheReadInputTokens = pick("cacheReadInputTokens");
@@ -65,16 +98,15 @@ export async function generateReport(allResults, outputDir, promptText = null) {
     // 7. Feedback analysis
     const feedbackAnalysis = analyzeFeedback(validIterations);
 
-    // 8. Accessibility analysis
-    const a11yAnalysis = analyzeAccessibility(validIterations);
+    // 8. Accessibility analysis — runtime metric, built iterations only.
+    const a11yAnalysis = analyzeAccessibility(builtIterations);
 
     // 9. Visual diff (attached by index.js as _visualDiff on iterations)
-    const visualDiff =
-      iterations.find((r) => r._visualDiff)?._visualDiff || null;
+    const visualDiff = iterations.find((r) => r._visualDiff)?._visualDiff || null;
 
-    // 10. Performance analysis (Lighthouse + React Profiler kept separate)
-    const lighthouseAnalysis = analyzeLighthouse(validIterations);
-    const reactProfileAnalysis = analyzeReactProfile(validIterations);
+    // 10. Performance analysis — runtime metric, built iterations only.
+    const lighthouseAnalysis = analyzeLighthouse(builtIterations);
+    const reactProfileAnalysis = analyzeReactProfile(builtIterations);
 
     // 11. Inline style analysis
     const inlineStyleAnalysis = analyzeInlineStyles(validIterations);
@@ -82,11 +114,12 @@ export async function generateReport(allResults, outputDir, promptText = null) {
     // 12. Component usage count analysis
     const componentUsageAnalysis = analyzeComponentUsage(validIterations);
 
-    // 15. Semantic HTML analysis
-    const semanticHtmlAnalysis = analyzeSemanticHtml(validIterations);
+    // 13. Semantic HTML analysis — extracted from the live DOM; built
+    // iterations only.
+    const semanticHtmlAnalysis = analyzeSemanticHtml(builtIterations);
 
-    // 14. DOM element counts + serialized HTML size
-    const domSamples = validIterations
+    // 14. DOM element counts + serialized HTML size — runtime measurement.
+    const domSamples = builtIterations
       .filter((r) => r.domElementCount != null)
       .map((r) => ({
         iteration: r.iteration,
@@ -94,9 +127,7 @@ export async function generateReport(allResults, outputDir, promptText = null) {
         htmlBytes: r.domHtmlBytes ?? null,
       }));
     const counts = domSamples.map((d) => d.count);
-    const byteSamples = domSamples
-      .map((d) => d.htmlBytes)
-      .filter((b) => b != null);
+    const byteSamples = domSamples.map((d) => d.htmlBytes).filter((b) => b != null);
     const domElementAnalysis = {
       iterationsWithData: domSamples.length,
       totalIterations: validIterations.length,
@@ -123,6 +154,12 @@ export async function generateReport(allResults, outputDir, promptText = null) {
       totalIterations: iterations.length,
       successfulIterations: validIterations.length,
       failedIterations: failedCount,
+      // Of the iterations the harness was able to record, how many
+      // produced a working build. Runtime metrics (a11y, lighthouse,
+      // DOM, semantic HTML, visual diff) are computed against this
+      // subset only — broken builds are excluded.
+      builtIterations: builtIterations.length,
+      unbuiltIterations: buildFailedCount,
       timing: {
         // Guard the empty case (every iteration failed): Math.min() of
         // an empty spread is Infinity, which would render literally.
@@ -149,8 +186,7 @@ export async function generateReport(allResults, outputDir, promptText = null) {
         max: fixCounts.length ? Math.max(...fixCounts) : null,
         total: sum(fixCounts),
         iterationsNeedingFixes,
-        iterationsCleanOnFirstTry:
-          validIterations.length - iterationsNeedingFixes,
+        iterationsCleanOnFirstTry: validIterations.length - iterationsNeedingFixes,
         all: fixCounts,
         perIteration: validIterations.map((r) => ({
           iteration: r.iteration,
@@ -163,6 +199,7 @@ export async function generateReport(allResults, outputDir, promptText = null) {
       },
       feedback: feedbackAnalysis,
       accessibility: a11yAnalysis,
+      repairLoop: analyzeRepairLoop(validIterations),
       visualDiff: visualDiff || {
         pairwiseDiffs: [],
         averageDiffPercent: null,
@@ -185,10 +222,18 @@ export async function generateReport(allResults, outputDir, promptText = null) {
         // cost of uncached input. Use `avgEffectiveInputTokens` for
         // billed-cost comparisons.
         avgInputTokens: inputTokens.length ? round(mean(inputTokens)) : null,
-        avgUncachedInputTokens: uncachedInputTokens.length ? round(mean(uncachedInputTokens)) : null,
-        avgCacheReadInputTokens: cacheReadInputTokens.length ? round(mean(cacheReadInputTokens)) : null,
-        avgCacheCreationInputTokens: cacheCreationInputTokens.length ? round(mean(cacheCreationInputTokens)) : null,
-        avgEffectiveInputTokens: effectiveInputTokens.length ? round(mean(effectiveInputTokens)) : null,
+        avgUncachedInputTokens: uncachedInputTokens.length
+          ? round(mean(uncachedInputTokens))
+          : null,
+        avgCacheReadInputTokens: cacheReadInputTokens.length
+          ? round(mean(cacheReadInputTokens))
+          : null,
+        avgCacheCreationInputTokens: cacheCreationInputTokens.length
+          ? round(mean(cacheCreationInputTokens))
+          : null,
+        avgEffectiveInputTokens: effectiveInputTokens.length
+          ? round(mean(effectiveInputTokens))
+          : null,
         avgOutputTokens: outputTokens.length ? round(mean(outputTokens)) : null,
         totalInputTokens: sum(inputTokens),
         totalUncachedInputTokens: sum(uncachedInputTokens),
@@ -227,11 +272,7 @@ export async function generateReport(allResults, outputDir, promptText = null) {
   let summarySection = "";
   if (promptKeys.length > 0) {
     try {
-      const summaryMd = renderSummary(
-        [{ name: runName, report }],
-        promptKeys,
-        outputDir,
-      );
+      const summaryMd = renderSummary([{ name: runName, report }], promptKeys, outputDir);
       summarySection = summaryMd + "\n---\n\n";
     } catch (err) {
       console.warn(`Failed to render run summary: ${err.message}`);
@@ -240,1166 +281,9 @@ export async function generateReport(allResults, outputDir, promptText = null) {
 
   // Write human-readable markdown report
   const mdPath = resolve(outputDir, "report.md");
-  const markdown = summarySection + renderMarkdown(report);
+  const markdown = summarySection + renderMarkdown(report, outputDir);
   await writeFile(mdPath, markdown, "utf-8");
   console.log(`Markdown report written to: ${mdPath}`);
 
   return report;
-}
-
-/**
- * Compute pairwise code variance between iterations.
- * Uses Jaccard similarity on line-level n-grams for each source file.
- */
-export function computeCodeVariance(iterations) {
-  // Iterations with no files would compare as identical — the Jaccard
-  // index of two empty n-gram sets is 1 — inflating average similarity.
-  // Only compare iterations that produced content.
-  iterations = iterations.filter((iter) => iter.files?.length > 0);
-
-  if (iterations.length < 2) {
-    return {
-      pairwiseContentSimilarity: [],
-      averageContentSimilarity: null,
-      pairwiseStructuralSimilarity: [],
-      averageStructuralSimilarity: null,
-      description: "Need at least 2 successful iterations to compute variance",
-    };
-  }
-
-  // Flatten all source content from each iteration into a single string
-  const iterContents = iterations.map((iter) =>
-    iter.files.map((f) => f.content).join("\n"),
-  );
-
-  // Compute pairwise similarities
-  const pairs = [];
-  for (let i = 0; i < iterContents.length; i++) {
-    for (let j = i + 1; j < iterContents.length; j++) {
-      const sim = jaccardSimilarity(
-        ngramSet(iterContents[i], 3),
-        ngramSet(iterContents[j], 3),
-      );
-      pairs.push({
-        iterA: iterations[i].iteration,
-        iterB: iterations[j].iteration,
-        similarity: round(sim),
-      });
-    }
-  }
-
-  const avgSim = mean(pairs.map((p) => p.similarity));
-
-  // Also compute structural similarity (same files present)
-  const fileSets = iterations.map(
-    (iter) => new Set((iter.files || []).map((f) => f.path)),
-  );
-  const structuralPairs = [];
-  for (let i = 0; i < fileSets.length; i++) {
-    for (let j = i + 1; j < fileSets.length; j++) {
-      structuralPairs.push({
-        iterA: iterations[i].iteration,
-        iterB: iterations[j].iteration,
-        similarity: round(jaccardSimilarity(fileSets[i], fileSets[j])),
-      });
-    }
-  }
-  const avgStructural = mean(structuralPairs.map((p) => p.similarity));
-
-  return {
-    pairwiseContentSimilarity: pairs,
-    averageContentSimilarity: round(avgSim),
-    pairwiseStructuralSimilarity: structuralPairs,
-    averageStructuralSimilarity: round(avgStructural),
-    description: `Content similarity based on 3-gram Jaccard index (0 = completely different, 1 = identical). Structural similarity based on file paths.`,
-  };
-}
-
-/**
- * Analyze feedback across iterations.
- */
-export function analyzeFeedback(iterations) {
-  const allItems = [];
-  const perIteration = [];
-  const byCategoryMap = {};
-
-  for (const iter of iterations) {
-    const items = iter.feedback || [];
-    perIteration.push({
-      iteration: iter.iteration,
-      count: items.length,
-      items,
-    });
-    for (const item of items) {
-      allItems.push({ ...item, iteration: iter.iteration });
-      if (!byCategoryMap[item.category]) {
-        byCategoryMap[item.category] = [];
-      }
-      byCategoryMap[item.category].push({
-        text: item.text,
-        iteration: iter.iteration,
-      });
-    }
-  }
-
-  // Deduplicate similar feedback items (simple exact-text dedup)
-  const uniqueTexts = new Set();
-  const uniqueItems = [];
-  for (const item of allItems) {
-    const normalized = item.text.toLowerCase().trim();
-    if (!uniqueTexts.has(normalized)) {
-      uniqueTexts.add(normalized);
-      uniqueItems.push(item);
-    }
-  }
-
-  // Build category summary
-  const byCategory = {};
-  for (const [cat, items] of Object.entries(byCategoryMap)) {
-    byCategory[cat] = {
-      count: items.length,
-      items,
-    };
-  }
-
-  // Sort categories by frequency
-  const categoriesSorted = Object.entries(byCategory)
-    .sort((a, b) => b[1].count - a[1].count)
-    .map(([cat, data]) => ({ category: cat, ...data }));
-
-  return {
-    totalItems: allItems.length,
-    uniqueItems: uniqueItems.length,
-    averagePerIteration: round(mean(perIteration.map((p) => p.count))),
-    iterationsWithFeedback: perIteration.filter((p) => p.count > 0).length,
-    byCategory,
-    categoriesSorted,
-    allItems,
-    perIteration,
-  };
-}
-
-/**
- * Analyze design system component usage across iterations.
- */
-export function analyzeComponents(iterations) {
-  const allComponents = new Set();
-  const perIteration = [];
-
-  for (const iter of iterations) {
-    const comps = iter.componentImports || [];
-    perIteration.push({
-      iteration: iter.iteration,
-      count: comps.length,
-      components: comps,
-    });
-    for (const c of comps) {
-      allComponents.add(c);
-    }
-  }
-
-  // Count frequency of each component across iterations
-  const frequency = {};
-  for (const comp of allComponents) {
-    frequency[comp] = iterations.filter((iter) =>
-      (iter.componentImports || []).includes(comp),
-    ).length;
-  }
-
-  // Separate UI components from icons
-  const uiComponents = [...allComponents].filter((c) => !c.startsWith("icon:"));
-  const icons = [...allComponents]
-    .filter((c) => c.startsWith("icon:"))
-    .map((c) => c.replace("icon:", ""));
-
-  return {
-    uniqueUIComponents: uiComponents.length,
-    uniqueIcons: icons.length,
-    totalUniqueElements: allComponents.size,
-    uiComponentsList: uiComponents.sort(),
-    iconsList: icons.sort(),
-    frequency,
-    perIteration,
-    averageComponentsPerIteration: round(
-      mean(perIteration.map((p) => p.count)),
-    ),
-  };
-}
-
-/**
- * Analyze accessibility results across iterations.
- */
-export function analyzeAccessibility(iterations) {
-  // Skipped scans (axe failed to load/inject — summary.skipped) carry
-  // axeViolationCount: 0 but measured nothing. Counting them as tested
-  // iterations would deflate averageViolations and corrupt passRate.
-  const withA11y = iterations.filter(
-    (r) => r.a11yResults != null && !r.a11yResults.summary?.skipped,
-  );
-  const skippedCount = iterations.filter(
-    (r) => r.a11yResults?.summary?.skipped,
-  ).length;
-
-  if (withA11y.length === 0) {
-    return {
-      iterationsWithResults: 0,
-      skippedIterations: skippedCount,
-      totalIterations: iterations.length,
-      description:
-        skippedCount > 0
-          ? `No accessibility results collected (${skippedCount} scan(s) skipped)`
-          : "No accessibility results collected",
-    };
-  }
-
-  let totalViolations = 0;
-  const allViolationIds = {};
-  const perIteration = [];
-
-  for (const iter of withA11y) {
-    const a11y = iter.a11yResults;
-    const count = a11y.axeViolationCount || 0;
-    const summary = a11y.summary || {};
-
-    perIteration.push({
-      iteration: iter.iteration,
-      violations: count,
-      lightViolations: summary.lightViolations || 0,
-      darkOnlyViolations: summary.darkOnlyViolations || 0,
-      passed: summary.passed || false,
-    });
-
-    totalViolations += count;
-
-    // Collect unique violation IDs across iterations
-    for (const v of a11y.axeViolations || []) {
-      const id = v.id || "unknown";
-      if (!allViolationIds[id]) {
-        allViolationIds[id] = {
-          id,
-          impact: v.impact,
-          description: v.description || v.help,
-          helpUrl: v.helpUrl,
-          modes: new Set(),
-          count: 0,
-        };
-      }
-      allViolationIds[id].count++;
-      for (const mode of v.modes || []) {
-        allViolationIds[id].modes.add(mode);
-      }
-    }
-  }
-
-  // Convert Sets to arrays for serialization
-  const topViolations = Object.values(allViolationIds)
-    .map((v) => ({ ...v, modes: [...v.modes] }))
-    .sort((a, b) => b.count - a.count);
-
-  return {
-    iterationsWithResults: withA11y.length,
-    skippedIterations: skippedCount,
-    totalIterations: iterations.length,
-    totalViolations,
-    averageViolations: round(totalViolations / withA11y.length),
-    passRate: round(perIteration.filter((p) => p.passed).length / withA11y.length),
-    topViolations: topViolations.slice(0, 20),
-    perIteration,
-  };
-}
-
-/**
- * Render report as Markdown.
- */
-// Render a possibly-null metric cell: null (e.g. every iteration
-// failed, so there's nothing to aggregate) shows as a dash.
-function cell(value, suffix = "") {
-  return value == null ? "—" : `${value}${suffix}`;
-}
-
-function renderMarkdown(report) {
-  let md = `# Agent Test Report\n\n`;
-  md += `**Generated:** ${report.generatedAt}\n\n`;
-
-  if (report.promptText) {
-    md += `## Interface Brief\n\n`;
-    md += `> ${report.promptText.split("\n").join("\n> ")}\n\n`;
-  }
-
-  // ─── TL;DR: headline metrics across all tests ──────────────────
-  const labels = Object.keys(report.prompts);
-  if (labels.length > 0) {
-    const aggregatesByLabel = Object.fromEntries(
-      labels.map((label) => [label, extractMetrics(report.prompts[label])]),
-    );
-    md += `## Summary\n\n`;
-    md += renderMetricsTables(labels, aggregatesByLabel);
-    md += `\n`;
-  }
-
-  for (const [promptKey, data] of Object.entries(report.prompts)) {
-    md += `---\n\n`;
-    md += `## Prompt: \`${promptKey}\`\n\n`;
-    md += `| Metric | Value |\n|--------|-------|\n`;
-    if (data.model) {
-      md += `| Model | \`${data.model}\` |\n`;
-    }
-    md += `| Total iterations | ${data.totalIterations} |\n`;
-    md += `| Successful | ${data.successfulIterations} |\n`;
-    md += `| Failed | ${data.failedIterations} |\n\n`;
-
-    // Timing
-    md += `### Timing\n\n`;
-    md += `| Metric | Value |\n|--------|-------|\n`;
-    md += `| Average | ${cell(data.timing.averageSeconds, "s")} |\n`;
-    md += `| Std Dev | ${cell(data.timing.stdDevSeconds, "s")} |\n`;
-    md += `| Min | ${cell(data.timing.minSeconds, "s")} |\n`;
-    md += `| Max | ${cell(data.timing.maxSeconds, "s")} |\n`;
-    md += `| All | ${data.timing.allTimesSeconds.map((t) => `${t}s`).join(", ")} |\n\n`;
-
-    // LOC
-    md += `### Lines of Code\n\n`;
-    md += `| Metric | Value |\n|--------|-------|\n`;
-    md += `| Average | ${cell(data.linesOfCode.average)} |\n`;
-    md += `| Std Dev | ${cell(data.linesOfCode.stdDev)} |\n`;
-    md += `| Min | ${cell(data.linesOfCode.min)} |\n`;
-    md += `| Max | ${cell(data.linesOfCode.max)} |\n`;
-    md += `| All | ${data.linesOfCode.all.join(", ")} |\n\n`;
-
-    // Variance
-    md += `### Code Variance\n\n`;
-    const v = data.codeVariance;
-    if (v.averageContentSimilarity !== null) {
-      md += `**Average content similarity:** ${v.averageContentSimilarity} (0 = completely different, 1 = identical)\n\n`;
-      md += `**Average structural similarity:** ${v.averageStructuralSimilarity}\n\n`;
-
-      if (v.pairwiseContentSimilarity.length > 0) {
-        md += `| Pair | Content Similarity | Structural Similarity |\n|------|-------------------|----------------------|\n`;
-        for (let i = 0; i < v.pairwiseContentSimilarity.length; i++) {
-          const cp = v.pairwiseContentSimilarity[i];
-          const sp = v.pairwiseStructuralSimilarity[i];
-          md += `| Iter ${cp.iterA} vs ${cp.iterB} | ${cp.similarity} | ${sp.similarity} |\n`;
-        }
-        md += `\n`;
-      }
-    } else {
-      md += `${v.description}\n\n`;
-    }
-
-    // Fix Attempts
-    md += `### Fix Attempts\n\n`;
-    const f = data.fixAttempts;
-    md += `| Metric | Value |\n|--------|-------|\n`;
-    md += `| Average fixes per iteration | ${cell(f.average)} |\n`;
-    md += `| Std Dev | ${cell(f.stdDev)} |\n`;
-    md += `| Min | ${cell(f.min)} |\n`;
-    md += `| Max | ${cell(f.max)} |\n`;
-    md += `| Total fixes across all iterations | ${f.total} |\n`;
-    md += `| Iterations clean on first try | ${f.iterationsCleanOnFirstTry}/${data.successfulIterations} |\n`;
-    md += `| Iterations needing fixes | ${f.iterationsNeedingFixes}/${data.successfulIterations} |\n`;
-    md += `| All | ${f.all.join(", ")} |\n\n`;
-
-    if (f.perIteration.some((p) => p.fixAttempts > 0)) {
-      md += `**Fix details:**\n\n`;
-      for (const p of f.perIteration) {
-        if (p.fixAttempts === 0) {
-          md += `- **Iteration ${p.iteration}:** Clean on first try\n`;
-        } else {
-          md += `- **Iteration ${p.iteration}:** ${p.fixAttempts} fix(es) needed\n`;
-          for (const err of p.errors) {
-            const shortErr = (err.fatalError || "unknown")
-              .split("\n")[0]
-              .slice(0, 120);
-            md += `  - Fix #${err.attempt}: \`${shortErr}\`\n`;
-          }
-        }
-      }
-      md += `\n`;
-    }
-
-    // Components
-    md += `### ${dsConfig.name} Components\n\n`;
-    const c = data.componentImports;
-    md += `| Metric | Value |\n|--------|-------|\n`;
-    md += `| Unique UI components | ${c.uniqueUIComponents} |\n`;
-    md += `| Unique icons | ${c.uniqueIcons} |\n`;
-    md += `| Avg components/iteration | ${c.averageComponentsPerIteration} |\n\n`;
-
-    if (c.uiComponentsList.length > 0) {
-      md += `**UI Components:** ${c.uiComponentsList.map((x) => `\`${x}\``).join(", ")}\n\n`;
-    }
-    if (c.iconsList.length > 0) {
-      md += `**Icons:** ${c.iconsList.map((x) => `\`${x}\``).join(", ")}\n\n`;
-    }
-
-    if (Object.keys(c.frequency).length > 0) {
-      md += `**Component frequency** (across iterations):\n\n`;
-      md += `| Component | Iterations Used |\n|-----------|-----------------|\n`;
-      const sorted = Object.entries(c.frequency).sort((a, b) => b[1] - a[1]);
-      for (const [comp, freq] of sorted) {
-        const label = comp.startsWith("icon:")
-          ? `icon: ${comp.replace("icon:", "")}`
-          : comp;
-        md += `| ${label} | ${freq}/${data.successfulIterations} |\n`;
-      }
-      md += `\n`;
-    }
-
-    // Feedback
-    md += `### ${dsConfig.name} Feedback\n\n`;
-    const fb = data.feedback;
-    if (fb.totalItems > 0) {
-      md += `| Metric | Value |\n|--------|-------|\n`;
-      md += `| Total feedback items | ${fb.totalItems} |\n`;
-      md += `| Unique feedback items | ${fb.uniqueItems} |\n`;
-      md += `| Avg per iteration | ${fb.averagePerIteration} |\n`;
-      md += `| Iterations with feedback | ${fb.iterationsWithFeedback}/${data.successfulIterations} |\n\n`;
-
-      // Category breakdown
-      if (fb.categoriesSorted.length > 0) {
-        md += `**By category:**\n\n`;
-        md += `| Category | Count |\n|----------|-------|\n`;
-        for (const cat of fb.categoriesSorted) {
-          md += `| ${cat.category} | ${cat.count} |\n`;
-        }
-        md += `\n`;
-      }
-
-      // Full line-item list per iteration
-      md += `**Full feedback by iteration:**\n\n`;
-      for (const p of fb.perIteration) {
-        if (p.items.length === 0) {
-          md += `**Iteration ${p.iteration}:** No feedback provided\n\n`;
-        } else {
-          md += `**Iteration ${p.iteration}** (${p.items.length} items):\n\n`;
-          for (const item of p.items) {
-            md += `- \`${item.category}\` ${item.text}\n`;
-          }
-          md += `\n`;
-        }
-      }
-    } else {
-      md += `No feedback was provided by the agent across any iteration.\n\n`;
-    }
-
-    // Accessibility
-    md += `### Accessibility\n\n`;
-    const a11y = data.accessibility;
-    if (a11y && a11y.iterationsWithResults > 0) {
-      md += `| Metric | Value |\n|--------|-------|\n`;
-      md += `| Iterations tested | ${a11y.iterationsWithResults}/${a11y.totalIterations} |\n`;
-      md += `| Total violations | ${a11y.totalViolations} |\n`;
-      md += `| Avg violations/iteration | ${a11y.averageViolations} |\n`;
-      md += `| Pass rate | ${a11y.passRate !== null ? round(a11y.passRate * 100, 1) + '%' : '—'} |\n\n`;
-
-      // Top violations
-      if (a11y.topViolations.length > 0) {
-        md += `**Most common violations (axe-core):**\n\n`;
-        md += `| Rule | Impact | Modes | Occurrences | Description |\n|------|--------|-------|-------------|-------------|\n`;
-        for (const v of a11y.topViolations.slice(0, 15)) {
-          const modes = (v.modes || []).join(', ') || '—';
-          md += `| \`${v.id}\` | ${v.impact || '—'} | ${modes} | ${v.count}/${a11y.iterationsWithResults} | ${(v.description || '').slice(0, 80)} |\n`;
-        }
-        md += `\n`;
-      }
-
-      // Per-iteration summary
-      md += `**Per iteration:**\n\n`;
-      md += `| Iteration | Violations | Light | Dark-only | Status |\n|-----------|-----------|-------|-----------|--------|\n`;
-      for (const p of a11y.perIteration) {
-        const status = p.passed ? "pass" : "fail";
-        md += `| ${p.iteration} | ${p.violations} | ${p.lightViolations} | ${p.darkOnlyViolations} | ${status} |\n`;
-      }
-      md += `\n`;
-    } else {
-      md += `No accessibility results collected for this prompt.\n\n`;
-    }
-
-    // Lighthouse
-    md += `### Lighthouse\n\n`;
-    const lh = data.lighthouse;
-    if (lh && lh.iterationsWithResults > 0) {
-      md += `| Metric | Median | Mean |\n|--------|--------|------|\n`;
-      const row = (label, med, mn, unit = "") => {
-        const m = med != null ? `${med}${unit}` : "—";
-        const a = mn != null ? `${mn}${unit}` : "—";
-        return `| ${label} | ${m} | ${a} |\n`;
-      };
-      md += row("FCP", lh.medianFcpMs, lh.meanFcpMs, "ms");
-      md += row("LCP", lh.medianLcpMs, lh.meanLcpMs, "ms");
-      md += row("TBT (Total Blocking Time)", lh.medianTbtMs, lh.meanTbtMs, "ms");
-      md += row("TTI (Time to Interactive)", lh.medianTtiMs, lh.meanTtiMs, "ms");
-      md += row("Speed Index", lh.medianSpeedIndex, lh.meanSpeedIndex, "ms");
-      md += row("Lighthouse score", lh.medianPerformanceScore, lh.meanPerformanceScore);
-      md += `\n`;
-      md += `_Median and mean both aggregate across ${lh.iterationsWithResults} iteration(s). Each iteration's number is itself the median (Median column) or mean (Mean column) of ${lh.runsPerIteration} intra-iteration Lighthouse runs. Large median↔mean gaps indicate a slow outlier in the lighthouse runs — usually CPU contention or a cold dev-server start._\n\n`;
-
-      if (lh.perIteration.length > 0) {
-        md += `**Per iteration** (median values):\n\n`;
-        md += `| Iteration | FCP (ms) | LCP (ms) | TBT (ms) | TTI (ms) | Score |\n`;
-        md += `|-----------|----------|----------|----------|----------|-------|\n`;
-        for (const p of lh.perIteration) {
-          const fcp   = p.fcpMs            ?? "N/A";
-          const lcp   = p.lcpMs            ?? "N/A";
-          const tbt   = p.tbtMs            ?? "N/A";
-          const tti   = p.ttiMs            ?? "N/A";
-          const score = p.performanceScore ?? "N/A";
-          md += `| ${p.iteration} | ${fcp} | ${lcp} | ${tbt} | ${tti} | ${score} |\n`;
-        }
-        md += `\n`;
-      }
-    } else {
-      md += `No Lighthouse data collected for this prompt.\n\n`;
-    }
-
-    // React Profiler
-    md += `### React Profiler\n\n`;
-    const rp = data.reactProfile;
-    if (rp && rp.iterationsWithResults > 0) {
-      md += `| Metric | Value |\n|--------|-------|\n`;
-      md += `| Iterations measured | ${rp.iterationsWithResults}/${data.successfulIterations} |\n`;
-      if (rp.avgMountMs !== null) md += `| Avg initial mount | ${rp.avgMountMs}ms |\n`;
-      if (rp.avgCommitCount !== null) md += `| Avg commit count | ${rp.avgCommitCount} |\n`;
-      if (rp.avgUpdateMs !== null) md += `| Avg update commit | ${rp.avgUpdateMs}ms |\n`;
-      if (rp.avgMaxUpdateMs !== null) md += `| Avg slowest update | ${rp.avgMaxUpdateMs}ms |\n`;
-      md += `\n`;
-
-      if (rp.perIteration.length > 0) {
-        md += `| Iteration | Mount (ms) | Commits | Avg update (ms) | Max update (ms) |\n`;
-        md += `|-----------|-----------|---------|-----------------|-----------------|\n`;
-        for (const p of rp.perIteration) {
-          md += `| ${p.iteration} | ${p.mountMs ?? "N/A"} | ${p.commitCount ?? "N/A"} | ${p.avgUpdateMs ?? "N/A"} | ${p.maxUpdateMs ?? "N/A"} |\n`;
-        }
-        md += `\n`;
-      }
-    } else {
-      md += `No React Profiler data collected for this prompt.\n\n`;
-    }
-
-    // Component Usage Counts
-    md += `### Component Usage Counts\n\n`;
-    const cu = data.componentUsageCounts;
-    if (cu && cu.totalAcrossIterations > 0) {
-      md += `| Metric | Value |\n|--------|-------|\n`;
-      md += `| Total component instances | ${cu.totalAcrossIterations} |\n`;
-      md += `| Unique component types | ${Object.keys(cu.byComponent).length} |\n`;
-      md += `| Average per iteration | ${cu.averagePerIteration} |\n`;
-      md += `| Iterations measured | ${cu.iterationsWithData}/${data.successfulIterations} |\n\n`;
-
-      if (Object.keys(cu.byComponent).length > 0) {
-        md += `**By component (total instances across all iterations):**\n\n`;
-        md += `| Component | Total Uses |\n|-----------|------------|\n`;
-        const sorted = Object.entries(cu.byComponent).sort((a, b) => b[1] - a[1]);
-        for (const [comp, count] of sorted) {
-          md += `| \`${comp}\` | ${count} |\n`;
-        }
-        md += `\n`;
-      }
-
-      if (cu.perIteration.length > 0) {
-        md += `**Per iteration:**\n\n`;
-        md += `| Iteration | Total | Top component |\n|-----------|-------|---------------|\n`;
-        for (const p of cu.perIteration) {
-          const top = Object.entries(p.byComponent).sort((a, b) => b[1] - a[1])[0];
-          const topStr = top ? `\`${top[0]}\` (${top[1]})` : "—";
-          md += `| ${p.iteration} | ${p.total} | ${topStr} |\n`;
-        }
-        md += `\n`;
-      }
-    } else {
-      md += `No component usage data available.\n\n`;
-    }
-
-    // Inline Styles
-    md += `### Inline Styles\n\n`;
-    const is = data.inlineStyles;
-    if (is && is.totalAcrossIterations > 0) {
-      md += `| Metric | Value |\n|--------|-------|\n`;
-      md += `| Total inline \`style={{}}\` usages | ${is.totalAcrossIterations} |\n`;
-      md += `| Average per iteration | ${is.averagePerIteration} |\n`;
-      md += `| Iterations measured | ${is.iterationsWithData}/${data.successfulIterations} |\n\n`;
-
-      if (Object.keys(is.byComponent).length > 0) {
-        md += `**By component (across all iterations):**\n\n`;
-        md += `| Component | Inline Style Count | % of Instances |\n|-----------|--------------------|-----------------|\n`;
-        const sorted = Object.entries(is.byComponent).sort((a, b) => b[1] - a[1]);
-        const totalUsage = data.componentUsageCounts?.byComponent || {};
-        for (const [comp, count] of sorted) {
-          const totalInstances = totalUsage[comp] || 0;
-          const pct = totalInstances > 0
-            ? `${Math.round((count / totalInstances) * 100)}%`
-            : "—";
-          md += `| \`${comp}\` | ${count} | ${pct} |\n`;
-        }
-        md += `\n`;
-      }
-
-      if (is.topProperties && is.topProperties.length > 0) {
-        md += `**Most common inline CSS properties:**\n\n`;
-        md += `| Property | Occurrences | % of Total |\n|----------|-------------|------------|\n`;
-        for (const { property, count } of is.topProperties.slice(0, 15)) {
-          const pct = is.totalAcrossIterations > 0
-            ? round((count / is.totalAcrossIterations) * 100, 1)
-            : 0;
-          md += `| \`${property}\` | ${count} | ${pct}% |\n`;
-        }
-        md += `\n`;
-      }
-
-      if (is.perIteration.length > 0) {
-        md += `**Per iteration:**\n\n`;
-        md += `| Iteration | Total | Top component |\n|-----------|-------|---------------|\n`;
-        for (const p of is.perIteration) {
-          const top = Object.entries(p.byComponent).sort((a, b) => b[1] - a[1])[0];
-          const topStr = top ? `\`${top[0]}\` (${top[1]})` : "—";
-          md += `| ${p.iteration} | ${p.total} | ${topStr} |\n`;
-        }
-        md += `\n`;
-      }
-    } else {
-      md += `No inline style data available.\n\n`;
-    }
-
-    // DOM Elements
-    const dom = data.domElements;
-    if (dom && dom.iterationsWithData > 0) {
-      md += `### DOM Elements\n\n`;
-      md += `| Metric | Value |\n|--------|-------|\n`;
-      md += `| Average elements | ${dom.average} |\n`;
-      md += `| Std Dev (elements) | ${dom.stdDev} |\n`;
-      md += `| Min elements | ${dom.min} |\n`;
-      md += `| Max elements | ${dom.max} |\n`;
-      if (dom.htmlBytesAverage != null) {
-        md += `| Avg HTML size | ${formatBytes(dom.htmlBytesAverage)} |\n`;
-        md += `| Std Dev (HTML size) | ${formatBytes(dom.htmlBytesStdDev)} |\n`;
-        md += `| Min HTML size | ${formatBytes(dom.htmlBytesMin)} |\n`;
-        md += `| Max HTML size | ${formatBytes(dom.htmlBytesMax)} |\n`;
-      }
-      md += `| Iterations measured | ${dom.iterationsWithData}/${dom.totalIterations} |\n\n`;
-
-      if (dom.perIteration.length > 0) {
-        md += `**Per iteration:**\n\n`;
-        const hasBytes = dom.perIteration.some((d) => d.htmlBytes != null);
-        if (hasBytes) {
-          md += `| Iteration | DOM Elements | HTML size |\n|-----------|--------------|----------|\n`;
-          for (const d of dom.perIteration) {
-            const size = d.htmlBytes != null ? formatBytes(d.htmlBytes) : "—";
-            md += `| ${d.iteration} | ${d.count.toLocaleString()} | ${size} |\n`;
-          }
-        } else {
-          md += `| Iteration | DOM Elements |\n|-----------|-------------|\n`;
-          for (const d of dom.perIteration) {
-            md += `| ${d.iteration} | ${d.count.toLocaleString()} |\n`;
-          }
-        }
-        md += `\n`;
-      }
-    }
-
-    // Semantic HTML
-    const sem = data.semanticHtml;
-    if (sem && sem.iterationsWithData > 0) {
-      md += `### Semantic HTML\n\n`;
-      md += `| Metric | Value |\n|--------|-------|\n`;
-      md += `| Avg semantic elements | ${sem.avgSemanticCount} |\n`;
-      md += `| Avg generic elements (div/span) | ${sem.avgGenericCount} |\n`;
-      md += `| Avg \`role\` attributes | ${sem.avgRoleCount} |\n`;
-      md += `| Semantic ratio | ${sem.avgSemanticRatio}% |\n`;
-      md += `| Iterations measured | ${sem.iterationsWithData}/${sem.totalIterations} |\n\n`;
-
-      // Semantic tags breakdown
-      const semTags = Object.entries(sem.globalSemanticByTag).sort((a, b) => b[1] - a[1]);
-      if (semTags.length > 0) {
-        md += `**Semantic tags used:**\n\n`;
-        md += `| Tag | Count |\n|-----|-------|\n`;
-        for (const [tag, count] of semTags) {
-          md += `| \`<${tag}>\` | ${count} |\n`;
-        }
-        md += `\n`;
-      }
-
-      // Generic tags
-      const genTags = Object.entries(sem.globalGenericByTag).sort((a, b) => b[1] - a[1]);
-      if (genTags.length > 0) {
-        md += `**Generic tags:**\n\n`;
-        md += `| Tag | Count |\n|-----|-------|\n`;
-        for (const [tag, count] of genTags) {
-          md += `| \`<${tag}>\` | ${count} |\n`;
-        }
-        md += `\n`;
-      }
-
-      // Roles
-      const roles = Object.entries(sem.globalRolesByValue).sort((a, b) => b[1] - a[1]);
-      if (roles.length > 0) {
-        md += `**ARIA roles:**\n\n`;
-        md += `| Role | Count |\n|------|-------|\n`;
-        for (const [role, count] of roles) {
-          md += `| \`${role}\` | ${count} |\n`;
-        }
-        md += `\n`;
-      }
-
-      // Per iteration
-      if (sem.perIteration.length > 0) {
-        md += `**Per iteration:**\n\n`;
-        md += `| Iteration | Semantic | Generic | Roles | Ratio |\n|-----------|----------|---------|-------|-------|\n`;
-        for (const p of sem.perIteration) {
-          md += `| ${p.iteration} | ${p.semanticCount} | ${p.genericCount} | ${p.roleCount} | ${p.semanticRatio}% |\n`;
-        }
-        md += `\n`;
-      }
-    }
-
-    // Visual Diff
-    md += `### Visual Diff\n\n`;
-    const vd = data.visualDiff;
-    if (vd && vd.averageDiffPercent !== null) {
-      md += `| Metric | Value |\n|--------|-------|\n`;
-      md += `| Average difference | ${vd.averageDiffPercent}% |\n`;
-      md += `| Min difference | ${vd.minDiffPercent}% |\n`;
-      md += `| Max difference | ${vd.maxDiffPercent}% |\n`;
-      md += `| Iterations compared | ${vd.iterationsCompared} |\n\n`;
-
-      md += `_${vd.description}_\n\n`;
-
-      if (vd.pairwiseDiffs.length > 0) {
-        md += `| Pair | Diff % | Changed Pixels | Total Pixels |\n|------|--------|----------------|---------------|\n`;
-        for (const d of vd.pairwiseDiffs) {
-          md += `| Iter ${d.iterA} vs ${d.iterB} | ${d.diffPercent}% | ${d.diffPixels.toLocaleString()} | ${d.totalPixels.toLocaleString()} |\n`;
-        }
-        md += `\n`;
-
-        // Link diff images if they exist
-        const withImages = vd.pairwiseDiffs.filter((d) => d.diffImagePath);
-        if (withImages.length > 0) {
-          md += `**Diff images:**\n\n`;
-          for (const d of withImages) {
-            const relPath = d.diffImagePath.split("/output/").pop();
-            md += `- Iter ${d.iterA} vs ${d.iterB}: ![diff](${relPath})\n`;
-          }
-          md += `\n`;
-        }
-      }
-    } else {
-      md += `${vd?.description || "No visual diff data available."}\n\n`;
-    }
-
-    // Screenshots
-    if (data.screenshots.length > 0) {
-      md += `### Screenshots\n\n`;
-      for (const ss of data.screenshots) {
-        const relPath = ss.split("/output/").pop();
-        md += `![${relPath}](${relPath})\n\n`;
-      }
-    }
-
-    // Token usage
-    if (data.tokenUsage.avgInputTokens !== null) {
-      const tu = data.tokenUsage;
-      md += `### Token Usage\n\n`;
-      md += `Input breakdown (per iteration averages):\n\n`;
-      md += `| Bucket | Avg / iter | Total | Billing weight |\n|---|---|---|---|\n`;
-      md += `| Uncached input | ${tu.avgUncachedInputTokens ?? 0} | ${tu.totalUncachedInputTokens ?? 0} | 1.0× |\n`;
-      md += `| Cache reads | ${tu.avgCacheReadInputTokens ?? 0} | ${tu.totalCacheReadInputTokens ?? 0} | 0.1× |\n`;
-      md += `| Cache creations | ${tu.avgCacheCreationInputTokens ?? 0} | ${tu.totalCacheCreationInputTokens ?? 0} | 1.25× |\n`;
-      md += `| **Effective input** (weighted) | **${tu.avgEffectiveInputTokens ?? 0}** | **${tu.totalEffectiveInputTokens ?? 0}** | — |\n`;
-      md += `| Raw sum (all three input buckets) | ${tu.avgInputTokens} | ${tu.totalInputTokens} | — |\n`;
-      md += `\n`;
-      md += `Output:\n\n`;
-      md += `| Metric | Avg / iter | Total |\n|---|---|---|\n`;
-      md += `| Output tokens | ${tu.avgOutputTokens} | ${tu.totalOutputTokens} |\n\n`;
-      if (tu.cacheHitRate != null) {
-        const pct = round(tu.cacheHitRate * 100, 1);
-        md += `_Cache hit rate: ${pct}% of input tokens served from cache (billed at ~10% of full input rate)._\n\n`;
-      }
-    }
-  }
-
-  return md;
-}
-
-// --- Utility functions ---
-
-/**
- * Aggregate Lighthouse results across iterations.
- *
- * Each iteration's Lighthouse run produces a median + mean per metric
- * (computed across N intra-iteration lighthouse runs — typically 3).
- * This function rolls both upwards to a single number per metric:
- *
- *   - `medianFcpMs` — mean of per-iteration **medians** (robust)
- *   - `meanFcpMs`   — mean of per-iteration **means**   (sensitive to outliers)
- *
- * Backward-compat: `avgFcpMs` is kept as an alias for `medianFcpMs`
- * since the historic top-level `lighthouseResults.fcpMs` was a mean,
- * and old reports' "Avg FCP" cell maps onto today's median.
- */
-export function analyzeLighthouse(iterations) {
-  const withResults = iterations.filter(
-    (r) => r.lighthouseResults && !r.lighthouseResults.error,
-  );
-
-  const empty = {
-    iterationsWithResults: 0,
-    totalIterations: iterations.length,
-    medianFcpMs: null,
-    meanFcpMs: null,
-    medianLcpMs: null,
-    meanLcpMs: null,
-    medianTbtMs: null,
-    meanTbtMs: null,
-    medianTtiMs: null,
-    meanTtiMs: null,
-    medianSpeedIndex: null,
-    meanSpeedIndex: null,
-    medianPerformanceScore: null,
-    meanPerformanceScore: null,
-    avgFcpMs: null,
-    avgLcpMs: null,
-    avgTbtMs: null,
-    avgTtiMs: null,
-    avgSpeedIndex: null,
-    avgPerformanceScore: null,
-    runsPerIteration: 0,
-    perIteration: [],
-  };
-
-  if (withResults.length === 0) return empty;
-
-  // Per-metric: pull the median (top-level field, kept for backward
-  // compat) and the mean (under `metrics.<name>.mean` when emitted by
-  // newer lighthouse.js; falls back to the top-level for old runs).
-  const pickMedian = (r, key) => r.lighthouseResults[key] ?? null;
-  const pickMean = (r, metricName) =>
-    r.lighthouseResults.metrics?.[metricName]?.mean ??
-    r.lighthouseResults[`${metricName}Ms`] ??
-    null;
-
-  const fcpMedians = withResults.map((r) => pickMedian(r, "fcpMs")).filter((v) => v !== null);
-  const fcpMeans   = withResults.map((r) => pickMean(r, "fcp")).filter((v) => v !== null);
-  const lcpMedians = withResults.map((r) => pickMedian(r, "lcpMs")).filter((v) => v !== null);
-  const lcpMeans   = withResults.map((r) => pickMean(r, "lcp")).filter((v) => v !== null);
-  const tbtMedians = withResults.map((r) => pickMedian(r, "tbtMs")).filter((v) => v !== null);
-  const tbtMeans   = withResults.map((r) => pickMean(r, "tbt")).filter((v) => v !== null);
-  const ttiMedians = withResults.map((r) => pickMedian(r, "ttiMs")).filter((v) => v !== null);
-  const ttiMeans   = withResults.map((r) => pickMean(r, "tti")).filter((v) => v !== null);
-  const siMedians  = withResults.map((r) => pickMedian(r, "speedIndex")).filter((v) => v !== null);
-  const siMeans    = withResults.map((r) => r.lighthouseResults.metrics?.speedIndex?.mean ?? r.lighthouseResults.speedIndex ?? null).filter((v) => v !== null);
-  const scoreMedians = withResults.map((r) => pickMedian(r, "performanceScore")).filter((v) => v !== null);
-  const scoreMeans = withResults.map((r) => r.lighthouseResults.metrics?.performanceScore?.mean ?? r.lighthouseResults.performanceScore ?? null).filter((v) => v !== null);
-
-  const perIteration = withResults.map((r) => ({
-    iteration:        r.iteration,
-    // Median values per metric (top-level fields are medians in v2 runs)
-    fcpMs:            r.lighthouseResults.fcpMs,
-    lcpMs:            r.lighthouseResults.lcpMs,
-    tbtMs:            r.lighthouseResults.tbtMs ?? null,
-    ttiMs:            r.lighthouseResults.ttiMs ?? null,
-    speedIndex:       r.lighthouseResults.speedIndex ?? null,
-    performanceScore: r.lighthouseResults.performanceScore ?? null,
-    // Means from the nested `metrics` block (newer runs only)
-    fcpMean:            r.lighthouseResults.metrics?.fcp?.mean ?? null,
-    lcpMean:            r.lighthouseResults.metrics?.lcp?.mean ?? null,
-    tbtMean:            r.lighthouseResults.metrics?.tbt?.mean ?? null,
-    ttiMean:            r.lighthouseResults.metrics?.tti?.mean ?? null,
-    speedIndexMean:     r.lighthouseResults.metrics?.speedIndex?.mean ?? null,
-    performanceScoreMean: r.lighthouseResults.metrics?.performanceScore?.mean ?? null,
-    runCount:         r.lighthouseResults.runs ?? 0,
-  }));
-
-  const ofMean = (vals) => (vals.length > 0 ? round(mean(vals)) : null);
-
-  const medianFcpMs = ofMean(fcpMedians);
-  const meanFcpMs = ofMean(fcpMeans);
-  const medianLcpMs = ofMean(lcpMedians);
-  const meanLcpMs = ofMean(lcpMeans);
-  const medianTbtMs = ofMean(tbtMedians);
-  const meanTbtMs = ofMean(tbtMeans);
-  const medianTtiMs = ofMean(ttiMedians);
-  const meanTtiMs = ofMean(ttiMeans);
-  const medianSpeedIndex = ofMean(siMedians);
-  const meanSpeedIndex = ofMean(siMeans);
-  const medianPerformanceScore = ofMean(scoreMedians);
-  const meanPerformanceScore = ofMean(scoreMeans);
-
-  return {
-    iterationsWithResults: withResults.length,
-    totalIterations: iterations.length,
-    medianFcpMs,
-    meanFcpMs,
-    medianLcpMs,
-    meanLcpMs,
-    medianTbtMs,
-    meanTbtMs,
-    medianTtiMs,
-    meanTtiMs,
-    medianSpeedIndex,
-    meanSpeedIndex,
-    medianPerformanceScore,
-    meanPerformanceScore,
-    // Backward-compat aliases (downstream report rendering + aggregate.js
-    // historically read `avg*` fields). Treat them as the median-of-medians.
-    avgFcpMs: medianFcpMs,
-    avgLcpMs: medianLcpMs,
-    avgTbtMs: medianTbtMs,
-    avgTtiMs: medianTtiMs,
-    avgSpeedIndex: medianSpeedIndex,
-    avgPerformanceScore: medianPerformanceScore,
-    runsPerIteration: withResults[0]?.lighthouseResults?.runs ?? 0,
-    perIteration,
-  };
-}
-
-/**
- * Aggregate React Profiler results across iterations.
- */
-export function analyzeReactProfile(iterations) {
-  const withResults = iterations.filter((r) => r.reactProfile);
-
-  if (withResults.length === 0) {
-    return {
-      iterationsWithResults: 0,
-      totalIterations: iterations.length,
-      avgMountMs: null,
-      avgCommitCount: null,
-      avgUpdateMs: null,
-      avgMaxUpdateMs: null,
-      perIteration: [],
-    };
-  }
-
-  const mountValues     = withResults.map((r) => r.reactProfile.mountMs).filter((v) => v != null);
-  const commitCounts    = withResults.map((r) => r.reactProfile.commitCount).filter((v) => v != null);
-  const avgUpdateValues = withResults.map((r) => r.reactProfile.avgUpdateMs).filter((v) => v != null);
-  const maxUpdateValues = withResults.map((r) => r.reactProfile.maxUpdateMs).filter((v) => v != null);
-
-  const perIteration = withResults.map((r) => ({
-    iteration:    r.iteration,
-    mountMs:      r.reactProfile.mountMs ?? null,
-    commitCount:  r.reactProfile.commitCount ?? null,
-    avgUpdateMs:  r.reactProfile.avgUpdateMs ?? null,
-    maxUpdateMs:  r.reactProfile.maxUpdateMs ?? null,
-  }));
-
-  return {
-    iterationsWithResults: withResults.length,
-    totalIterations:       iterations.length,
-    avgMountMs:            mountValues.length     > 0 ? round(mean(mountValues))     : null,
-    avgCommitCount:        commitCounts.length    > 0 ? round(mean(commitCounts))    : null,
-    avgUpdateMs:           avgUpdateValues.length > 0 ? round(mean(avgUpdateValues)) : null,
-    avgMaxUpdateMs:        maxUpdateValues.length > 0 ? round(mean(maxUpdateValues)) : null,
-    perIteration,
-  };
-}
-
-/**
- * Aggregate inline style usage across iterations.
- */
-/**
- * Aggregate component JSX usage counts across iterations.
- */
-export function analyzeComponentUsage(iterations) {
-  const withData = iterations.filter(
-    (r) => r.componentUsage && r.componentUsage.total !== undefined,
-  );
-
-  if (withData.length === 0) {
-    return {
-      iterationsWithData: 0,
-      totalAcrossIterations: 0,
-      averagePerIteration: 0,
-      byComponent: {},
-      perIteration: [],
-    };
-  }
-
-  const globalByComponent = {};
-  let totalAcrossIterations = 0;
-
-  const perIteration = withData.map((r) => {
-    const { total, byComponent } = r.componentUsage;
-    totalAcrossIterations += total;
-    for (const [comp, count] of Object.entries(byComponent || {})) {
-      globalByComponent[comp] = (globalByComponent[comp] || 0) + count;
-    }
-    return {
-      iteration: r.iteration,
-      total,
-      byComponent: byComponent || {},
-    };
-  });
-
-  return {
-    iterationsWithData: withData.length,
-    totalAcrossIterations,
-    averagePerIteration: round(totalAcrossIterations / withData.length),
-    byComponent: globalByComponent,
-    perIteration,
-  };
-}
-
-export function analyzeInlineStyles(iterations) {
-  const withData = iterations.filter(
-    (r) => r.inlineStyles && r.inlineStyles.total !== undefined,
-  );
-
-  if (withData.length === 0) {
-    return {
-      iterationsWithData: 0,
-      totalAcrossIterations: 0,
-      averagePerIteration: 0,
-      byComponent: {},
-      byProperty: {},
-      topProperties: [],
-      perIteration: [],
-    };
-  }
-
-  const globalByComponent = {};
-  const globalByProperty = {};
-  let totalAcrossIterations = 0;
-
-  const perIteration = withData.map((r) => {
-    const { total, byComponent, byProperty } = r.inlineStyles;
-    totalAcrossIterations += total;
-    for (const [comp, count] of Object.entries(byComponent || {})) {
-      globalByComponent[comp] = (globalByComponent[comp] || 0) + count;
-    }
-    for (const [prop, count] of Object.entries(byProperty || {})) {
-      globalByProperty[prop] = (globalByProperty[prop] || 0) + count;
-    }
-    return {
-      iteration: r.iteration,
-      total,
-      byComponent: byComponent || {},
-    };
-  });
-
-  // Sort properties by frequency, descending
-  const topProperties = Object.entries(globalByProperty)
-    .map(([property, count]) => ({ property, count }))
-    .sort((a, b) => b.count - a.count);
-
-  return {
-    iterationsWithData: withData.length,
-    totalAcrossIterations,
-    averagePerIteration: round(totalAcrossIterations / withData.length),
-    byComponent: globalByComponent,
-    byProperty: globalByProperty,
-    topProperties,
-    perIteration,
-  };
-}
-
-/**
- * Aggregate semantic HTML usage across iterations.
- */
-export function analyzeSemanticHtml(iterations) {
-  const withData = iterations.filter(
-    (r) => r.semanticHtml && r.semanticHtml.total !== undefined,
-  );
-
-  if (withData.length === 0) {
-    return {
-      iterationsWithData: 0,
-      totalIterations: iterations.length,
-      avgSemanticCount: null,
-      avgGenericCount: null,
-      avgRoleCount: null,
-      avgSemanticRatio: null,
-      globalSemanticByTag: {},
-      globalGenericByTag: {},
-      globalRolesByValue: {},
-      perIteration: [],
-    };
-  }
-
-  const globalSemanticByTag = {};
-  const globalGenericByTag = {};
-  const globalRolesByValue = {};
-
-  const perIteration = withData.map((r) => {
-    const s = r.semanticHtml;
-    for (const [tag, count] of Object.entries(s.semanticByTag || {})) {
-      globalSemanticByTag[tag] = (globalSemanticByTag[tag] || 0) + count;
-    }
-    for (const [tag, count] of Object.entries(s.genericByTag || {})) {
-      globalGenericByTag[tag] = (globalGenericByTag[tag] || 0) + count;
-    }
-    for (const [role, count] of Object.entries(s.rolesByValue || {})) {
-      globalRolesByValue[role] = (globalRolesByValue[role] || 0) + count;
-    }
-    return {
-      iteration: r.iteration,
-      semanticCount: s.semanticCount,
-      genericCount: s.genericCount,
-      roleCount: s.roleCount,
-      semanticRatio: s.semanticRatio,
-    };
-  });
-
-  const semanticCounts = withData.map((r) => r.semanticHtml.semanticCount);
-  const genericCounts = withData.map((r) => r.semanticHtml.genericCount);
-  const roleCounts = withData.map((r) => r.semanticHtml.roleCount);
-  const ratios = withData.map((r) => r.semanticHtml.semanticRatio);
-
-  return {
-    iterationsWithData: withData.length,
-    totalIterations: iterations.length,
-    avgSemanticCount: round(mean(semanticCounts)),
-    avgGenericCount: round(mean(genericCounts)),
-    avgRoleCount: round(mean(roleCounts)),
-    avgSemanticRatio: round(mean(ratios), 1),
-    globalSemanticByTag,
-    globalGenericByTag,
-    globalRolesByValue,
-    perIteration,
-  };
-}
-
-export function mean(arr) {
-  if (arr.length === 0) return 0;
-  return arr.reduce((a, b) => a + b, 0) / arr.length;
-}
-
-export function sum(arr) {
-  return arr.reduce((a, b) => a + b, 0);
-}
-
-export function stdDev(arr) {
-  if (arr.length < 2) return 0;
-  const avg = mean(arr);
-  const squareDiffs = arr.map((v) => (v - avg) ** 2);
-  return Math.sqrt(mean(squareDiffs));
-}
-
-export function round(n, decimals = 3) {
-  if (n === null || n === undefined || isNaN(n)) return n;
-  return Math.round(n * 10 ** decimals) / 10 ** decimals;
-}
-
-/**
- * Create a set of character n-grams from a string.
- */
-export function ngramSet(text, n) {
-  const set = new Set();
-  const normalized = text.replace(/\s+/g, " ").trim();
-  for (let i = 0; i <= normalized.length - n; i++) {
-    set.add(normalized.substring(i, i + n));
-  }
-  return set;
-}
-
-/**
- * Compute Jaccard similarity between two sets.
- */
-export function jaccardSimilarity(setA, setB) {
-  if (setA.size === 0 && setB.size === 0) return 1;
-  let intersection = 0;
-  for (const item of setA) {
-    if (setB.has(item)) intersection++;
-  }
-  const union = setA.size + setB.size - intersection;
-  return union === 0 ? 1 : intersection / union;
 }

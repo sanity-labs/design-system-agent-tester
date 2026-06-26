@@ -11,6 +11,14 @@
  * same: per-test aggregated metrics keyed by label.
  */
 
+import { delta, fmt, fmtInt, formatBytes, mdTable } from "./format.js";
+import { maxVal, mean, minVal, stdDev } from "./stats.js";
+
+export { delta, fmt, fmtInt, formatBytes, mdTable } from "./format.js";
+// Re-export the shared stats/format helpers so existing importers of
+// `aggregate.js` keep working unchanged.
+export { maxVal, mean, minVal, stdDev } from "./stats.js";
+
 // ─── Metric extraction ──────────────────────────────────────────────
 
 /**
@@ -35,9 +43,7 @@ export function extractMetrics(data) {
     tbtMs: data.lighthouse?.medianTbtMs ?? data.lighthouse?.avgTbtMs ?? null,
     ttiMs: data.lighthouse?.medianTtiMs ?? data.lighthouse?.avgTtiMs ?? null,
     performanceScore:
-      data.lighthouse?.medianPerformanceScore ??
-      data.lighthouse?.avgPerformanceScore ??
-      null,
+      data.lighthouse?.medianPerformanceScore ?? data.lighthouse?.avgPerformanceScore ?? null,
     // Mean-based (for comparison with median in the summary tables)
     fcpMsMean: data.lighthouse?.meanFcpMs ?? null,
     tbtMsMean: data.lighthouse?.meanTbtMs ?? null,
@@ -106,32 +112,7 @@ const AGGREGATABLE_KEYS = [
   "cacheHitRate",
 ];
 
-// ─── Stats helpers ──────────────────────────────────────────────────
-
-export function mean(arr) {
-  const valid = arr.filter((x) => x !== null && x !== undefined && !isNaN(x));
-  if (valid.length === 0) return null;
-  return valid.reduce((a, b) => a + b, 0) / valid.length;
-}
-
-export function stdDev(arr) {
-  const valid = arr.filter((x) => x !== null && x !== undefined && !isNaN(x));
-  if (valid.length < 2) return null;
-  const m = mean(valid);
-  const variance =
-    valid.reduce((sum, x) => sum + (x - m) ** 2, 0) / valid.length;
-  return Math.sqrt(variance);
-}
-
-export function minVal(arr) {
-  const valid = arr.filter((x) => x !== null && x !== undefined && !isNaN(x));
-  return valid.length ? Math.min(...valid) : null;
-}
-
-export function maxVal(arr) {
-  const valid = arr.filter((x) => x !== null && x !== undefined && !isNaN(x));
-  return valid.length ? Math.max(...valid) : null;
-}
+// ─── Aggregation ────────────────────────────────────────────────────
 
 /**
  * Aggregate a list of metric sets (one per run) into a single mean / sd /
@@ -148,58 +129,6 @@ export function aggregateMetrics(metricSets) {
   }
   result.totalIterations = metricSets[0]?.totalIterations ?? null;
   return result;
-}
-
-// ─── Formatting helpers ─────────────────────────────────────────────
-
-export function fmt(n, decimals = 1) {
-  if (n === null || n === undefined) return "—";
-  return Number(n).toFixed(decimals);
-}
-
-export function fmtInt(n) {
-  if (n === null || n === undefined) return "—";
-  return String(Math.round(n));
-}
-
-/**
- * Format a byte count as a short human-readable string (`12 KB`,
- * `1.4 MB`). Used for HTML-tree size, which spans roughly 5 KB to
- * a few hundred KB across the runs we've seen.
- */
-export function formatBytes(n) {
-  if (n === null || n === undefined || isNaN(n)) return "—";
-  if (n < 1024) return `${Math.round(n)} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / (1024 * 1024)).toFixed(2)} MB`;
-}
-
-/**
- * Format a delta between two values as `+15% worse` / `-30% better`.
- * Returns '' if either value is missing, or if the baseline is 0
- * (no meaningful percentage).
- *
- * `lowerIsBetter` controls the better/worse direction.
- */
-export function delta(baseline, candidate, lowerIsBetter = true) {
-  if (baseline === null || candidate === null || baseline === 0) return "";
-  const pct = ((candidate - baseline) / Math.abs(baseline)) * 100;
-  if (pct === 0) return "0%";
-  const improved = lowerIsBetter ? pct < 0 : pct > 0;
-  const sign = pct >= 0 ? "+" : "";
-  return `${sign}${pct.toFixed(0)}% ${improved ? "better" : "worse"}`;
-}
-
-// ─── Markdown table renderer ────────────────────────────────────────
-
-export function mdTable(headers, rows) {
-  const sep = headers.map(() => "---");
-  const lines = [
-    `| ${headers.join(" | ")} |`,
-    `| ${sep.join(" | ")} |`,
-    ...rows.map((r) => `| ${r.join(" | ")} |`),
-  ];
-  return lines.join("\n") + "\n";
 }
 
 // ─── Headline metrics tables ────────────────────────────────────────
@@ -255,13 +184,7 @@ const METRIC_GROUPS = [
     heading: "DOM & semantic HTML",
     rows: [
       ["DOM elements (avg)", "domAvg", false, 0],
-      [
-        "HTML size (avg)",
-        "domHtmlBytesAvg",
-        true,
-        0,
-        (agg) => formatBytes(agg?.domHtmlBytesAvg),
-      ],
+      ["HTML size (avg)", "domHtmlBytesAvg", true, 0, (agg) => formatBytes(agg?.domHtmlBytesAvg)],
       ["Semantic ratio", "semanticRatio", false, 1],
       ["Semantic elements (avg)", "semanticCount", false, 0],
       ["Generic elements (avg)", "genericCount", true, 0],
@@ -305,10 +228,7 @@ const METRIC_GROUPS = [
         "cacheHitRate",
         false,
         2,
-        (agg) =>
-          agg?.cacheHitRate == null
-            ? "—"
-            : `${(agg.cacheHitRate * 100).toFixed(1)}%`,
+        (agg) => (agg?.cacheHitRate == null ? "—" : `${(agg.cacheHitRate * 100).toFixed(1)}%`),
       ],
       ["Effective input total", "effectiveInputTokensTotal", true, 0],
       ["Output total", "outputTokensTotal", true, 0],
@@ -361,17 +281,12 @@ function findWinners(labels, aggregatesByLabel, key, lowerBetter) {
   if (labels.length < 2) return new Set();
   const samples = labels
     .map((l) => ({ label: l, value: aggregatesByLabel[l]?.[key] }))
-    .filter(
-      ({ value }) =>
-        value !== null && value !== undefined && !Number.isNaN(value),
-    );
+    .filter(({ value }) => value !== null && value !== undefined && !Number.isNaN(value));
   if (samples.length === 0) return new Set();
   const best = lowerBetter
     ? Math.min(...samples.map((s) => s.value))
     : Math.max(...samples.map((s) => s.value));
-  return new Set(
-    samples.filter((s) => s.value === best).map((s) => s.label),
-  );
+  return new Set(samples.filter((s) => s.value === best).map((s) => s.label));
 }
 
 const WINNER_MARK = " ✓";
@@ -436,7 +351,5 @@ function renderOneGroup(group, labels, aggregatesByLabel, iters) {
  */
 export function renderMetricsTables(labels, aggregatesByLabel) {
   const iters = aggregatesByLabel[labels[0]]?.totalIterations ?? null;
-  return METRIC_GROUPS.map((g) =>
-    renderOneGroup(g, labels, aggregatesByLabel, iters),
-  ).join("");
+  return METRIC_GROUPS.map((g) => renderOneGroup(g, labels, aggregatesByLabel, iters)).join("");
 }

@@ -1,4 +1,4 @@
-import { isSourceFile } from "./parse-files.js";
+import { isJsxFile } from "./parse-files.js";
 
 /**
  * Extract unique imported component names from a set of source files,
@@ -18,13 +18,15 @@ export function extractComponentImports(files, packageNames) {
 
   const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const pattern = packageNames.map(escRe).join("|");
+  // `(?:type\\s+)?` so `import type { BoxProps } from "pkg"` is counted too —
+  // agent-written TSX commonly uses type-only imports for prop types.
   const importRegex = new RegExp(
-    `import\\s*\\{([^}]+)\\}\\s*from\\s*['"](?:${pattern})['"]`,
+    `import\\s+(?:type\\s+)?\\{([^}]+)\\}\\s*from\\s*['"](?:${pattern})['"]`,
     "g",
   );
 
   for (const file of files) {
-    if (!isSourceFile(file.path)) continue;
+    if (!isJsxFile(file.path)) continue;
 
     let match;
     while ((match = importRegex.exec(file.content)) !== null) {

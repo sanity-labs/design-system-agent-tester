@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { extractComponentUsageCounts } from "./count-component-usage.js";
 
 // ---------------------------------------------------------------------------
@@ -9,12 +9,7 @@ describe("extractComponentUsageCounts", () => {
     const files = [
       {
         path: "src/App.jsx",
-        content: [
-          "<Button>Click</Button>",
-          "<Card>",
-          "  <Text>Hello</Text>",
-          "</Card>",
-        ].join("\n"),
+        content: ["<Button>Click</Button>", "<Card>", "  <Text>Hello</Text>", "</Card>"].join("\n"),
       },
     ];
 

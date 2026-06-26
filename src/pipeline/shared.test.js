@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
 import { resolve, sep } from "node:path";
+import { describe, expect, it } from "vitest";
 import { buildFixPrompt, resolveWithinProject } from "./shared.js";
 
 // ─── resolveWithinProject ────────────────────────────────────────────
@@ -14,9 +14,7 @@ describe("resolveWithinProject", () => {
   });
 
   it("allows `..` segments that stay inside the project", () => {
-    expect(resolveWithinProject(projectDir, "src/../App.jsx")).toBe(
-      resolve(projectDir, "App.jsx"),
-    );
+    expect(resolveWithinProject(projectDir, "src/../App.jsx")).toBe(resolve(projectDir, "App.jsx"));
   });
 
   it("throws on traversal outside the project directory", () => {
@@ -32,9 +30,9 @@ describe("resolveWithinProject", () => {
   });
 
   it("does not treat a sibling directory with a shared prefix as inside", () => {
-    expect(() =>
-      resolveWithinProject(projectDir, `..${sep}at-project-evil${sep}x.js`),
-    ).toThrow(/outside the project directory/);
+    expect(() => resolveWithinProject(projectDir, `..${sep}at-project-evil${sep}x.js`)).toThrow(
+      /outside the project directory/,
+    );
   });
 });
 
@@ -42,11 +40,7 @@ describe("resolveWithinProject", () => {
 
 describe("buildFixPrompt", () => {
   it("includes current files text and a call to action", () => {
-    const prompt = buildFixPrompt(
-      "--- app.tsx ---\nconsole.log('hi')\n--- end ---",
-      [],
-      null,
-    );
+    const prompt = buildFixPrompt("--- app.tsx ---\nconsole.log('hi')\n--- end ---", [], null);
     expect(prompt).toContain("--- app.tsx ---");
     expect(prompt).toContain("console.log('hi')");
     expect(prompt).toContain("## Current Project Files");
@@ -54,11 +48,7 @@ describe("buildFixPrompt", () => {
   });
 
   it("includes a fatal error when provided", () => {
-    const prompt = buildFixPrompt(
-      "files",
-      [],
-      "TypeError: cannot read undefined",
-    );
+    const prompt = buildFixPrompt("files", [], "TypeError: cannot read undefined");
     expect(prompt).toContain("**Fatal error (app did not mount):**");
     expect(prompt).toContain("TypeError: cannot read undefined");
   });

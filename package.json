@@ -25,14 +25,17 @@
   ],
   "license": "MIT",
   "scripts": {
-    "start": "node --env-file-if-exists=.env src/index.js",
+    "start": "node src/index.js",
+    "genui": "node src/genui/run.js",
     "summarize": "node src/reporting/summarize.js",
     "new-test": "node src/scripts/new-test.js",
     "clean-output": "node src/scripts/clean-output.js",
     "clean-diff-images": "node src/scripts/clean-diff-images.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "lint": "biome check .",
+    "format": "biome check --write ."
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
@@ -43,6 +46,7 @@
     "puppeteer": "^24.2.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.5.1",
     "@vitest/coverage-v8": "^4.1.6",
     "typescript": "^5.8.3",
     "vitest": "^4.1.6"

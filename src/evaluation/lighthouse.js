@@ -12,6 +12,7 @@
 
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { launchBrowser } from "./puppeteer-helpers.js";
 
 const LIGHTHOUSE_RUNS = 3;
 
@@ -25,18 +26,22 @@ const LIGHTHOUSE_RUNS = 3;
  * @returns {Promise<object>} Lighthouse results (never throws)
  */
 export async function measureLighthouse({ serverUrl, iterDir, iterLabel }) {
-  const { default: lighthouse, desktopConfig } = await import("lighthouse");
-  const puppeteer = await import("puppeteer");
-
-  const browser = await puppeteer.default.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
-  });
-
+  // Everything that can throw lives inside the try so this function honors
+  // its "never throws" contract and never leaks the browser. `browser` is
+  // declared here so the `finally` can close it only when it was opened.
+  let browser = null;
   try {
+    const { default: lighthouse, desktopConfig } = await import("lighthouse");
+    browser = await launchBrowser();
+
     console.log(`[${iterLabel}] Lighthouse (${LIGHTHOUSE_RUNS} runs)...`);
 
-    const port = parseInt(new URL(browser.wsEndpoint()).port);
+    const port = parseInt(new URL(browser.wsEndpoint()).port, 10);
+    if (!Number.isInteger(port)) {
+      throw new Error(
+        `Could not read the Chrome DevTools port from the Puppeteer endpoint (${browser.wsEndpoint()})`,
+      );
+    }
 
     const lhRuns = [];
     for (let i = 0; i < LIGHTHOUSE_RUNS; i++) {
@@ -80,14 +85,10 @@ export async function measureLighthouse({ serverUrl, iterDir, iterLabel }) {
     }
 
     const pick = (key) =>
-      lhRuns
-        .map((lhr) => lhr.audits[key]?.numericValue ?? null)
-        .filter((v) => v !== null);
+      lhRuns.map((lhr) => lhr.audits[key]?.numericValue ?? null).filter((v) => v !== null);
 
     const mean = (vals) =>
-      vals.length
-        ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length)
-        : null;
+      vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null;
 
     const median = (vals) => {
       if (!vals.length) return null;
@@ -110,9 +111,14 @@ export async function measureLighthouse({ serverUrl, iterDir, iterLabel }) {
     const tbtVals = pick("total-blocking-time");
     const ttiVals = pick("interactive");
     const siVals = pick("speed-index");
-    const scoreVals = lhRuns.map((lhr) =>
-      Math.round((lhr.categories.performance?.score ?? 0) * 100),
-    );
+    // Exclude runs with no performance score rather than coercing them to
+    // 0 — a single failed/null score would otherwise drag the median and
+    // mean toward zero, the same way `pick()` filters nulls for the other
+    // metrics above.
+    const scoreVals = lhRuns
+      .map((lhr) => lhr.categories.performance?.score)
+      .filter((s) => s != null)
+      .map((s) => Math.round(s * 100));
 
     const metrics = {
       fcp: summary(fcpVals),
@@ -170,8 +176,10 @@ export async function measureLighthouse({ serverUrl, iterDir, iterLabel }) {
     // tasks a chance to finish on a live session. The global
     // unhandledRejection handler in src/index.js catches anything
     // that still slips through.
-    await new Promise((r) => setTimeout(r, 100));
-    await browser.close();
+    if (browser) {
+      await new Promise((r) => setTimeout(r, 100));
+      await browser.close();
+    }
   }
 }
 

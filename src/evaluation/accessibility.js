@@ -8,10 +8,16 @@
  * Self-contained: opens its own browser instance.
  */
 
-import { resolve } from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { launchBrowser, waitForRenderedContent } from "./puppeteer-helpers.js";
+import { resolve } from "node:path";
+import {
+  launchBrowser,
+  MEASURE_TIMEOUT_MS,
+  NAV_TIMEOUT_MS,
+  waitForRenderedContent,
+  withTimeout,
+} from "./puppeteer-helpers.js";
 
 const require = createRequire(import.meta.url);
 
@@ -19,14 +25,7 @@ const require = createRequire(import.meta.url);
  * WCAG tag sets to test against.
  * Each scan uses these tags to filter axe-core rules.
  */
-const AXE_TAGS = [
-  "wcag2a",
-  "wcag2aa",
-  "wcag21a",
-  "wcag21aa",
-  "wcag22aa",
-  "best-practice",
-];
+const AXE_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa", "best-practice"];
 
 /**
  * Run accessibility tests against a running dev server URL.
@@ -60,11 +59,13 @@ export async function runAccessibilityTests({ serverUrl, iterDir, iterLabel }) {
     browser = await launchBrowser();
 
     const page = await browser.newPage();
+    page.setDefaultTimeout(NAV_TIMEOUT_MS);
+    page.setDefaultNavigationTimeout(NAV_TIMEOUT_MS);
     await page.setViewport({ width: 1440, height: 900 });
 
     // Navigate and wait for content
     try {
-      await page.goto(serverUrl, { waitUntil: "networkidle2", timeout: 30_000 });
+      await page.goto(serverUrl, { waitUntil: "networkidle2", timeout: NAV_TIMEOUT_MS });
     } catch (err) {
       return skipAll(`Page failed to load: ${err.message}`, iterLabel, iterDir);
     }
@@ -78,36 +79,45 @@ export async function runAccessibilityTests({ serverUrl, iterDir, iterLabel }) {
       return skipAll(`Failed to inject axe-core: ${err.message}`, iterLabel, iterDir);
     }
 
+    // axe.run walks the whole (agent-generated) DOM; bound it so a
+    // pathological page can't hang the scan indefinitely.
+    const runAxe = () =>
+      withTimeout(
+        page.evaluate(async (tags) => {
+          return await window.axe.run(document, {
+            runOnly: { type: "tag", values: tags },
+          });
+        }, AXE_TAGS),
+        MEASURE_TIMEOUT_MS,
+        `axe.run (${iterLabel})`,
+      );
+
     // ── Scan 1: Light mode (default) ──────────────────────────────────────
-    const lightResult = await page.evaluate(async (tags) => {
-      return await window.axe.run(document, {
-        runOnly: { type: "tag", values: tags },
-      });
-    }, AXE_TAGS);
+    const lightResult = await runAxe();
 
     // ── Scan 2: Dark mode ─────────────────────────────────────────────────
-    await page.emulateMediaFeatures([
-      { name: "prefers-color-scheme", value: "dark" },
-    ]);
+    await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "dark" }]);
     // Allow CSS transitions to settle
     await page.evaluate(() => new Promise((r) => setTimeout(r, 500)));
 
-    // Re-inject axe-core (media change may have triggered navigation in some SPAs)
+    // Re-inject axe-core (media change may have triggered navigation in some
+    // SPAs). If re-injection fails we must NOT run a dark scan — doing so
+    // would silently re-run against the stale light-mode axe global and
+    // report bogus dark numbers. Skip the dark scan entirely instead.
+    let darkInjected = true;
     try {
       await page.evaluate(axeSource);
     } catch {
-      // If re-injection fails, skip dark mode scan
+      darkInjected = false;
     }
 
-    let darkResult;
-    try {
-      darkResult = await page.evaluate(async (tags) => {
-        return await window.axe.run(document, {
-          runOnly: { type: "tag", values: tags },
-        });
-      }, AXE_TAGS);
-    } catch {
-      darkResult = null;
+    let darkResult = null;
+    if (darkInjected) {
+      try {
+        darkResult = await runAxe();
+      } catch {
+        darkResult = null;
+      }
     }
 
     // ── Assemble results ──────────────────────────────────────────────────
