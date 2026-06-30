@@ -11,6 +11,7 @@ import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { resolve, sep } from "node:path";
 import { buildFixSystemPrompt, buildSystemPrompt, getTest } from "../config/prompts.js";
 import { runAccessibilityTests } from "../evaluation/accessibility.js";
+import { deriveErrorHints } from "./error-hints.js";
 import { extractComponentUsageCounts } from "../evaluation/count-component-usage.js";
 import { measureDom } from "../evaluation/dom-count.js";
 import { extractComponentImports } from "../evaluation/extract-component-imports.js";
@@ -263,6 +264,17 @@ export function buildFixPrompt(currentFilesText, consoleErrors, fatalError) {
     }
   }
 
+  // Pair each error with its fix: design-system-aware hints derived from the
+  // error text (named component + valid props, import corrections, etc.) so the
+  // model resolves the actual cause instead of re-guessing from raw TS type-soup.
+  const hints = deriveErrorHints(
+    [fatalError || "", ...(consoleErrors || [])].join("\n"),
+  );
+  if (hints.length > 0) {
+    prompt += `## How to fix\n\n`;
+    prompt += hints.map((h) => `- ${h}`).join("\n") + "\n\n";
+  }
+
   prompt += `Fix all errors. Output ONLY the files you actually changed, each as a complete \`---FILE: path---\` block. Do NOT re-output files you did not modify — unchanged files are kept automatically. Re-emitting the whole project wastes output tokens and risks regressions.`;
   return prompt;
 }
@@ -299,6 +311,11 @@ export async function buildResult({
   firstTryAxe = null,
   residualLint = null,
   residualAxe = null,
+  // Per-iteration count of `npm install` failures across all validation
+  // cycles. 0 when every install resolved cleanly. Aggregated at the
+  // report layer to surface dependency-install issues separately from
+  // code errors in the fix loop.
+  npmInstallFailures = 0,
 }) {
   // Token-usage breakdown. Prompt caching splits input tokens across
   // three buckets billed at different rates: uncached at 1.0×,
@@ -366,6 +383,7 @@ export async function buildResult({
     firstTryAxe,
     residualLint,
     residualAxe,
+    npmInstallFailures,
   };
   await writeFile(resolve(iterDir, "_meta.json"), JSON.stringify(meta, null, 2), "utf-8");
 
@@ -399,5 +417,6 @@ export async function buildResult({
     firstTryAxe,
     residualLint,
     residualAxe,
+    npmInstallFailures,
   };
 }

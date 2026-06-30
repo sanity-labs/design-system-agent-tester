@@ -60,6 +60,11 @@ export async function validateProject(projectDir, iterLabel) {
     rendered: false,
     consoleErrors: [],
     fatalError: null,
+    // True when this validation cycle failed at `npm install` (as
+    // opposed to tsc, dev-server boot, or runtime render). Aggregated
+    // into the report so the user can see which tests/models bleed fix
+    // budget on dependency-install failures vs. real code errors.
+    installFailed: false,
   };
 
   try {
@@ -90,6 +95,7 @@ export async function validateProject(projectDir, iterLabel) {
   } catch (err) {
     result.fatalError = err.message;
     result.success = false;
+    if (err.stage === "install") result.installFailed = true;
     killDevServer(result.devServer);
     result.devServer = null;
     return result;
@@ -177,7 +183,12 @@ async function runNpmInstall(projectDir, iterLabel) {
     await appendFile(resolve(iterDir, "_npm_install.txt"), log, "utf-8");
 
     console.error(`${tag(iterLabel)} ${error("npm install failed:")}\n${detail}`);
-    throw new Error(`npm install failed:\n${detail}`);
+    const wrapped = new Error(`npm install failed:\n${detail}`);
+    // `stage` lets `validateProject` distinguish install failures from
+    // tsc / dev-server / runtime failures without string-matching the
+    // error message.
+    wrapped.stage = "install";
+    throw wrapped;
   }
 }
 

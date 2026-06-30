@@ -33,6 +33,8 @@ export function extractMetrics(data) {
     fixesAvg: data.fixAttempts?.average ?? null,
     fixesTotal: data.fixAttempts?.total ?? null,
     cleanOnFirstTry: data.fixAttempts?.iterationsCleanOnFirstTry ?? null,
+    npmInstallFailuresTotal: data.npmInstall?.total ?? null,
+    npmInstallFailuresAffected: data.npmInstall?.affectedIterations ?? null,
     inlineTotal: data.inlineStyles?.totalAcrossIterations ?? null,
     inlineAvg: data.inlineStyles?.averagePerIteration ?? null,
     boxInline: data.inlineStyles?.byComponent?.Box ?? 0,
@@ -77,6 +79,8 @@ const AGGREGATABLE_KEYS = [
   "fixesAvg",
   "fixesTotal",
   "cleanOnFirstTry",
+  "npmInstallFailuresTotal",
+  "npmInstallFailuresAffected",
   "inlineTotal",
   "inlineAvg",
   "boxInline",
@@ -154,6 +158,8 @@ const METRIC_GROUPS = [
       ["Lines of code (avg)", "loc", false, 0],
       ["Fix attempts / iter", "fixesAvg", true, 2],
       ["Total fixes (avg per run)", "fixesTotal", true, 1],
+      ["npm install failures (total)", "npmInstallFailuresTotal", true, 1],
+      ["Iterations with install failure", "npmInstallFailuresAffected", true, 1],
       // "Clean on 1st try" is computed below from cleanOnFirstTry +
       // totalIterations; it has bespoke formatting and is appended
       // automatically into this group when iteration count is known.

@@ -149,6 +149,21 @@ export async function generateReport(allResults, outputDir, promptText = null) {
     const stdDevFixes = stdDev(fixCounts);
     const iterationsNeedingFixes = fixCounts.filter((n) => n > 0).length;
 
+    // npm install failures — counted across every validation cycle in
+    // every valid iteration. `total` is the gross count; `affected` is
+    // how many iterations hit at least one. Older runs without the
+    // field count as 0.
+    const installFailureCounts = validIterations.map((r) => r.npmInstallFailures ?? 0);
+    const npmInstallAnalysis = {
+      total: sum(installFailureCounts),
+      affectedIterations: installFailureCounts.filter((n) => n > 0).length,
+      totalIterations: validIterations.length,
+      perIteration: validIterations.map((r) => ({
+        iteration: r.iteration,
+        failures: r.npmInstallFailures ?? 0,
+      })),
+    };
+
     report.prompts[promptKey] = {
       model,
       totalIterations: iterations.length,
@@ -199,6 +214,7 @@ export async function generateReport(allResults, outputDir, promptText = null) {
       },
       feedback: feedbackAnalysis,
       accessibility: a11yAnalysis,
+      npmInstall: npmInstallAnalysis,
       repairLoop: analyzeRepairLoop(validIterations),
       visualDiff: visualDiff || {
         pairwiseDiffs: [],

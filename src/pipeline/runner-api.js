@@ -353,12 +353,17 @@ const SOURCE_LINTABLE = /\.(t|j)sx?$/;
 
 /**
  * Lint the project's source files via the MCP, applying auto-fixes to disk.
- * Returns { remaining, files } (files = per-file remaining violations), or a
- * flag when lint can't run so the caller skips the gate rather than failing.
+ *
+ * The gate counts ERRORS only (severity 2), not warnings. Fixable issues of any
+ * severity are already auto-applied by `apply:true`; what remains as a warning is
+ * advisory and often structurally unfixable (e.g. `no-style-prop` on a
+ * `backgroundColor`). Gating on those would burn repair attempts on something the
+ * model can't clear, so warnings are reported (for the report) but never trigger
+ * a repair. Returns { remaining (errors), files (error messages only), warnings }.
  */
 async function runLintGate(lintClient, files) {
   const sources = files.filter((f) => SOURCE_LINTABLE.test(f.path));
-  if (!sources.length) return { remaining: 0, files: [] };
+  if (!sources.length) return { remaining: 0, files: [], warnings: 0 };
   let result;
   try {
     result = await lintClient.callTool("dsds_lint_code", {
@@ -366,14 +371,21 @@ async function runLintGate(lintClient, files) {
       files: sources.map((f) => ({ path: f.path, filename: f.path })),
     });
   } catch (err) {
-    return { remaining: 0, files: [], error: err.message };
+    return { remaining: 0, files: [], warnings: 0, error: err.message };
   }
   const sc = result?.structuredContent;
-  if (!sc) return { remaining: 0, files: [], unavailable: true };
-  return {
-    remaining: sc.remaining ?? 0,
-    files: (sc.files ?? []).filter((f) => f.messages?.length),
-  };
+  if (!sc) return { remaining: 0, files: [], warnings: 0, unavailable: true };
+
+  // Split messages by severity (2 = error, 1 = warn). Only errors gate.
+  let warnings = 0;
+  const errorFiles = [];
+  for (const f of sc.files ?? []) {
+    const errs = (f.messages ?? []).filter((m) => m.severity === 2);
+    warnings += (f.messages ?? []).length - errs.length;
+    if (errs.length) errorFiles.push({ ...f, messages: errs });
+  }
+  const remaining = errorFiles.reduce((n, f) => n + f.messages.length, 0);
+  return { remaining, files: errorFiles, warnings };
 }
 
 /** Fix prompt for remaining (non-auto-fixable) lint violations. */
@@ -550,6 +562,15 @@ export async function runAgent({
     totalOutputTokens += u.outputTokens ?? 0;
   };
 
+  // How many times `npm install` failed across the iteration's validation
+  // cycles. Reported by `validateProject` via `result.installFailed`.
+  // Aggregated at the report layer to surface dependency-resolution
+  // problems separately from real code-error fixes.
+  let npmInstallFailures = 0;
+  const trackInstall = (v) => {
+    if (v?.installFailed) npmInstallFailures++;
+  };
+
   const agentLogPath = resolve(iterDir, "_agent_log.txt");
   // Computed up front so the MCP-enabled generation can write the agent's
   // files here as they are emitted, enabling lint-by-path during generation.
@@ -699,7 +720,7 @@ export async function runAgent({
             residualLint = lint.remaining;
             if (lint.remaining > 0) {
               console.log(
-                `${tag(iterLabel)} ${warn(`✗ Lint: ${lint.remaining} remaining violation(s)`)}`,
+                `${tag(iterLabel)} ${warn(`✗ Lint: ${lint.remaining} error(s)${lint.warnings ? `, ${lint.warnings} warning(s) ignored` : ""}`)}`,
               );
               if (fixAttempts >= maxFixes) {
                 exitStage = "lint";
@@ -739,6 +760,7 @@ export async function runAgent({
         );
 
         const validation = await validateProject(projectDir, iterLabel);
+        trackInstall(validation);
 
         try {
           if (validation.success) {
@@ -841,6 +863,7 @@ export async function runAgent({
               firstTryAxe,
               residualLint,
               residualAxe,
+              npmInstallFailures,
             });
             return result;
           }
@@ -927,43 +950,59 @@ export async function runAgent({
         }
       }
 
-      // If we got here, we exhausted fix attempts or broke out of the loop.
-      // Take a screenshot anyway (even if the page is broken) for the report.
-      console.log(`[${iterLabel}] Taking screenshot of final state (may be broken)...`);
-      const lastValidation = await validateProject(projectDir, iterLabel);
-
+      // Fix budget exhausted. Decide whether a final measurement pass is
+      // worth doing:
+      //  - exitStage="build" — the in-loop validation just failed. The
+      //    page won't render. Skip everything (no screenshot, no DOM,
+      //    no axe, no lighthouse). Saves a dev-server spawn and avoids
+      //    polluting the report with measurements against a broken page.
+      //  - exitStage="lint" — lint never converged so the build wasn't
+      //    tested. One final validateProject() — if it renders, capture
+      //    measurements and axe; if not, skip.
       let screenshotPath = null;
       let lastDomElementCount = null;
       let lastDomHtmlBytes = null;
       let lastSemanticHtml = null;
       let lastA11y = null;
-      try {
-        if (lastValidation.serverUrl) {
-          ({
-            screenshotPath,
-            domElementCount: lastDomElementCount,
-            domHtmlBytes: lastDomHtmlBytes,
-            semanticHtml: lastSemanticHtml,
-          } = await runStaticMeasurements(lastValidation.serverUrl, iterDir, iterLabel));
-          // If the app still renders (e.g. exhausted at the lint gate), record
-          // a final axe pass so the report shows residual accessibility state.
-          if (gateLintAndA11y) {
-            lastA11y = await runAccessibility(lastValidation.serverUrl, iterDir, iterLabel);
-            if (lastA11y && !lastA11y.summary?.skipped) {
-              if (firstTryAxe === null) firstTryAxe = lastA11y.axeViolationCount ?? 0;
-              residualAxe = lastA11y.axeViolationCount ?? 0;
+
+      if (exitStage === "build") {
+        console.log(
+          `${tag(iterLabel)} ${warn("Skipping final screenshot / measurements: build failed after max attempts")}`,
+        );
+      } else {
+        console.log(`[${iterLabel}] Taking screenshot of final state...`);
+        const lastValidation = await validateProject(projectDir, iterLabel);
+        trackInstall(lastValidation);
+        try {
+          if (lastValidation.success) {
+            ({
+              screenshotPath,
+              domElementCount: lastDomElementCount,
+              domHtmlBytes: lastDomHtmlBytes,
+              semanticHtml: lastSemanticHtml,
+            } = await runStaticMeasurements(lastValidation.serverUrl, iterDir, iterLabel));
+            if (gateLintAndA11y) {
+              lastA11y = await runAccessibility(lastValidation.serverUrl, iterDir, iterLabel);
+              if (lastA11y && !lastA11y.summary?.skipped) {
+                if (firstTryAxe === null) firstTryAxe = lastA11y.axeViolationCount ?? 0;
+                residualAxe = lastA11y.axeViolationCount ?? 0;
+              }
             }
+          } else {
+            console.log(
+              `${tag(iterLabel)} ${warn("Skipping final screenshot / measurements: page did not render")}`,
+            );
           }
+          if (lastValidation.consoleErrors.length > 0) {
+            await writeFile(
+              resolve(iterDir, "_console_errors.txt"),
+              lastValidation.consoleErrors.join("\n"),
+              "utf-8",
+            );
+          }
+        } finally {
+          killDevServer(lastValidation?.devServer);
         }
-        if (lastValidation.consoleErrors.length > 0) {
-          await writeFile(
-            resolve(iterDir, "_console_errors.txt"),
-            lastValidation.consoleErrors.join("\n"),
-            "utf-8",
-          );
-        }
-      } finally {
-        killDevServer(lastValidation?.devServer);
       }
 
       files = await readProjectFiles(projectDir, files);
@@ -993,6 +1032,7 @@ export async function runAgent({
         firstTryAxe,
         residualLint,
         residualAxe,
+        npmInstallFailures,
       });
     } finally {
       if (lintClient) await lintClient.stop().catch(() => {});
@@ -1021,5 +1061,6 @@ export async function runAgent({
     domHtmlBytes: null,
     semanticHtml: null,
     runner: "api",
+    npmInstallFailures,
   });
 }

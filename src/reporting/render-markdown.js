@@ -161,6 +161,28 @@ export function renderMarkdown(report, runDir = null) {
       md += `\n`;
     }
 
+    // npm install failures — counts retries the agent burned on
+    // dependency-resolution problems instead of real code errors.
+    const npm = data.npmInstall;
+    if (npm) {
+      md += `### npm install failures\n\n`;
+      md += metricTable([
+        ["Total failures", npm.total],
+        [
+          "Iterations with at least one failure",
+          `${npm.affectedIterations}/${npm.totalIterations}`,
+        ],
+      ]);
+      const offenders = npm.perIteration.filter((p) => p.failures > 0);
+      if (offenders.length > 0) {
+        md += `**Per-iteration breakdown:**\n\n`;
+        for (const p of offenders) {
+          md += `- **Iteration ${p.iteration}:** ${p.failures} failure(s)\n`;
+        }
+        md += `\n`;
+      }
+    }
+
     // Repair Loop — where iterations exited and residual lint/axe state.
     const rl = data.repairLoop;
     if (rl && rl.measured > 0) {

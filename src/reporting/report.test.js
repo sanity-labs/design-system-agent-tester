@@ -872,6 +872,81 @@ describe("generateReport markdown sections", () => {
 });
 
 // ---------------------------------------------------------------------------
+// npm install failure tracking
+// ---------------------------------------------------------------------------
+describe("generateReport rolls up npm install failures", () => {
+  it("totals failures across iterations and reports affected-iteration count", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const dir = await mkdtemp(join(tmpdir(), "at-report-"));
+
+    const iterations = [
+      {
+        iteration: 1, elapsedSeconds: 5, linesOfCode: 20, files: [],
+        componentImports: [], fixAttempts: 0, exitStage: "clean",
+        npmInstallFailures: 0,
+      },
+      {
+        iteration: 2, elapsedSeconds: 9, linesOfCode: 22, files: [],
+        componentImports: [], fixAttempts: 3, exitStage: "build",
+        npmInstallFailures: 2,
+      },
+      {
+        iteration: 3, elapsedSeconds: 6, linesOfCode: 18, files: [],
+        componentImports: [], fixAttempts: 1, exitStage: "clean",
+        npmInstallFailures: 1,
+      },
+    ];
+
+    try {
+      await generateReport({ demo: iterations }, dir);
+      const data = JSON.parse(await readFile(join(dir, "report.json"), "utf-8")).prompts.demo;
+
+      expect(data.npmInstall.total).toBe(3);
+      expect(data.npmInstall.affectedIterations).toBe(2);
+      expect(data.npmInstall.totalIterations).toBe(3);
+
+      const md = await readFile(join(dir, "report.md"), "utf-8");
+      expect(md).toContain("### npm install failures");
+      expect(md).toContain("Total failures");
+      // The per-iteration breakdown lists only iterations that hit ≥1.
+      expect(md).toContain("**Iteration 2:** 2 failure(s)");
+      expect(md).toContain("**Iteration 3:** 1 failure(s)");
+      expect(md).not.toContain("**Iteration 1:** 0 failure(s)");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      log.mockRestore();
+      warn.mockRestore();
+    }
+  });
+
+  it("treats older iterations missing the field as zero", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const dir = await mkdtemp(join(tmpdir(), "at-report-"));
+
+    const iterations = [
+      {
+        iteration: 1, elapsedSeconds: 5, linesOfCode: 20, files: [],
+        componentImports: [], fixAttempts: 0, exitStage: "clean",
+        // no npmInstallFailures field at all
+      },
+    ];
+
+    try {
+      await generateReport({ demo: iterations }, dir);
+      const data = JSON.parse(await readFile(join(dir, "report.json"), "utf-8")).prompts.demo;
+      expect(data.npmInstall.total).toBe(0);
+      expect(data.npmInstall.affectedIterations).toBe(0);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      log.mockRestore();
+      warn.mockRestore();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Built-iteration filtering — runtime metrics should NOT count broken builds
 // ---------------------------------------------------------------------------
 describe("generateReport excludes broken builds from runtime metrics", () => {
