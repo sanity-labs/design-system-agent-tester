@@ -57,6 +57,10 @@ export async function generateReport(allResults, outputDir, promptText = null) {
 
     // Extract model name from the first valid iteration (all iterations use the same model)
     const model = validIterations.find((r) => r.model)?.model || null;
+    // Non-default request settings the runner applied for this model (e.g.
+    // Fable's effort cap) — surfaced so tuned results aren't compared
+    // against other models' default-settings results without knowing it.
+    const modelTuning = validIterations.find((r) => r.modelTuning)?.modelTuning || null;
 
     // 1. Average time to complete
     const times = validIterations.map((r) => r.elapsedSeconds);
@@ -166,6 +170,7 @@ export async function generateReport(allResults, outputDir, promptText = null) {
 
     report.prompts[promptKey] = {
       model,
+      modelTuning,
       totalIterations: iterations.length,
       successfulIterations: validIterations.length,
       failedIterations: failedCount,

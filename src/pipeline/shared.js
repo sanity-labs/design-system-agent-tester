@@ -288,6 +288,10 @@ export function buildFixPrompt(currentFilesText, consoleErrors, fatalError) {
 export async function buildResult({
   files,
   model,
+  // Per-model request overrides applied by the runner (e.g. Fable's
+  // `output_config.effort` cap). Recorded so results produced under
+  // non-default settings are labeled as such in _meta.json and the report.
+  modelTuning = null,
   iterDir,
   iterLabel,
   testLabel,
@@ -354,6 +358,7 @@ export async function buildResult({
   const meta = {
     runner,
     model,
+    modelTuning,
     iterLabel,
     testLabel: testLabel ?? null,
     linesOfCode,
@@ -389,6 +394,7 @@ export async function buildResult({
 
   return {
     model,
+    modelTuning,
     testLabel: testLabel ?? null,
     linesOfCode,
     fileCount: files.length,

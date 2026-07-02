@@ -79,6 +79,10 @@ export function renderMarkdown(report, runDir = null) {
     md += `## Prompt: \`${promptKey}\`\n\n`;
     md += metricTable([
       data.model && ["Model", `\`${data.model}\``],
+      // Non-default request settings the runner applied for this model —
+      // results in this section were produced under these overrides, not
+      // provider defaults.
+      data.modelTuning && ["Model tuning", `\`${JSON.stringify(data.modelTuning)}\``],
       ["Total iterations", data.totalIterations],
       ["Successful", data.successfulIterations],
       ["Failed", data.failedIterations],

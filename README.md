@@ -62,6 +62,23 @@ Output lands in `output/<date>/<time>/`. Open `report.md` to see the comparison.
 
 See [Anthropic's documentation](https://docs.anthropic.com/en/docs/about-claude/models) for current model IDs. Pass via `--model`. The default is `claude-sonnet-4-6`. Model IDs are retired over time — if a run fails with a `404 not_found_error: model: …`, pass a current id via `--model`.
 
+#### Per-model request tuning
+
+Most models run with the harness's default request settings. The exceptions are
+hardcoded in `modelTuning()` in `src/pipeline/runner-api.js`:
+
+| Model | Override | Why |
+| --- | --- | --- |
+| `claude-fable-*`, `claude-mythos-*` | `output_config: { effort: "medium" }` | Fable's extended thinking is always on and never returned by the API. At the default (`high`) effort it composes entire projects inside its reasoning and ends the turn with a summary instead of `---FILE:` blocks. Medium effort shifts it from deliberation to action. |
+
+**Comparing results across models:** any override applied during a run is
+recorded as `modelTuning` in `report.json` (per prompt), in each iteration's
+`_meta.json`, and as a "Model tuning" row in `report.md` — so tuned results
+are never silently compared against other models' default-settings results.
+Related mechanisms for reasoning models (in-conversation emission nudges,
+retry-attempt isolation) apply to all models and don't change request
+settings.
+
 ## Tests
 
 The `tests/` directory ships with nine reference examples covering public design systems:
