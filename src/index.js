@@ -75,10 +75,6 @@ const { values } = parseArgs({
     "brief-file": {
       type: "string",
     },
-    genui: {
-      type: "boolean",
-      default: false,
-    },
 
     yes: {
       type: "boolean",
@@ -191,9 +187,6 @@ async function main() {
   // explicit `--concurrency 2+` for runs that prioritise wall-clock time
   // over measurement precision.
   const maxConcurrency = parseInt(values.concurrency, 10) || 1;
-  const genui = values.genui;
-  // genui still compiles to a real React app, so the full build/screenshot/
-  // measure pipeline runs exactly like a normal test.
   const takeScreenshots = values.screenshot;
   const maxFixes = parseInt(values["max-fixes"], 10);
   const useAgentPrompt = values["agent-prompt"];
@@ -261,9 +254,7 @@ async function main() {
   console.log(
     `${field(multiModel ? "Models:" : "Model:")} ${models.join(", ")} (Anthropic SDK — requires ANTHROPIC_API_KEY)`,
   );
-  console.log(
-    `${field("Mode:")} ${genui ? "genui — EXPERIMENTAL (agent writes JSON → compiled to React)" : "build (agent writes React)"}`,
-  );
+  console.log(`${field("Mode:")} build (agent writes React)`);
   console.log(`${field("Iterations:")} ${iterations}`);
   console.log(`${field("Max fixes:")} ${maxFixes}`);
   console.log(`${field("Concurrency:")} ${maxConcurrency}`);
@@ -292,10 +283,6 @@ async function main() {
 
   for (const label of testLabels) {
     const test = TESTS.find((t) => t.label === label);
-    if (genui && !test.mcp) {
-      console.error(error(`--genui requires a test with an \`mcp\` block; "${label}" has none.`));
-      process.exit(1);
-    }
 
     // Pre-run doctor gate: when the test's design-system tooling ships the
     // dsds CLI, verify the entire configuration (documents load and validate,
@@ -330,9 +317,7 @@ async function main() {
         );
       }
     }
-    // In genui mode the system prompt carries the catalog + format rules, so the
-    // user message is the raw brief; the React path wraps it with test framing.
-    const promptContent = genui ? promptBrief : buildUserPrompt(label, promptBrief);
+    const promptContent = buildUserPrompt(label, promptBrief);
 
     for (const model of models) {
       // Each model gets its own result bucket and (in multi-model runs) its
@@ -381,7 +366,6 @@ async function main() {
               maxFixes,
               mcpConfig: test.mcp,
               cliConfig: test.cli ?? null,
-              genui,
             });
 
             const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
@@ -510,8 +494,7 @@ async function main() {
     }
   }
 
-  // Generate report — the same report for both modes; genui just got its files
-  // by compiling a JSON spec instead of the agent hand-writing React.
+  // Generate report.
   console.log(banner("\n\n=== Generating Report ===\n"));
   await generateReport(allResults, runDir, promptBrief);
 

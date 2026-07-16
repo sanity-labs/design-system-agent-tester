@@ -26,7 +26,6 @@
   "license": "MIT",
   "scripts": {
     "start": "node src/index.js",
-    "genui": "node src/genui/run.js",
     "summarize": "node src/reporting/summarize.js",
     "new-test": "node src/scripts/new-test.js",
     "clean-output": "node src/scripts/clean-output.js",

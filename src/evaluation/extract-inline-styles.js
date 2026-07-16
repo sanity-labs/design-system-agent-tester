@@ -1,8 +1,8 @@
 import { isJsxFile } from "./parse-files.js";
 
 // Project files can be attacker-controlled (agent output, or MCP server
-// output in genui mode where a single file is bounded only by the 16MB
-// stdout cap — not by max_tokens). Cap the scanned length so a
+// output where a single file may be bounded only by the 16MB stdout cap —
+// not by max_tokens). Cap the scanned length so a
 // pathological file (e.g. `style={{}}` repeated to megabytes) can't drive
 // superlinear work. The scan below is linear, but the cap is a belt-and-
 // suspenders bound on total work regardless of content shape.

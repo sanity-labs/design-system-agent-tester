@@ -1,5 +1,5 @@
 /**
- * Shared utilities for the API runner (and the genui standalone runner).
+ * Shared utilities for the API runner.
  *
  * Per-test knobs (packages, prompts, MCP flag) are passed in via function
  * arguments — this file does not bake in a specific test.
