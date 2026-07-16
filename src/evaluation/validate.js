@@ -30,7 +30,7 @@ import { createWriteStream } from "node:fs";
 import { appendFile, readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { createServer } from "node:net";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { error, tag, warn } from "../util/color.js";
 import { launchBrowser, NAV_TIMEOUT_MS, waitForRenderedContent } from "./puppeteer-helpers.js";
@@ -295,17 +295,35 @@ async function execTscOnce(projectDir, tscBin) {
  * flake signature checks out against ground truth — meaning the failure is
  * transient toolchain noise, not the agent's code.
  */
+/** True when `p` resolves to `root` or somewhere inside it (lexical). */
+function isWithin(root, p) {
+  const r = resolve(root);
+  const full = resolve(root, p);
+  return full === r || full.startsWith(r + sep);
+}
+
 async function isSuspiciousTscFailure(projectDir, tsconfig, errors) {
   if (hasConfigFallbackSignature(errors) && tsconfig?.compilerOptions?.jsx) return true;
 
+  const nmRoot = join(projectDir, "node_modules");
   for (const { module, member } of extractMissingExports(errors).slice(0, 5)) {
     try {
+      // Both `module` (a bare specifier, but could contain `..`) and the
+      // package's `types`/`typings` field (fully controlled by a hostile
+      // installed dependency) are agent-influenced. Confine every derived
+      // path to the sandbox so a traversing value like `../../../etc/passwd`
+      // can't turn this read into an out-of-sandbox content oracle.
+      const modSegments = module.split("/");
+      if (modSegments.includes("..")) continue;
       // Filesystem path, not require.resolve — `exports` maps that hide
       // "./package.json" would make installed packages unreadable here.
-      const pkgDir = join(projectDir, "node_modules", ...module.split("/"));
+      const pkgDir = join(nmRoot, ...modSegments);
+      if (!isWithin(nmRoot, pkgDir)) continue;
       const pkg = JSON.parse(await readFile(join(pkgDir, "package.json"), "utf-8"));
       const typesRel = pkg.types || pkg.typings || "dist/index.d.ts";
-      const dts = await readFile(join(pkgDir, typesRel), "utf-8");
+      const dtsPath = join(pkgDir, typesRel);
+      if (!isWithin(pkgDir, dtsPath)) continue; // types must stay within the package
+      const dts = await readFile(dtsPath, "utf-8");
       if (memberInTypes(dts, member)) return true; // export exists — tsc lied
     } catch {
       // package or types unreadable — can't prove a flake from this line

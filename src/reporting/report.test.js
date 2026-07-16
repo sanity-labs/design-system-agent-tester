@@ -1234,4 +1234,48 @@ describe("generateReport neutralizes untrusted artifact text", () => {
       warn.mockRestore();
     }
   });
+
+  it("sanitizes inline-CSS property names in the property table (backtick code-span breakout)", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const dir = await mkdtemp(join(tmpdir(), "at-report-"));
+
+    // A property name captured from a quoted JSX style key can contain a
+    // backtick that closes the code span, then active markdown.
+    const evilProp = "`](https://attacker.example/b.png)![";
+    const iterations = [
+      {
+        iteration: 1,
+        elapsedSeconds: 10,
+        linesOfCode: 50,
+        files: [{ path: "src/App.tsx", content: "export default () => null;\n" }],
+        componentImports: [],
+        fixAttempts: 0,
+        inlineStyles: {
+          total: 3,
+          byComponent: { div: 3 },
+          byProperty: { [evilProp]: 3 },
+        },
+        componentUsage: { total: 3, byComponent: { div: 3 } },
+        domElementCount: 120,
+        feedback: [],
+      },
+    ];
+
+    try {
+      await generateReport({ demo: iterations }, dir);
+      const md = await readFile(join(dir, "report.md"), "utf-8");
+      // The attacker's backtick — which would close the code span and turn
+      // the trailing `](url)![` into an active link/image — is neutralized,
+      // so the raw property (with its leading backtick) never appears and no
+      // "backtick immediately followed by ](" breakout sequence exists. The
+      // url may remain as inert text *inside* the code span, which is safe.
+      expect(md).not.toContain(evilProp);
+      expect(md).not.toMatch(/`\]\(/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      log.mockRestore();
+      warn.mockRestore();
+    }
+  });
 });

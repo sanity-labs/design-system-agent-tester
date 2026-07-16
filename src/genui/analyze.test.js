@@ -136,3 +136,21 @@ describe("buildReport", () => {
     expect(markdown).toContain("no parseable spec");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Security: extractSpec resists unterminated-fence backtracking
+// ---------------------------------------------------------------------------
+describe("extractSpec resists ReDoS", () => {
+  it("returns promptly on an unterminated code fence with a long whitespace+tail", () => {
+    const text = "```json\n" + " ".repeat(300_000) + "x".repeat(300_000);
+    const start = process.hrtime.bigint();
+    extractSpec(text);
+    const ms = Number(process.hrtime.bigint() - start) / 1e6;
+    expect(ms).toBeLessThan(1000);
+  });
+
+  it("still extracts a fenced json spec", () => {
+    const r = extractSpec('lead\n```json\n{"root":1}\n```\ntail');
+    expect(r.raw).toBe('{"root":1}');
+  });
+});

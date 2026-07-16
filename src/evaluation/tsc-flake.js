@@ -29,6 +29,14 @@
  * Parse a tsconfig.json string leniently (JSONC comments and trailing commas
  * are legal in tsconfig). Returns the parsed object, or null when unreadable.
  */
+// A real tsconfig.json is tiny (well under 100KB). The lenient comment-strip
+// path below uses a lazy `/\*[\s\S]*?\*\//` regex that backtracks quadratically
+// on a `/*`-flood with no closing `*/`; agent content is only bounded to ~2MB
+// at write time, so cap the lenient path here. Anything larger is not a real
+// config — treat it as unreadable rather than risk a stall in the type-check
+// preflight.
+const MAX_TSCONFIG_STRIP_BYTES = 256_000;
+
 export function parseTsconfig(raw) {
   if (typeof raw !== "string" || raw.trim() === "") return null;
   const tryParse = (s) => {
@@ -40,6 +48,9 @@ export function parseTsconfig(raw) {
   };
   const direct = tryParse(raw);
   if (direct) return direct;
+  // Only the lenient strip path is vulnerable to the `/*`-flood; direct
+  // JSON.parse above is linear. Bail rather than scan an oversized blob.
+  if (raw.length > MAX_TSCONFIG_STRIP_BYTES) return null;
   // Strip /* */ and // comments (not inside strings — good enough for
   // tsconfig files, which rarely embed "//" in values), then trailing commas.
   const stripped = raw

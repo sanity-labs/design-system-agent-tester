@@ -55,3 +55,35 @@ describe("resolveCliEntry / resolveTestEnv", () => {
     expect(resolveTestEnv(t)).toEqual({ DIR: "/d" });
   });
 });
+
+describe("execDsdsCommand rejects path arguments that escape the project", () => {
+  // Rejection happens before any spawn, so a fake cliEntry/projectDir is fine.
+  const run = (cmd) => execDsdsCommand("/nonexistent/cli.js", {}, "/tmp/proj", cmd);
+
+  it("rejects a relative-traversal path argument", async () => {
+    const r = await run("dsds lint --apply ../../../../etc/passwd");
+    expect(r.ok).toBe(false);
+    expect(r.output).toMatch(/outside the project directory/);
+  });
+
+  it("rejects an absolute path argument", async () => {
+    const r = await run("dsds context /etc/passwd");
+    expect(r.ok).toBe(false);
+    expect(r.output).toMatch(/outside the project directory/);
+  });
+
+  it("rejects traversal in a --flag=value argument", async () => {
+    const r = await run("dsds lint --out=../../x");
+    expect(r.ok).toBe(false);
+    expect(r.output).toMatch(/outside the project directory/);
+  });
+
+  it("does not reject legitimate in-project path or bare-word arguments", async () => {
+    // These pass the guard and reach the spawn step (which fails only because
+    // the fake cliEntry doesn't exist) — the point is no path rejection.
+    for (const cmd of ["dsds context button", "dsds lint src/App.tsx"]) {
+      const r = await run(cmd);
+      expect(r.output).not.toMatch(/outside the project directory/);
+    }
+  });
+});

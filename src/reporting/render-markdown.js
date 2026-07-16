@@ -509,7 +509,7 @@ export function renderMarkdown(report, runDir = null) {
         for (const { property, count } of is.topProperties.slice(0, 15)) {
           const pct =
             is.totalAcrossIterations > 0 ? round((count / is.totalAcrossIterations) * 100, 1) : 0;
-          md += `| \`${property}\` | ${count} | ${pct}% |\n`;
+          md += `| \`${sanitizeCode(property)}\` | ${count} | ${pct}% |\n`;
         }
         md += `\n`;
       }
