@@ -96,8 +96,23 @@ export async function generateReport(allResults, outputDir, promptText = null) {
     const effectiveInputTokens = pick("effectiveInputTokens");
     const outputTokens = pick("outputTokens");
 
-    // 6. Fix attempts
+    // 6. Fix attempts — tracked per repair stage. The loop shares one fix
+    // budget, but the failure kinds are different signals: a "build" fix
+    // means the app didn't compile/render, an "accessibility" fix means it
+    // rendered and axe flagged violations, "lint" means style-rule errors.
+    // A single combined count conflates broken apps with working apps that
+    // needed polish, so each stage is measured separately (the combined
+    // number is kept for back-compat with older reports).
+    const stageFixes = (r, stage) => (r.fixLog || []).filter((e) => e.stage === stage).length;
     const fixCounts = validIterations.map((r) => r.fixAttempts ?? 0);
+    const buildFixCounts = validIterations.map((r) => stageFixes(r, "build"));
+    const a11yFixCounts = validIterations.map((r) => stageFixes(r, "accessibility"));
+    const lintFixCounts = validIterations.map((r) => stageFixes(r, "lint"));
+    const stageSummary = (counts) => ({
+      total: sum(counts),
+      average: counts.length ? round(mean(counts)) : null,
+      iterationsAffected: counts.filter((n) => n > 0).length,
+    });
 
     // 7. Feedback analysis
     const feedbackAnalysis = analyzeFeedback(validIterations);
@@ -168,6 +183,16 @@ export async function generateReport(allResults, outputDir, promptText = null) {
       })),
     };
 
+    // Toolchain flakes — tsc failures that contradicted on-disk state and
+    // passed on a single retry. Infra noise, not agent errors; surfaced so
+    // analyses can subtract it. Older runs without the field count as 0.
+    const tscFlakeCounts = validIterations.map((r) => r.tscFlakes ?? 0);
+    const tscFlakeAnalysis = {
+      total: sum(tscFlakeCounts),
+      affectedIterations: tscFlakeCounts.filter((n) => n > 0).length,
+      totalIterations: validIterations.length,
+    };
+
     report.prompts[promptKey] = {
       model,
       modelTuning,
@@ -207,10 +232,22 @@ export async function generateReport(allResults, outputDir, promptText = null) {
         total: sum(fixCounts),
         iterationsNeedingFixes,
         iterationsCleanOnFirstTry: validIterations.length - iterationsNeedingFixes,
+        // Per-stage split of the combined numbers above.
+        byStage: {
+          build: stageSummary(buildFixCounts),
+          accessibility: stageSummary(a11yFixCounts),
+          lint: stageSummary(lintFixCounts),
+        },
+        // "Clean" restricted to the build gate: iterations that compiled and
+        // rendered without a single build fix, regardless of a11y/lint polish.
+        iterationsBuildCleanOnFirstTry: buildFixCounts.filter((n) => n === 0).length,
         all: fixCounts,
         perIteration: validIterations.map((r) => ({
           iteration: r.iteration,
           fixAttempts: r.fixAttempts ?? 0,
+          buildFixes: stageFixes(r, "build"),
+          accessibilityFixes: stageFixes(r, "accessibility"),
+          lintFixes: stageFixes(r, "lint"),
           errors: (r.fixLog || []).map((entry) => ({
             attempt: entry.attempt,
             fatalError: entry.fatalError,
@@ -220,6 +257,7 @@ export async function generateReport(allResults, outputDir, promptText = null) {
       feedback: feedbackAnalysis,
       accessibility: a11yAnalysis,
       npmInstall: npmInstallAnalysis,
+      tscFlakes: tscFlakeAnalysis,
       repairLoop: analyzeRepairLoop(validIterations),
       visualDiff: visualDiff || {
         pairwiseDiffs: [],

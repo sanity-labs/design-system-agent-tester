@@ -243,6 +243,11 @@ function normalise(raw, dirName, testDir) {
     // normalised shape so templates can keep using `{{#if requiresMcp}}`.
     requiresMcp: Boolean(raw.mcp),
     mcp: raw.mcp ?? null,
+    // Shell-agent transport: a test with `cli` (and no `mcp`) drives the
+    // dsds CLI through a sandboxed tool instead of MCP. `requiresCli` is
+    // derived the same way for template conditionals.
+    requiresCli: Boolean(raw.cli),
+    cli: raw.cli ?? null,
     docsPath: raw.docsPath ? resolveTestPath(testDir, raw.docsPath) : null,
     prompts: {
       system: resolveTestPath(testDir, raw.prompts.system),
@@ -353,6 +358,7 @@ function buildCtx(test, extra = {}) {
     packages: test.packages,
     reactVersion: test.reactVersion,
     requiresMcp: test.requiresMcp,
+    requiresCli: test.requiresCli,
     name: config.name,
     harnessRoot: PROJECT_ROOT,
     ...extra,

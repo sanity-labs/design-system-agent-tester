@@ -43,7 +43,9 @@ npm start -- --test carbon,spectrum
 npm start -- --test all --yes
 ```
 
-Output lands in `output/<date>/<time>/`. Open `report.md` to see the comparison.
+Output lands in `output/<date>/<time>/`. One run per machine: a lock (`~/.agent-tester/run.lock`) makes a second concurrent run refuse to start — concurrent runs contend for CPU/npm/dev-server resources and invalidate each other's measurements. Stale locks from dead processes are stolen automatically.
+
+The type-check stage is hardened against toolchain races: it runs the project's own `tsc` (never an npx-fetched one), pre-verifies `tsconfig.json` and dependency resolvability (one automatic reinstall if `node_modules` hasn't settled), and retries once when a failure contradicts the on-disk state — such retries are counted as **Toolchain flakes** in the report rather than agent errors. Open `report.md` to see the comparison.
 
 ### Options
 
@@ -52,6 +54,7 @@ Output lands in `output/<date>/<time>/`. Open `report.md` to see the comparison.
 | `--test`, `-t` | `all` | Which test(s) to run. A label, `all`, or a comma list. |
 | `--iterations`, `-n` | `3` | How many times to run each test. |
 | `--model`, `-m` | `claude-sonnet-4-6` | Claude model ID. |
+| `--models` | — | Comma-separated model IDs. Runs every test on every model (tests × models × iterations). Takes precedence over `--model`. |
 | `--max-fixes`, `-f` | `5` | Max error→fix cycles per iteration. |
 | `--concurrency`, `-c` | `1` | Max parallel agent iterations. Default is sequential so Lighthouse / DOM measurements aren't biased by CPU contention. Pass `2+` to trade precision for wall-clock speed. |
 | `--no-screenshot` | — | Skip browser validation and all browser-based metrics. |
@@ -61,6 +64,23 @@ Output lands in `output/<date>/<time>/`. Open `report.md` to see the comparison.
 ### Models
 
 See [Anthropic's documentation](https://docs.anthropic.com/en/docs/about-claude/models) for current model IDs. Pass via `--model`. The default is `claude-sonnet-4-6`. Model IDs are retired over time — if a run fails with a `404 not_found_error: model: …`, pass a current id via `--model`.
+
+#### Comparing models
+
+`--models` runs the same test suite across several models in one run:
+
+```bash
+node --env-file=.env src/index.js --test ui4-mcp --iterations 3 \
+  --models claude-sonnet-4-6,claude-haiku-4-5
+```
+
+Every model receives the identical brief and prompts. Each test × model
+combination gets its own output directory (`output/<run>/<test>/<model>/`)
+and its own section in `report.json` / `report.md`, keyed `<test>/<model>`,
+so per-model metrics are never mixed. Iterations stay independent across
+models exactly as they are within one model. Single-model runs (via
+`--model` or a one-item `--models`) keep the flat `output/<run>/<test>/`
+layout and plain report keys, so existing tooling is unaffected.
 
 #### Per-model request tuning
 

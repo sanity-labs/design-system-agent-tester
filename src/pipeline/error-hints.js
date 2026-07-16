@@ -29,7 +29,9 @@ export function deriveErrorHints(text) {
   while ((m = propRe.exec(text)) !== null) {
     const prop = m[1];
     const component = m[2];
-    hints.add(`\`${component}\` has no \`${prop}\` prop (the type checker rejected it) — remove it, do not re-add it. For the authoritative prop set for this version, call dsds_build_component(identifier="${component}").`);
+    hints.add(
+      `\`${component}\` has no \`${prop}\` prop (the type checker rejected it) — remove it, do not re-add it. For the authoritative prop set for this version, call dsds_build_component(identifier="${component}").`,
+    );
   }
 
   // 2. Hallucinated import: `Module '"@sanity-labs/ui-poc"' has no exported member 'X'`
@@ -37,20 +39,28 @@ export function deriveErrorHints(text) {
   while ((m = importRe.exec(text)) !== null) {
     const name = m[1];
     if (/provider|theme|root/i.test(name)) {
-      hints.add(`\`${name}\` is not a ui-poc export — ui-poc is CSS-driven and has no theme provider. Render components directly; the stylesheet is imported once in main.tsx.`);
+      hints.add(
+        `\`${name}\` is not a ui-poc export — ui-poc is CSS-driven and has no theme provider. Render components directly; the stylesheet is imported once in main.tsx.`,
+      );
     } else {
-      hints.add(`\`${name}\` is not exported by @sanity-labs/ui-poc. Verify the name with dsds_check_exports — do not guess. Common ones: Box, Button, Card, Flex, Grid, Stack→VStack/HStack, Text, Heading, Icon, IconButton.`);
+      hints.add(
+        `\`${name}\` is not exported by @sanity-labs/ui-poc. Verify the name with dsds_check_exports — do not guess. Common ones: Box, Button, Card, Flex, Grid, Stack→VStack/HStack, Text, Heading, Icon, IconButton.`,
+      );
     }
   }
 
   // 3. Boolean prop given a string: `Type 'string' is not assignable to type 'Responsive<boolean>'`
   if (/is not assignable to type '(?:Responsive<boolean>|boolean)'/.test(text)) {
-    hints.add('A boolean prop was given a string (e.g. `fullWidth="true"`). Use the bare prop (`fullWidth`) or a brace boolean (`fullWidth={false}`), never a string.');
+    hints.add(
+      'A boolean prop was given a string (e.g. `fullWidth="true"`). Use the bare prop (`fullWidth`) or a brace boolean (`fullWidth={false}`), never a string.',
+    );
   }
 
   // 4. Number where a CSS string is expected.
   if (/is not assignable to type 'Responsive<string>'/.test(text)) {
-    hints.add('A sizing/grid prop (width, gridTemplateColumns, …) was given a number. These take CSS strings — use `width="320px"` or `gridTemplateColumns="repeat(3, 1fr)"`. (Spacing props like padding/gap are the opposite — integers.)');
+    hints.add(
+      'A sizing/grid prop (width, gridTemplateColumns, …) was given a number. These take CSS strings — use `width="320px"` or `gridTemplateColumns="repeat(3, 1fr)"`. (Spacing props like padding/gap are the opposite — integers.)',
+    );
   }
 
   // 5. Implicit any on a parameter (TS7006) — almost always an event handler.
@@ -58,12 +68,20 @@ export function deriveErrorHints(text) {
   const anyParams = new Set();
   while ((m = anyRe.exec(text)) !== null) anyParams.add(m[1]);
   if (anyParams.size) {
-    hints.add(`Add a type to ${[...anyParams].map((p) => `\`${p}\``).join(', ')} — for an input handler use \`(e: React.ChangeEvent<HTMLInputElement>)\`, for a click use \`(e: React.MouseEvent)\`.`);
+    hints.add(
+      `Add a type to ${[...anyParams].map((p) => `\`${p}\``).join(", ")} — for an input handler use \`(e: React.ChangeEvent<HTMLInputElement>)\`, for a click use \`(e: React.MouseEvent)\`.`,
+    );
   }
 
   // 6. Agent edited scaffold/config files it should leave alone.
-  if (/tsconfig\.(?:json|app\.json|node\.json)|Unknown compiler option|'files' list .* is empty/i.test(text)) {
-    hints.add('Do not modify tsconfig.json / tsconfig.*.json or other scaffold files — they are pre-configured and valid. Only edit files under `src/`.');
+  if (
+    /tsconfig\.(?:json|app\.json|node\.json)|Unknown compiler option|'files' list .* is empty/i.test(
+      text,
+    )
+  ) {
+    hints.add(
+      "Do not modify tsconfig.json / tsconfig.*.json or other scaffold files — they are pre-configured and valid. Only edit files under `src/`.",
+    );
   }
 
   return [...hints];

@@ -6,6 +6,7 @@ import { parseFiles } from "../evaluation/parse-files.js";
 import { killDevServer, validateProject } from "../evaluation/validate.js";
 import { error, success, tag, warn } from "../util/color.js";
 import { isTransientError } from "../util/retry.js";
+import { execDsdsCommand, resolveCliEntry, resolveTestEnv, runCliLintGate } from "./dsds-cli.js";
 import { createMcpClient } from "./mcp-client.js";
 import { generateGenuiProjectWithMcp } from "./runner-genui.js";
 import {
@@ -310,8 +311,7 @@ async function generateWithMcp({
             content: [
               {
                 type: "text",
-                text:
-                  `STOP: your visible text output contains ${status}. Files composed in your reasoning were NOT output — the harness receives only the text you write. Nothing is persisted after your response ends, and nothing you passed to tools was saved. Write out EVERY project file now — package.json, tsconfig.json, vite.config.ts, index.html, src/main.tsx, src/App.tsx, and every component/view — as complete \`---FILE: path--- … ---END FILE---\` blocks. No tool calls. No summary. Only the files.`,
+                text: `STOP: your visible text output contains ${status}. Files composed in your reasoning were NOT output — the harness receives only the text you write. Nothing is persisted after your response ends, and nothing you passed to tools was saved. Write out EVERY project file now — package.json, tsconfig.json, vite.config.ts, index.html, src/main.tsx, src/App.tsx, and every component/view — as complete \`---FILE: path--- … ---END FILE---\` blocks. No tool calls. No summary. Only the files.`,
               },
             ],
           });
@@ -411,6 +411,237 @@ async function generateWithMcp({
       await mcpClient.stop().catch(() => {});
     }
   }
+}
+
+/**
+ * Multi-turn generation with the dsds CLI as the agent's only tool.
+ *
+ * The shell-agent counterpart of generateWithMcp: same conversation loop,
+ * cache slider, duplicate detection, incremental ---FILE: writes, and
+ * emission nudges — but the agent researches through ONE sandboxed tool
+ * (`dsds_cli`) that runs `dsds …` commands (argv-split, no shell, cwd =
+ * projectDir). This measures the CLI's stated audience: coding agents with
+ * shell access and no MCP client.
+ */
+const DSDS_CLI_TOOL = {
+  name: "dsds_cli",
+  description:
+    "Run one `dsds` CLI command against the design system, e.g. `dsds context button`, " +
+    "`dsds search card --kind component`, `dsds chunk dashboard-shell`, `dsds check-exports Box AddIcon`, " +
+    "`dsds lint src/App.tsx --apply`, `dsds brief build`. Exit codes: 0 ok · 1 usage error · 2 ran and found problems. " +
+    "Pass --json for machine-readable output. This is NOT a shell: pipes, redirects, and non-dsds commands are rejected. " +
+    "The CLI reads and checks files — it never creates or saves project files; only your ---FILE: blocks do.",
+  input_schema: {
+    type: "object",
+    properties: {
+      command: {
+        type: "string",
+        description: "The full command line, starting with `dsds`. One command per call.",
+      },
+    },
+    required: ["command"],
+  },
+};
+
+async function generateWithCli({
+  client,
+  model,
+  promptContent,
+  baseSystemPrompt,
+  iterDir,
+  iterLabel,
+  cliConfig,
+  mcpConfig,
+  projectDir,
+}) {
+  const cliEntry = resolveCliEntry({ cli: cliConfig, mcp: mcpConfig });
+  if (!cliEntry)
+    throw new Error("ui4-cli generation requires a resolvable dsds CLI entry (test.cli.entry)");
+  const cliEnv = resolveTestEnv({ cli: cliConfig, mcp: mcpConfig });
+  await mkdir(projectDir, { recursive: true });
+  console.log(`[${iterLabel}] dsds CLI transport — entry: ${cliEntry}`);
+
+  const messages = [
+    {
+      role: "user",
+      content: [{ type: "text", text: promptContent, cache_control: { type: "ephemeral" } }],
+    },
+  ];
+
+  let uncachedInputTokens = 0;
+  let cacheReadInputTokens = 0;
+  let cacheCreationInputTokens = 0;
+  let outputTokens = 0;
+  const allTextParts = [];
+  let turns = 0;
+
+  const toolLog = [];
+  const seenToolCalls = new Set();
+  let duplicateStreak = 0;
+  let duplicateTotal = 0; // cumulative, not just consecutive
+  let emissionNudges = 0;
+  let forceTextOnly = false;
+  let cacheMarker = null;
+
+  while (turns < MAX_TOOL_TURNS) {
+    turns++;
+
+    // Sliding cache breakpoint (see generateWithMcp for the rationale).
+    if (messages.length > 1) {
+      if (cacheMarker) delete cacheMarker.cache_control;
+      const lastContent = messages[messages.length - 1].content;
+      if (Array.isArray(lastContent) && lastContent.length > 0) {
+        const lastBlock = lastContent[lastContent.length - 1];
+        if (lastBlock && typeof lastBlock === "object") {
+          lastBlock.cache_control = { type: "ephemeral" };
+          cacheMarker = lastBlock;
+        }
+      }
+    }
+
+    // Convergence pressure — tuned for the CLI surface, where weaker models
+    // thrash (observed: Haiku ran to the 25-turn cap with 19 repeated commands,
+    // because the streak-only trigger misses non-consecutive repeats). Two
+    // escalating signals catch it earlier:
+    //   soft nudge — a consecutive OR cumulative repeat streak, or nearing the cap
+    //   hard force — sustained thrash (many total repeats) or almost at the cap:
+    //                block tool calls next turn so the model MUST emit files.
+    const thrashing = duplicateStreak >= 2 || duplicateTotal >= 4;
+    const hardStop = duplicateTotal >= 6 || turns >= MAX_TOOL_TURNS - 3;
+    const nudge =
+      thrashing || turns >= MAX_TOOL_TURNS - 5
+        ? "\n\nYou have done enough research. Produce ALL project files using ---FILE: path--- blocks now. Do not re-run dsds commands you have already run; if you're unsure of a component, use `dsds build <id> --answers '{…}'` ONCE to get valid JSX, then emit files."
+        : "";
+    if (hardStop) forceTextOnly = true;
+    const systemBlocks = [
+      { type: "text", text: baseSystemPrompt, cache_control: { type: "ephemeral" } },
+    ];
+    if (nudge) systemBlocks.push({ type: "text", text: nudge });
+
+    const response = await callAnthropicWithRetry(
+      client,
+      {
+        model,
+        max_tokens: 32000,
+        ...modelTuning(model),
+        ...(forceTextOnly ? { tool_choice: { type: "none" } } : {}),
+        system: systemBlocks,
+        tools: [DSDS_CLI_TOOL],
+        messages,
+      },
+      iterLabel,
+    );
+    forceTextOnly = false;
+
+    const u = response.usage ?? {};
+    uncachedInputTokens += u.input_tokens ?? 0;
+    cacheReadInputTokens += u.cache_read_input_tokens ?? 0;
+    cacheCreationInputTokens += u.cache_creation_input_tokens ?? 0;
+    outputTokens += u.output_tokens ?? 0;
+    console.log(
+      `[${iterLabel}] turn ${turns} usage: in=${u.input_tokens ?? 0} out=${u.output_tokens ?? 0} ` +
+        `cache_read=${u.cache_read_input_tokens ?? 0} cache_write=${u.cache_creation_input_tokens ?? 0} stop=${response.stop_reason}`,
+    );
+
+    const textBlocks = response.content.filter((b) => b.type === "text").map((b) => b.text);
+    allTextParts.push(...textBlocks);
+
+    // Write emitted ---FILE: blocks immediately so `dsds lint src/…` in a
+    // later turn reads them from disk (same contract as the MCP path).
+    const emittedSoFar = parseFiles(allTextParts.join("\n"));
+    if (emittedSoFar.length > 0) {
+      await writeProjectFiles(projectDir, emittedSoFar);
+    }
+
+    const toolUseBlocks = response.content.filter((b) => b.type === "tool_use");
+
+    if (response.stop_reason === "end_turn" || toolUseBlocks.length === 0) {
+      const hasScaffold = emittedSoFar.some((f) => f.path === "package.json");
+      if (!hasScaffold && emissionNudges < MAX_EMISSION_NUDGES && turns < MAX_TOOL_TURNS) {
+        emissionNudges++;
+        const status = emittedSoFar.length
+          ? `only ${emittedSoFar.length} ---FILE: block(s) (${emittedSoFar.map((f) => f.path).join(", ")}) and no package.json`
+          : "ZERO ---FILE: blocks";
+        console.log(
+          `[${iterLabel}] Turn ended with ${status} — emission nudge ${emissionNudges}/${MAX_EMISSION_NUDGES}`,
+        );
+        messages.push({ role: "assistant", content: response.content });
+        messages.push({
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: `STOP: your visible text output contains ${status}. Files composed in your reasoning were NOT output — the harness receives only the text you write. Nothing is persisted after your response ends, and nothing you passed to the dsds CLI was saved. Write out EVERY project file now — package.json, tsconfig.json, vite.config.ts, index.html, src/main.tsx, src/App.tsx, and every component/view — as complete \`---FILE: path--- … ---END FILE---\` blocks. No tool calls. No summary. Only the files.`,
+            },
+          ],
+        });
+        forceTextOnly = true;
+        continue;
+      }
+      console.log(
+        `[${iterLabel}] Generation complete after ${turns} turn(s), ${toolLog.length} CLI call(s)`,
+      );
+      break;
+    }
+
+    messages.push({ role: "assistant", content: response.content });
+
+    const toolResults = [];
+    for (const toolUse of toolUseBlocks) {
+      const commandLine = String(toolUse.input?.command ?? "");
+      const callKey = `dsds_cli:${commandLine}`;
+      const isDuplicate = seenToolCalls.has(callKey);
+      seenToolCalls.add(callKey);
+      if (isDuplicate) {
+        duplicateStreak++;
+        duplicateTotal++;
+      } else {
+        duplicateStreak = 0;
+      }
+
+      console.log(
+        `[${iterLabel}] CLI call: ${commandLine.slice(0, 110)}${isDuplicate ? " [DUPLICATE]" : ""}`,
+      );
+
+      let resultText;
+      if (isDuplicate) {
+        resultText = `You already ran \`${commandLine}\` — the result has not changed. Stop repeating commands and proceed to generate the project files.`;
+      } else {
+        const res = await execDsdsCommand(cliEntry, cliEnv, projectDir, commandLine);
+        resultText = res.output;
+      }
+
+      toolLog.push({
+        turn: turns,
+        tool: "dsds_cli",
+        input: { command: commandLine },
+        resultText,
+        resultLength: resultText.length,
+        isDuplicate,
+      });
+      toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: resultText });
+    }
+    messages.push({ role: "user", content: toolResults });
+  }
+
+  if (turns >= MAX_TOOL_TURNS) {
+    console.warn(`[${iterLabel}] Hit max tool turns (${MAX_TOOL_TURNS}) — forcing completion`);
+  }
+  if (toolLog.length > 0) {
+    await writeFile(
+      resolve(iterDir, "_cli_tool_log.json"),
+      JSON.stringify(toolLog, null, 2),
+      "utf-8",
+    );
+  }
+
+  return {
+    fullText: allTextParts.join("\n"),
+    uncachedInputTokens,
+    cacheReadInputTokens,
+    cacheCreationInputTokens,
+    outputTokens,
+  };
 }
 
 // ─── Repair-loop gate helpers ────────────────────────────────────────────────
@@ -587,6 +818,7 @@ export async function runAgent({
   maxFixes = 5,
   maxGenerationRetries = 3,
   mcpConfig = null,
+  cliConfig = null,
   genui = false,
 }) {
   const systemPrompt = getSystemPrompt(testLabel);
@@ -638,8 +870,13 @@ export async function runAgent({
   // Aggregated at the report layer to surface dependency-resolution
   // problems separately from real code-error fixes.
   let npmInstallFailures = 0;
+  // How many validation cycles hit a transient toolchain flake (tsc failure
+  // contradicting on-disk state, healed by one retry). Reported via
+  // `result.tscFlaked` so infra noise is subtractable from agent errors.
+  let tscFlakes = 0;
   const trackInstall = (v) => {
     if (v?.installFailed) npmInstallFailures++;
+    if (v?.tscFlaked) tscFlakes++;
   };
 
   const agentLogPath = resolve(iterDir, "_agent_log.txt");
@@ -698,6 +935,18 @@ export async function runAgent({
         iterLabel,
         mcpConfig,
         maxSpecFixes: maxFixes,
+      });
+    } else if (cliConfig && !mcpConfig) {
+      result = await generateWithCli({
+        client,
+        model,
+        promptContent: attemptPrompt,
+        baseSystemPrompt: systemPrompt,
+        iterDir,
+        iterLabel,
+        cliConfig,
+        mcpConfig,
+        projectDir,
       });
     } else if (needsMcp) {
       result = await generateWithMcp({
@@ -830,10 +1079,15 @@ export async function runAgent({
     let residualLint = null;
     let residualAxe = null;
 
-    // A dedicated MCP client drives the lint gate as a harness step (not the
-    // agent's choice), pointed at the project dir via LINT_SOURCE_DIR.
+    // The lint gate is a harness step (not the agent's choice). Preferred
+    // transport: the dsds CLI (`dsds lint --apply --json`) — one execFile per
+    // gate, no extra long-lived process. Falls back to a dedicated MCP client
+    // for setups without the CLI. Both point at projectDir via LINT_SOURCE_DIR.
+    const testShape = { cli: cliConfig, mcp: mcpConfig };
+    const gateCliEntry = gateLintAndA11y ? resolveCliEntry(testShape) : null;
+    const gateEnv = gateCliEntry ? resolveTestEnv(testShape) : null;
     let lintClient = null;
-    if (gateLintAndA11y && mcpConfig) {
+    if (gateLintAndA11y && !gateCliEntry && mcpConfig) {
       try {
         lintClient = await createMcpClient({
           ...mcpConfig,
@@ -852,8 +1106,10 @@ export async function runAgent({
     try {
       while (fixAttempts <= maxFixes) {
         // ── Gate 1: Lint (cheap, first; auto-fixes are applied to disk) ──
-        if (lintClient) {
-          const lint = await runLintGate(lintClient, files);
+        if (gateCliEntry || lintClient) {
+          const lint = gateCliEntry
+            ? await runCliLintGate(gateCliEntry, gateEnv, projectDir, files)
+            : await runLintGate(lintClient, files);
           if (!lint.unavailable && !lint.error) {
             files = await readProjectFiles(projectDir, files); // pick up applied auto-fixes
             if (firstTryLint === null) firstTryLint = lint.remaining;
@@ -1005,6 +1261,7 @@ export async function runAgent({
               residualLint,
               residualAxe,
               npmInstallFailures,
+              tscFlakes,
             });
             return result;
           }
@@ -1012,7 +1269,7 @@ export async function runAgent({
           // --- Validation (build) failed — attempt a fix ---
           if (fixAttempts >= maxFixes) {
             console.warn(
-              `${tag(iterLabel)} ${error(`✗ Max fix attempts (${maxFixes}) reached — giving up`)}`,
+              `${tag(iterLabel)} ${error(`✗ Fix budget (${maxFixes}) exhausted with the BUILD still failing — giving up`)}`,
             );
             exitStage = "build";
             break;
@@ -1022,7 +1279,7 @@ export async function runAgent({
           fixAttempts++;
           const errorSummary = validation.fatalError || "Unknown error";
           console.log(
-            `${tag(iterLabel)} ${warn(`✗ Validation failed (fix attempt ${fixAttempts}/${maxFixes}):`)} ${errorSummary.split("\n")[0]}`,
+            `${tag(iterLabel)} ${warn(`✗ Build failed (build fix ${fixAttempts}/${maxFixes}):`)} ${errorSummary.split("\n")[0]}`,
           );
 
           const fixLogEntry = {
@@ -1175,6 +1432,7 @@ export async function runAgent({
         residualLint,
         residualAxe,
         npmInstallFailures,
+        tscFlakes,
       });
     } finally {
       if (lintClient) await lintClient.stop().catch(() => {});
@@ -1205,5 +1463,6 @@ export async function runAgent({
     semanticHtml: null,
     runner: "api",
     npmInstallFailures,
+    tscFlakes: 0,
   });
 }

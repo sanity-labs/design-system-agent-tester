@@ -27,12 +27,19 @@
 
 import { execFile, spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
-import { appendFile } from "node:fs/promises";
+import { appendFile, readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { createServer } from "node:net";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { error, tag, warn } from "../util/color.js";
 import { launchBrowser, NAV_TIMEOUT_MS, waitForRenderedContent } from "./puppeteer-helpers.js";
+import {
+  extractMissingExports,
+  hasConfigFallbackSignature,
+  memberInTypes,
+  parseTsconfig,
+} from "./tsc-flake.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -65,11 +72,17 @@ export async function validateProject(projectDir, iterLabel) {
     // into the report so the user can see which tests/models bleed fix
     // budget on dependency-install failures vs. real code errors.
     installFailed: false,
+    // True when the type check initially failed with a toolchain-flake
+    // signature (configless fallback / unsettled node_modules) and a single
+    // retry passed. Counted in the report so infra noise is visible and
+    // subtractable from agent-error analyses.
+    tscFlaked: false,
   };
 
   try {
     await runNpmInstall(projectDir, iterLabel);
-    await runTypeCheck(projectDir, iterLabel);
+    const typeCheck = await runTypeCheck(projectDir, iterLabel);
+    result.tscFlaked = !!typeCheck?.flaked;
 
     const iterDir = dirname(projectDir);
     const port = await getAvailablePort();
@@ -192,43 +205,204 @@ async function runNpmInstall(projectDir, iterLabel) {
   }
 }
 
-async function runTypeCheck(projectDir, iterLabel) {
-  const iterDir = dirname(projectDir);
+/**
+ * Pre-flight for the type check. Verifies the state tsc is about to trust:
+ *   - tsconfig.json exists and parses (a configless tsc run silently falls
+ *     back to defaults → bogus TS17004/TS2305 storms);
+ *   - every declared dependency — and the typescript compiler itself — is
+ *     resolvable from the project (an unsettled node_modules produces the
+ *     same storms).
+ * Returns { tsconfig, missing, tscBin }; missing is [] when quiescent.
+ */
+async function preflightTypeCheck(projectDir) {
+  // tsconfig.json: a MISSING file is a scaffold error (tsc would silently
+  // fall back to defaults and storm TS17004/TS2305). An unparseable-to-us
+  // file is NOT fatal — tsc's JSONC dialect is the authority, ours is an
+  // approximation — it only means flake signature 1 can't be evaluated.
+  let tsconfigRaw = null;
   try {
-    console.log(`${tag(iterLabel)} Running type check...`);
-    const { stdout: tscOut, stderr: tscErr } = await execFileAsync("npx", ["tsc", "--noEmit"], {
+    tsconfigRaw = await readFile(join(projectDir, "tsconfig.json"), "utf-8");
+  } catch {
+    const err = new Error(
+      "tsconfig.json is missing — the project scaffold is broken. " +
+        "Emit a tsconfig.json at the project root.",
+    );
+    err.stage = "scaffold";
+    throw err;
+  }
+  const tsconfig = parseTsconfig(tsconfigRaw);
+
+  // Quiescence probe: is each declared dependency physically present?
+  // Deliberately a FILESYSTEM check, not require.resolve — modern packages
+  // whose `exports` map hides "./package.json" (e.g. @vitejs/plugin-react)
+  // throw ERR_PACKAGE_PATH_NOT_EXPORTED from require.resolve even when
+  // perfectly installed, which read as "missing" and failed every iteration.
+  const installed = async (name) => {
+    try {
+      await readFile(join(projectDir, "node_modules", ...name.split("/"), "package.json"), "utf-8");
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  let declared = [];
+  try {
+    const pkg = JSON.parse(await readFile(join(projectDir, "package.json"), "utf-8"));
+    declared = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies });
+  } catch {
+    declared = []; // package.json problems surface via npm install itself
+  }
+  const missing = [];
+  for (const name of declared) {
+    if (!(await installed(name))) missing.push(name);
+  }
+
+  // The compiler binary: prefer the project's own install; fall back to
+  // normal resolution (hoisted/workspace setups) before declaring it missing.
+  let tscBin = join(projectDir, "node_modules", "typescript", "bin", "tsc");
+  try {
+    await readFile(tscBin, "utf-8");
+  } catch {
+    try {
+      tscBin = createRequire(join(projectDir, "package.json")).resolve("typescript/bin/tsc");
+    } catch {
+      tscBin = null;
+      missing.push("typescript");
+    }
+  }
+
+  return { tsconfig, missing, tscBin };
+}
+
+/** One tsc invocation via the project's own compiler. Returns { ok, errors }. */
+async function execTscOnce(projectDir, tscBin) {
+  try {
+    await execFileAsync(process.execPath, [tscBin, "--noEmit"], {
       cwd: projectDir,
       timeout: 60_000,
     });
-
-    const ts = new Date().toISOString();
-    const tscLog =
-      `--- tsc --noEmit [${ts}] OK ---\n` +
-      (tscOut ? `[stdout]\n${tscOut.trim()}\n` : "") +
-      (tscErr ? `[stderr]\n${tscErr.trim()}\n` : "No type errors.\n");
-    await appendFile(resolve(iterDir, "_tsc_check.txt"), tscLog + "\n", "utf-8");
+    return { ok: true, errors: "" };
   } catch (tscErr) {
     const stderr = (tscErr.stderr || "").trim();
     const stdout = (tscErr.stdout || "").trim();
-    const errors = stdout || stderr || tscErr.message;
-
-    const ts = new Date().toISOString();
-    const tscLog = `--- tsc --noEmit [${ts}] FAILED ---\n${errors}\n`;
-    await appendFile(resolve(iterDir, "_tsc_check.txt"), tscLog + "\n", "utf-8");
-
-    const errorCount = (errors.match(/\): error TS/g) || []).length;
-    console.warn(`${tag(iterLabel)} ${warn(`Type check found ${errorCount} error(s)`)}`);
-
-    if (errorCount > 0) {
-      throw new Error(`TypeScript type check failed (${errorCount} error(s)):\n${errors}`);
-    }
-
-    // tsc exited non-zero but we couldn't parse any `): error TS` lines.
-    // That's not "types are fine" — it's tsc itself failing (bad tsconfig,
-    // a crash, a timeout, "Cannot find module"). Surface it instead of
-    // letting validation proceed as if the type check passed.
-    throw new Error(`Type check could not run (tsc exited abnormally):\n${errors}`);
+    return { ok: false, errors: stdout || stderr || tscErr.message };
   }
+}
+
+/**
+ * Does the failure contradict the on-disk project state? True when either
+ * flake signature checks out against ground truth — meaning the failure is
+ * transient toolchain noise, not the agent's code.
+ */
+async function isSuspiciousTscFailure(projectDir, tsconfig, errors) {
+  if (hasConfigFallbackSignature(errors) && tsconfig?.compilerOptions?.jsx) return true;
+
+  for (const { module, member } of extractMissingExports(errors).slice(0, 5)) {
+    try {
+      // Filesystem path, not require.resolve — `exports` maps that hide
+      // "./package.json" would make installed packages unreadable here.
+      const pkgDir = join(projectDir, "node_modules", ...module.split("/"));
+      const pkg = JSON.parse(await readFile(join(pkgDir, "package.json"), "utf-8"));
+      const typesRel = pkg.types || pkg.typings || "dist/index.d.ts";
+      const dts = await readFile(join(pkgDir, typesRel), "utf-8");
+      if (memberInTypes(dts, member)) return true; // export exists — tsc lied
+    } catch {
+      // package or types unreadable — can't prove a flake from this line
+    }
+  }
+  return false;
+}
+
+async function runTypeCheck(projectDir, iterLabel) {
+  const iterDir = dirname(projectDir);
+  console.log(`${tag(iterLabel)} Running type check...`);
+
+  // Pre-flight: never run tsc against a half-written config or a
+  // half-installed tree — that produces error storms that look like (and get
+  // counted as) agent mistakes. One reinstall heals an unsettled tree.
+  let pre = await preflightTypeCheck(projectDir);
+  if (pre.missing.length > 0) {
+    console.warn(
+      `${tag(iterLabel)} ${warn(`node_modules not settled (unresolvable: ${pre.missing.join(", ")}) — reinstalling once`)}`,
+    );
+    await appendFile(
+      resolve(iterDir, "_tsc_check.txt"),
+      `--- preflight [${new Date().toISOString()}] node_modules not settled (${pre.missing.join(", ")}) — reinstalling ---\n\n`,
+      "utf-8",
+    );
+    await runNpmInstall(projectDir, iterLabel);
+    pre = await preflightTypeCheck(projectDir);
+    if (pre.missing.length > 0) {
+      const err = new Error(
+        `npm install failed:\ndependencies unresolvable after reinstall: ${pre.missing.join(", ")}` +
+          (pre.missing.includes("typescript") ? " (typescript must be a devDependency)" : ""),
+      );
+      err.stage = "install";
+      throw err;
+    }
+  }
+
+  let attempt = await execTscOnce(projectDir, pre.tscBin);
+  let flaked = false;
+
+  if (!attempt.ok && (await isSuspiciousTscFailure(projectDir, pre.tsconfig, attempt.errors))) {
+    // The failure contradicts the on-disk state (config parses + has jsx, or
+    // the "missing" exports exist in the installed types). Retry ONCE after a
+    // short settle instead of reporting toolchain noise as agent errors.
+    await appendFile(
+      resolve(iterDir, "_tsc_check.txt"),
+      `--- tsc --noEmit [${new Date().toISOString()}] FLAKE-SUSPECT FAILURE (retrying once) ---\n${attempt.errors}\n\n`,
+      "utf-8",
+    );
+    console.warn(
+      `${tag(iterLabel)} ${warn("Type check failure contradicts on-disk state — retrying once")}`,
+    );
+    await new Promise((r) => setTimeout(r, 2_000));
+    const retry = await execTscOnce(projectDir, pre.tscBin);
+    if (retry.ok) {
+      flaked = true;
+      await appendFile(
+        resolve(iterDir, "_tsc_check.txt"),
+        `--- tsc --noEmit [${new Date().toISOString()}] FLAKE DETECTED — retry passed; first failure was transient ---\n\n`,
+        "utf-8",
+      );
+      console.warn(
+        `${tag(iterLabel)} ${warn("FLAKE DETECTED — tsc retry passed; counting as toolchain noise")}`,
+      );
+    }
+    attempt = retry;
+  }
+
+  const ts = new Date().toISOString();
+  if (attempt.ok) {
+    await appendFile(
+      resolve(iterDir, "_tsc_check.txt"),
+      `--- tsc --noEmit [${ts}] OK ---\nNo type errors.\n\n`,
+      "utf-8",
+    );
+    return { flaked };
+  }
+
+  const errors = attempt.errors;
+  await appendFile(
+    resolve(iterDir, "_tsc_check.txt"),
+    `--- tsc --noEmit [${ts}] FAILED ---\n${errors}\n\n`,
+    "utf-8",
+  );
+
+  const errorCount = (errors.match(/\): error TS/g) || []).length;
+  console.warn(`${tag(iterLabel)} ${warn(`Type check found ${errorCount} error(s)`)}`);
+
+  if (errorCount > 0) {
+    throw new Error(`TypeScript type check failed (${errorCount} error(s)):\n${errors}`);
+  }
+
+  // tsc exited non-zero but we couldn't parse any `): error TS` lines.
+  // That's not "types are fine" — it's tsc itself failing (bad tsconfig,
+  // a crash, a timeout, "Cannot find module"). Surface it instead of
+  // letting validation proceed as if the type check passed.
+  throw new Error(`Type check could not run (tsc exited abnormally):\n${errors}`);
 }
 
 /**
