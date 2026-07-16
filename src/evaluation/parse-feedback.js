@@ -1,3 +1,5 @@
+import { MAX_PARSE_BYTES } from "./parse-files.js";
+
 const VALID_CATEGORIES = ["documentation", "api", "components", "theming", "icons", "dx", "other"];
 
 /**
@@ -8,17 +10,32 @@ const VALID_CATEGORIES = ["documentation", "api", "components", "theming", "icon
  * feedback-like content exists in the response.
  */
 export function parseFeedback(text) {
+  if (typeof text !== "string") return [];
+  // Untrusted, and run on the cumulative multi-turn buffer every iteration.
+  // Cap before scanning so a crafted flood (e.g. many `---FEEDBACK---` markers
+  // with no `---END FEEDBACK---`) can't drive quadratic work — the same
+  // reasoning and bound as parse-files.js.
+  if (text.length > MAX_PARSE_BYTES) text = text.slice(0, MAX_PARSE_BYTES);
+
   const items = [];
 
-  // Primary: parse the structured ---FEEDBACK--- block
-  const blockRegex = /---FEEDBACK---\n([\s\S]*?)---END FEEDBACK---/g;
-  let blockMatch;
-
-  while ((blockMatch = blockRegex.exec(text)) !== null) {
-    const blockContent = blockMatch[1];
-    const lineRegex = /^-\s*\[(\w+)\]\s*(.+)$/gm;
+  // Primary: parse structured ---FEEDBACK--- … ---END FEEDBACK--- blocks with
+  // linear indexOf scanning (the previous lazy `[\s\S]*?`-to-far-terminator
+  // regex backtracked to end-of-input at every opening marker when the
+  // closing marker was missing — O(n²) on adversarial input).
+  const OPEN = "---FEEDBACK---\n";
+  const CLOSE = "---END FEEDBACK---";
+  const lineRegex = /^-\s*\[(\w+)\]\s*(.+)$/gm;
+  let cursor = 0;
+  while (true) {
+    const open = text.indexOf(OPEN, cursor);
+    if (open === -1) break;
+    const bodyStart = open + OPEN.length;
+    const close = text.indexOf(CLOSE, bodyStart);
+    if (close === -1) break;
+    const blockContent = text.slice(bodyStart, close);
+    lineRegex.lastIndex = 0;
     let lineMatch;
-
     while ((lineMatch = lineRegex.exec(blockContent)) !== null) {
       const rawCategory = lineMatch[1].toLowerCase();
       const category = VALID_CATEGORIES.includes(rawCategory) ? rawCategory : "other";
@@ -27,6 +44,7 @@ export function parseFeedback(text) {
         items.push({ category, text: feedbackText });
       }
     }
+    cursor = close + CLOSE.length;
   }
 
   // Fallback: look for a "Feedback" or "Friction" section in markdown-style output

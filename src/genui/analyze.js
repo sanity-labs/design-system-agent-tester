@@ -4,12 +4,22 @@
  * building the report. No I/O — unit-testable in isolation.
  */
 
+// Untrusted model output; in genui mode this is bounded only by max_tokens.
+// Cap before regex scanning so an unterminated code fence can't drive
+// quadratic backtracking (same rationale as parse-files.js MAX_PARSE_BYTES).
+const MAX_SPEC_BYTES = 2_000_000;
+
 /** Extract a `{ root, elements }` spec from a model response. */
 export function extractSpec(text) {
   if (!text) return { spec: null, raw: null };
+  if (typeof text !== "string") return { spec: null, raw: null };
+  if (text.length > MAX_SPEC_BYTES) text = text.slice(0, MAX_SPEC_BYTES);
 
   let raw = null;
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  // `[ \t]*\n?` instead of `\s*` removes the ambiguous overlap with the lazy
+  // `[\s\S]*?` body that caused O(n²) backtracking on an unterminated fence
+  // (both `\s*` and `[\s\S]*?` could match the same whitespace run).
+  const fenced = text.match(/```(?:json)?[ \t]*\n?([\s\S]*?)```/i);
   if (fenced) raw = fenced[1].trim();
 
   if (!raw) {

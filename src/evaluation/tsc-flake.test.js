@@ -72,3 +72,22 @@ describe("memberInTypes", () => {
     expect(memberInTypes("const NotAddIconX = 1;", "AddIcon")).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Security: parseTsconfig caps the lenient comment-strip path
+// ---------------------------------------------------------------------------
+describe("parseTsconfig resists quadratic comment-strip", () => {
+  it("returns promptly (null) on an oversized /* flood", () => {
+    const flood = "/*".repeat(300_000); // ~600KB, invalid JSON → lenient path
+    const start = process.hrtime.bigint();
+    const r = parseTsconfig(flood);
+    const ms = Number(process.hrtime.bigint() - start) / 1e6;
+    expect(r).toBeNull();
+    expect(ms).toBeLessThan(1000);
+  });
+
+  it("still parses a normal JSONC tsconfig with comments", () => {
+    const r = parseTsconfig('{\n  // comment\n  "compilerOptions": { "jsx": "react" },\n}');
+    expect(r?.compilerOptions?.jsx).toBe("react");
+  });
+});

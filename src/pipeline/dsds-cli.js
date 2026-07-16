@@ -20,8 +20,9 @@
  */
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import { promisify } from "node:util";
+import { isSafeRelativePath } from "../evaluation/parse-files.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -191,6 +192,34 @@ export async function execDsdsCommand(cliEntry, env, projectDir, commandLine) {
   let m;
   while ((m = re.exec(line)) !== null) argv.push(m[1] ?? m[2] ?? m[3]);
   argv.shift(); // drop the leading "dsds"
+
+  // The executor is contractually sandboxed to the project directory, but
+  // the CLI is handed cwd=projectDir and some subcommands (e.g. `lint
+  // --apply`) read and rewrite the paths they're given. SHELLISM doesn't
+  // block `.` / `/` / `..`, so a path argument like `../../x` or `/etc/x`
+  // would survive and point the CLI outside the sandbox. Reject any
+  // path-like argument that escapes the project dir (matching the guard
+  // every other agent-controlled path in the harness gets).
+  const offending = argv.find((token) => {
+    // Consider both bare args and the value side of `--flag=value`.
+    const value =
+      token.startsWith("-") && token.includes("=") ? token.slice(token.indexOf("=") + 1) : token;
+    if (value === "" || value.startsWith("-")) return false;
+    const looksLikePath =
+      isAbsolute(value) ||
+      value.includes("/") ||
+      value.includes("\\") ||
+      value.split(/[\\/]/).includes("..");
+    return looksLikePath && !isSafeRelativePath(value);
+  });
+  if (offending) {
+    return {
+      ok: false,
+      output:
+        `Refusing to run: the argument "${offending}" points outside the project directory. ` +
+        "Pass only paths inside the current project.",
+    };
+  }
 
   try {
     const res = await execDsds(cliEntry, argv, {

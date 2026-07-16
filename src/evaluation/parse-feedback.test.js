@@ -194,3 +194,27 @@ describe("parseFeedback", () => {
     expect(result[1].category).toBe("api");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Security: linear-time parsing of adversarial feedback blocks
+// ---------------------------------------------------------------------------
+describe("parseFeedback resists algorithmic-complexity attacks", () => {
+  it("handles many unterminated ---FEEDBACK--- markers in linear time", () => {
+    const text = "---FEEDBACK---\n".repeat(120_000); // no ---END FEEDBACK---
+    const start = process.hrtime.bigint();
+    const items = parseFeedback(text);
+    const ms = Number(process.hrtime.bigint() - start) / 1e6;
+    expect(items).toEqual([]);
+    expect(ms).toBeLessThan(1000);
+  });
+
+  it("still parses a normal feedback block", () => {
+    const items = parseFeedback(
+      "---FEEDBACK---\n- [api] friction here\n- [xx] y\n---END FEEDBACK---",
+    );
+    expect(items).toEqual([
+      { category: "api", text: "friction here" },
+      { category: "other", text: "y" },
+    ]);
+  });
+});
