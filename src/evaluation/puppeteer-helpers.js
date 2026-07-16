@@ -74,29 +74,39 @@ export async function waitForRenderedContent(page, opts = {}) {
   const rootSelector = config.appRootSelectors.join(", ");
 
   while (Date.now() - start < maxWaitMs) {
-    const hasContent = await page.evaluate((selector) => {
-      const roots = document.querySelectorAll(selector);
-      for (const root of roots) {
-        if (root.children.length > 0 && root.offsetHeight > 0) {
-          return true;
+    // `page.evaluate` has no built-in timeout (see MEASURE_TIMEOUT_MS above) —
+    // agent-generated code can hang the page's JS thread (infinite loop, runaway
+    // effect), which would otherwise block this poll (and the outer maxWaitMs
+    // check that depends on it) forever. Race each poll independently so one
+    // wedged evaluation just counts as "not yet rendered" instead of hanging
+    // the whole harness process.
+    const hasContent = await withTimeout(
+      page.evaluate((selector) => {
+        const roots = document.querySelectorAll(selector);
+        for (const root of roots) {
+          if (root.children.length > 0 && root.offsetHeight > 0) {
+            return true;
+          }
         }
-      }
 
-      // Fallback: count visible elements
-      const allElements = document.body.querySelectorAll("*");
-      let visibleCount = 0;
-      for (const el of allElements) {
-        const rect = el.getBoundingClientRect();
-        if (rect.width > 0 && rect.height > 0) {
-          visibleCount++;
+        // Fallback: count visible elements
+        const allElements = document.body.querySelectorAll("*");
+        let visibleCount = 0;
+        for (const el of allElements) {
+          const rect = el.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) {
+            visibleCount++;
+          }
+          if (visibleCount >= 5) {
+            return true;
+          }
         }
-        if (visibleCount >= 5) {
-          return true;
-        }
-      }
 
-      return false;
-    }, rootSelector);
+        return false;
+      }, rootSelector),
+      Math.max(pollIntervalMs * 4, 5_000),
+      "render-content poll",
+    ).catch(() => false);
 
     if (hasContent) {
       const elapsed = Date.now() - start;

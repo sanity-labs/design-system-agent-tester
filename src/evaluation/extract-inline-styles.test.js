@@ -162,3 +162,25 @@ describe("extractInlineStyles", () => {
     expect(result.byComponent.div).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Security: linear-time scan of adversarial file content (no quadratic blowup)
+// ---------------------------------------------------------------------------
+describe("extractInlineStyles resists algorithmic-complexity attacks", () => {
+  it("scans a multi-megabyte file of repeated style={{}} in linear time", () => {
+    const content = "style={{}}".repeat(400_000); // ~4MB
+    const start = process.hrtime.bigint();
+    const r = extractInlineStyles([{ path: "B.tsx", content }]);
+    const ms = Number(process.hrtime.bigint() - start) / 1e6;
+    expect(r.total).toBeGreaterThan(0);
+    expect(ms).toBeLessThan(1000); // old O(n^2) scan took minutes at this size
+  });
+
+  it("caps content beyond MAX_STYLE_SCAN_BYTES rather than scanning unbounded", () => {
+    const content = "style={{}}".repeat(1_000_000); // ~10MB, past the cap
+    const start = process.hrtime.bigint();
+    extractInlineStyles([{ path: "B.tsx", content }]);
+    const ms = Number(process.hrtime.bigint() - start) / 1e6;
+    expect(ms).toBeLessThan(1000);
+  });
+});

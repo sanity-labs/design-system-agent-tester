@@ -319,3 +319,69 @@ describe("isSafeRelativePath", () => {
     expect(isSafeRelativePath(42)).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Security: linear-time parsing of adversarial output (no ReDoS / quadratic)
+// ---------------------------------------------------------------------------
+describe("parseFiles resists algorithmic-complexity attacks", () => {
+  it("handles tens of thousands of unterminated ---FILE: markers in linear time", () => {
+    const text = "---FILE: a---\n".repeat(80_000); // no ---END FILE---
+    const start = process.hrtime.bigint();
+    const files = parseFiles(text);
+    const ms = Number(process.hrtime.bigint() - start) / 1e6;
+    // No complete blocks → no files; must not hang (old regex was ~8s here).
+    expect(files).toEqual([]);
+    expect(ms).toBeLessThan(1000);
+  });
+
+  it("handles a code fence followed by a long whitespace run in linear time", () => {
+    const text = "```\n" + " ".repeat(400_000); // fenced fallback, no comment marker
+    const start = process.hrtime.bigint();
+    parseFiles(text);
+    const ms = Number(process.hrtime.bigint() - start) / 1e6;
+    expect(ms).toBeLessThan(1000);
+  });
+
+  it("caps oversized input before scanning", () => {
+    // A valid block sitting past the cap must not be parsed; a huge input
+    // must still return promptly.
+    const filler = "x".repeat(3_000_000);
+    const start = process.hrtime.bigint();
+    const files = parseFiles(filler + "---FILE: late.tsx---\nhi\n---END FILE---");
+    const ms = Number(process.hrtime.bigint() - start) / 1e6;
+    expect(files).toEqual([]); // block was beyond MAX_PARSE_BYTES
+    expect(ms).toBeLessThan(1000);
+  });
+
+  it("still parses normal ---FILE: blocks unchanged", () => {
+    const files = parseFiles("---FILE: src/App.tsx---\nexport default 1;\n---END FILE---");
+    expect(files).toEqual([{ path: "src/App.tsx", content: "export default 1;\n" }]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Security: refuse node_modules paths (symlink-escape vector)
+// ---------------------------------------------------------------------------
+describe("isSafeRelativePath rejects node_modules segments", () => {
+  it("rejects any path containing a node_modules segment", () => {
+    expect(isSafeRelativePath("node_modules/esc/.env")).toBe(false);
+    expect(isSafeRelativePath("node_modules/pkg/index.js")).toBe(false);
+    expect(isSafeRelativePath("src/x/node_modules/y.js")).toBe(false);
+    expect(isSafeRelativePath("node_modules")).toBe(false);
+  });
+
+  it("still accepts ordinary project paths", () => {
+    expect(isSafeRelativePath("src/App.tsx")).toBe(true);
+    expect(isSafeRelativePath("package.json")).toBe(true);
+    // A filename that merely contains the substring is fine (not a segment).
+    expect(isSafeRelativePath("src/node_modules_helper.ts")).toBe(true);
+  });
+
+  it("parseFiles drops node_modules blocks and keeps the rest", () => {
+    const files = parseFiles(
+      "---FILE: node_modules/esc/shared.js---\nx\n---END FILE---\n" +
+        "---FILE: src/A.tsx---\ny\n---END FILE---",
+    );
+    expect(files.map((f) => f.path)).toEqual(["src/A.tsx"]);
+  });
+});

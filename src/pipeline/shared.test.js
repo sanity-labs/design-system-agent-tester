@@ -1,5 +1,7 @@
-import { resolve, sep } from "node:path";
-import { describe, expect, it } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve, sep } from "node:path";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildFixPrompt, resolveWithinProject } from "./shared.js";
 
 // ─── resolveWithinProject ────────────────────────────────────────────
@@ -33,6 +35,43 @@ describe("resolveWithinProject", () => {
     expect(() => resolveWithinProject(projectDir, `..${sep}at-project-evil${sep}x.js`)).toThrow(
       /outside the project directory/,
     );
+  });
+});
+
+// ─── resolveWithinProject: symlink-aware containment (P3) ─────────────
+
+describe("resolveWithinProject rejects symlink escapes", () => {
+  let root;
+  let outside;
+
+  beforeAll(() => {
+    root = mkdtempSync(join(tmpdir(), "at-proj-"));
+    outside = mkdtempSync(join(tmpdir(), "at-secret-"));
+    writeFileSync(join(outside, ".env"), "SECRET=1");
+    // Simulate `npm install` materializing a `file:` dependency as a
+    // symlink under node_modules that points outside the sandbox.
+    mkdirSync(join(root, "node_modules"), { recursive: true });
+    symlinkSync(outside, join(root, "node_modules", "esc"), "dir");
+  });
+
+  afterAll(() => {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  });
+
+  it("throws when a path resolves through a symlinked ancestor to outside the project", () => {
+    expect(() => resolveWithinProject(root, "node_modules/esc/.env")).toThrow(
+      /via symlink|outside the project directory/,
+    );
+    expect(() => resolveWithinProject(root, "node_modules/esc/planted.js")).toThrow(
+      /via symlink|outside the project directory/,
+    );
+  });
+
+  it("still resolves legitimate in-project paths (root canonicalized)", () => {
+    // macOS tmpdir is under a symlinked /var → /private/var; the check must
+    // canonicalize the root too so this does not falsely trip.
+    expect(resolveWithinProject(root, "src/App.tsx")).toBe(resolve(root, "src/App.tsx"));
   });
 });
 

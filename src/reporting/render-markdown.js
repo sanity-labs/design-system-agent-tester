@@ -43,6 +43,44 @@ function metricTable(rows) {
   return out + `\n`;
 }
 
+// ─── Untrusted-text neutralization ───────────────────────────────────
+//
+// Every string that originates from agent output or the rendered DOM
+// (feedback text, axe descriptions/ids, component/icon names, DOM tag
+// and ARIA-role values, error text) is untrusted: an adversarial or
+// prompt-injected agent can embed active markdown — `![](http://…)`
+// beacons that exfiltrate on report open, `[phish](http://…)` links,
+// raw HTML, or a literal `|` that breaks out of a table cell. These
+// helpers neutralize such content before interpolation. All are
+// length-capped so a pathological value can't bloat the report.
+
+/** Free-text body: kill raw HTML and markdown link/image/emphasis/code syntax. */
+function sanitizeText(s, max = 500) {
+  return String(s ?? "")
+    .slice(0, max)
+    .replace(/[<>]/g, (c) => (c === "<" ? "&lt;" : "&gt;"))
+    .replace(/[`[\]()!*_~\\]/g, "\\$&");
+}
+
+/** Table-cell text: `sanitizeText` plus pipe-escape and newline-flatten. */
+function sanitizeCell(s, max = 200) {
+  return sanitizeText(s, max).replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
+}
+
+/**
+ * A value that will be wrapped in an inline code span (`` `x` ``).
+ * Backslash escapes do NOT work inside code spans, so instead strip the
+ * characters that could break out of the span or its table cell:
+ * backticks, pipes, and newlines.
+ */
+function sanitizeCode(s, max = 200) {
+  return String(s ?? "")
+    .slice(0, max)
+    .replace(/`/g, "'")
+    .replace(/\|/g, "\\|")
+    .replace(/\r?\n/g, " ");
+}
+
 /** Entries of a `{ key: count }` map, sorted by count descending. */
 function sortedCounts(obj) {
   return Object.entries(obj).sort((a, b) => b[1] - a[1]);
@@ -51,7 +89,7 @@ function sortedCounts(obj) {
 /** `` `Comp` (12) `` for the highest-count entry of a byComponent map, or "—". */
 function topComponentCell(byComponent) {
   const top = sortedCounts(byComponent)[0];
-  return top ? `\`${top[0]}\` (${top[1]})` : "—";
+  return top ? `\`${sanitizeCode(top[0])}\` (${top[1]})` : "—";
 }
 
 export function renderMarkdown(report, runDir = null) {
@@ -132,17 +170,35 @@ export function renderMarkdown(report, runDir = null) {
       md += `${v.description}\n\n`;
     }
 
-    // Fix Attempts
+    // Fix Attempts — per stage. A build fix means the app failed to
+    // compile/render; an accessibility fix means it rendered but axe
+    // flagged violations. One combined number would conflate the two.
     md += `### Fix Attempts\n\n`;
     const f = data.fixAttempts;
+    const bs = f.byStage;
     md += metricTable([
-      ["Average fixes per iteration", cell(f.average)],
+      bs && ["Build fixes (app didn't compile/render) — total", bs.build.total],
+      bs && [
+        "Iterations needing build fixes",
+        `${bs.build.iterationsAffected}/${data.successfulIterations}`,
+      ],
+      bs && [
+        "Iterations build-clean on first try",
+        `${f.iterationsBuildCleanOnFirstTry}/${data.successfulIterations}`,
+      ],
+      bs && ["Accessibility fixes (rendered, axe violations) — total", bs.accessibility.total],
+      bs && [
+        "Iterations needing accessibility fixes",
+        `${bs.accessibility.iterationsAffected}/${data.successfulIterations}`,
+      ],
+      bs && ["Lint fixes — total", bs.lint.total],
+      ["Average fixes per iteration (all stages)", cell(f.average)],
       ["Std Dev", cell(f.stdDev)],
       ["Min", cell(f.min)],
       ["Max", cell(f.max)],
-      ["Total fixes across all iterations", f.total],
+      ["Total fixes across all iterations (all stages)", f.total],
       [
-        "Iterations clean on first try",
+        "Iterations clean on first try (no fixes of any kind)",
         `${f.iterationsCleanOnFirstTry}/${data.successfulIterations}`,
       ],
       ["Iterations needing fixes", `${f.iterationsNeedingFixes}/${data.successfulIterations}`],
@@ -155,9 +211,14 @@ export function renderMarkdown(report, runDir = null) {
         if (p.fixAttempts === 0) {
           md += `- **Iteration ${p.iteration}:** Clean on first try\n`;
         } else {
-          md += `- **Iteration ${p.iteration}:** ${p.fixAttempts} fix(es) needed\n`;
+          const stageParts = [
+            p.buildFixes ? `${p.buildFixes} build` : null,
+            p.accessibilityFixes ? `${p.accessibilityFixes} accessibility` : null,
+            p.lintFixes ? `${p.lintFixes} lint` : null,
+          ].filter(Boolean);
+          md += `- **Iteration ${p.iteration}:** ${p.fixAttempts} fix(es) needed${stageParts.length ? ` (${stageParts.join(", ")})` : ""}\n`;
           for (const err of p.errors) {
-            const shortErr = (err.fatalError || "unknown").split("\n")[0].slice(0, 120);
+            const shortErr = sanitizeCode((err.fatalError || "unknown").split("\n")[0], 120);
             md += `  - Fix #${err.attempt}: \`${shortErr}\`\n`;
           }
         }
@@ -167,6 +228,19 @@ export function renderMarkdown(report, runDir = null) {
 
     // npm install failures — counts retries the agent burned on
     // dependency-resolution problems instead of real code errors.
+    // Toolchain flakes — transient tsc failures healed by retry. When this
+    // is non-zero the machine was under load (or npm was settling); these
+    // are NOT agent errors and were excluded from the fix loop.
+    const flakes = data.tscFlakes;
+    if (flakes && flakes.total > 0) {
+      md += `### Toolchain flakes (tsc)\n\n`;
+      md += metricTable([
+        ["Transient tsc failures healed by retry", flakes.total],
+        ["Iterations affected", `${flakes.affectedIterations}/${flakes.totalIterations}`],
+      ]);
+      md += `_A flake is a tsc failure contradicting on-disk state (valid tsconfig, exports present in installed types) that passed on one retry. Infra noise, not agent errors._\n\n`;
+    }
+
     const npm = data.npmInstall;
     if (npm) {
       md += `### npm install failures\n\n`;
@@ -224,17 +298,19 @@ export function renderMarkdown(report, runDir = null) {
     ]);
 
     if (c.uiComponentsList.length > 0) {
-      md += `**UI Components:** ${c.uiComponentsList.map((x) => `\`${x}\``).join(", ")}\n\n`;
+      md += `**UI Components:** ${c.uiComponentsList.map((x) => `\`${sanitizeCode(x)}\``).join(", ")}\n\n`;
     }
     if (c.iconsList.length > 0) {
-      md += `**Icons:** ${c.iconsList.map((x) => `\`${x}\``).join(", ")}\n\n`;
+      md += `**Icons:** ${c.iconsList.map((x) => `\`${sanitizeCode(x)}\``).join(", ")}\n\n`;
     }
 
     if (Object.keys(c.frequency).length > 0) {
       md += `**Component frequency** (across iterations):\n\n`;
       md += `| Component | Iterations Used |\n|-----------|-----------------|\n`;
       for (const [comp, freq] of sortedCounts(c.frequency)) {
-        const label = comp.startsWith("icon:") ? `icon: ${comp.replace("icon:", "")}` : comp;
+        const label = comp.startsWith("icon:")
+          ? `icon: ${sanitizeCell(comp.replace("icon:", ""))}`
+          : sanitizeCell(comp);
         md += `| ${label} | ${freq}/${data.successfulIterations} |\n`;
       }
       md += `\n`;
@@ -256,7 +332,7 @@ export function renderMarkdown(report, runDir = null) {
         md += `**By category:**\n\n`;
         md += `| Category | Count |\n|----------|-------|\n`;
         for (const cat of fb.categoriesSorted) {
-          md += `| ${cat.category} | ${cat.count} |\n`;
+          md += `| ${sanitizeCell(cat.category)} | ${cat.count} |\n`;
         }
         md += `\n`;
       }
@@ -269,7 +345,7 @@ export function renderMarkdown(report, runDir = null) {
         } else {
           md += `**Iteration ${p.iteration}** (${p.items.length} items):\n\n`;
           for (const item of p.items) {
-            md += `- \`${item.category}\` ${item.text}\n`;
+            md += `- \`${sanitizeCode(item.category)}\` ${sanitizeText(item.text)}\n`;
           }
           md += `\n`;
         }
@@ -294,8 +370,8 @@ export function renderMarkdown(report, runDir = null) {
         md += `**Most common violations (axe-core):**\n\n`;
         md += `| Rule | Impact | Modes | Occurrences | Description |\n|------|--------|-------|-------------|-------------|\n`;
         for (const v of a11y.topViolations.slice(0, 15)) {
-          const modes = (v.modes || []).join(", ") || "—";
-          md += `| \`${v.id}\` | ${v.impact || "—"} | ${modes} | ${v.count}/${a11y.iterationsWithResults} | ${(v.description || "").slice(0, 80)} |\n`;
+          const modes = sanitizeCell((v.modes || []).join(", ")) || "—";
+          md += `| \`${sanitizeCode(v.id)}\` | ${sanitizeCell(v.impact) || "—"} | ${modes} | ${v.count}/${a11y.iterationsWithResults} | ${sanitizeCell(v.description, 80)} |\n`;
         }
         md += `\n`;
       }
@@ -388,7 +464,7 @@ export function renderMarkdown(report, runDir = null) {
         md += `**By component (total instances across all iterations):**\n\n`;
         md += `| Component | Total Uses |\n|-----------|------------|\n`;
         for (const [comp, count] of sortedCounts(cu.byComponent)) {
-          md += `| \`${comp}\` | ${count} |\n`;
+          md += `| \`${sanitizeCode(comp)}\` | ${count} |\n`;
         }
         md += `\n`;
       }
@@ -422,7 +498,7 @@ export function renderMarkdown(report, runDir = null) {
         for (const [comp, count] of sortedCounts(is.byComponent)) {
           const totalInstances = totalUsage[comp] || 0;
           const pct = totalInstances > 0 ? `${Math.round((count / totalInstances) * 100)}%` : "—";
-          md += `| \`${comp}\` | ${count} | ${pct} |\n`;
+          md += `| \`${sanitizeCode(comp)}\` | ${count} | ${pct} |\n`;
         }
         md += `\n`;
       }
@@ -504,7 +580,7 @@ export function renderMarkdown(report, runDir = null) {
         md += `**Semantic tags used:**\n\n`;
         md += `| Tag | Count |\n|-----|-------|\n`;
         for (const [tag, count] of semTags) {
-          md += `| \`<${tag}>\` | ${count} |\n`;
+          md += `| \`<${sanitizeCode(tag)}>\` | ${count} |\n`;
         }
         md += `\n`;
       }
@@ -515,7 +591,7 @@ export function renderMarkdown(report, runDir = null) {
         md += `**Generic tags:**\n\n`;
         md += `| Tag | Count |\n|-----|-------|\n`;
         for (const [tag, count] of genTags) {
-          md += `| \`<${tag}>\` | ${count} |\n`;
+          md += `| \`<${sanitizeCode(tag)}>\` | ${count} |\n`;
         }
         md += `\n`;
       }
@@ -526,7 +602,7 @@ export function renderMarkdown(report, runDir = null) {
         md += `**ARIA roles:**\n\n`;
         md += `| Role | Count |\n|------|-------|\n`;
         for (const [role, count] of roles) {
-          md += `| \`${role}\` | ${count} |\n`;
+          md += `| \`${sanitizeCode(role)}\` | ${count} |\n`;
         }
         md += `\n`;
       }

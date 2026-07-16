@@ -6,12 +6,11 @@
  */
 
 import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
-import { resolve, sep } from "node:path";
+import { dirname, resolve, sep } from "node:path";
 import { buildFixSystemPrompt, buildSystemPrompt, getTest } from "../config/prompts.js";
 import { runAccessibilityTests } from "../evaluation/accessibility.js";
-import { deriveErrorHints } from "./error-hints.js";
 import { extractComponentUsageCounts } from "../evaluation/count-component-usage.js";
 import { measureDom } from "../evaluation/dom-count.js";
 import { extractComponentImports } from "../evaluation/extract-component-imports.js";
@@ -22,6 +21,7 @@ import { measureReactProfile } from "../evaluation/react-profile.js";
 import { captureScreenshots } from "../evaluation/screenshot.js";
 import { analyzeSemanticHtml } from "../evaluation/semantic-html.js";
 import { tag, warn } from "../util/color.js";
+import { deriveErrorHints } from "./error-hints.js";
 
 // ─── Prompt accessors ────────────────────────────────────────────────
 
@@ -38,16 +38,54 @@ export function getFixSystemPrompt(testLabel) {
 // ─── File I/O ────────────────────────────────────────────────────────
 
 /**
+ * Canonicalize a path via realpath when it exists, else return it as-is.
+ * Used to resolve symlinks before containment checks.
+ */
+function realIfExists(p) {
+  try {
+    return realpathSync(p);
+  } catch {
+    return p; // ENOENT (not yet created) — nothing to resolve
+  }
+}
+
+/**
  * Resolve a file path inside the project directory, refusing anything
  * that escapes it. File paths come from agent output (untrusted), so
  * this is the last line of defense behind the parse-time filter in
  * `parse-files.js`.
+ *
+ * Two checks: (1) a lexical `resolve()`+prefix guard rejects `..`/absolute
+ * escapes; (2) a symlink-aware guard canonicalizes the deepest existing
+ * ancestor of the target (a to-be-created file's real bytes land under it)
+ * and re-verifies containment against the canonicalized root. Without (2),
+ * a symlink already on disk — e.g. an `npm install`-materialized `file:`
+ * dependency under node_modules — would pass the lexical check yet make the
+ * harness's own writeFile/readFile follow the link outside the sandbox.
  */
 export function resolveWithinProject(projectDir, filePath) {
   const root = resolve(projectDir);
   const resolved = resolve(root, filePath);
   if (resolved !== root && !resolved.startsWith(root + sep)) {
     throw new Error(`Refusing to access path outside the project directory: ${filePath}`);
+  }
+
+  // Symlink-aware containment. Compare canonicalized real paths so a
+  // symlinked ancestor is caught. The root itself is canonicalized too
+  // (e.g. macOS /var → /private/var) so a legitimate path isn't rejected.
+  const realRoot = realIfExists(root);
+  // Walk up to the deepest ancestor that exists on disk; its realpath
+  // reveals any symlink in the chain. The non-existent tail can't be a
+  // symlink, so canonicalizing the existing ancestor is sufficient.
+  let ancestor = resolved;
+  while (ancestor !== root && ancestor !== dirname(ancestor) && !existsSync(ancestor)) {
+    ancestor = dirname(ancestor);
+  }
+  const realAncestor = realIfExists(ancestor);
+  if (realAncestor !== realRoot && !realAncestor.startsWith(realRoot + sep)) {
+    throw new Error(
+      `Refusing to access path that resolves (via symlink) outside the project directory: ${filePath}`,
+    );
   }
   return resolved;
 }
@@ -267,9 +305,7 @@ export function buildFixPrompt(currentFilesText, consoleErrors, fatalError) {
   // Pair each error with its fix: design-system-aware hints derived from the
   // error text (named component + valid props, import corrections, etc.) so the
   // model resolves the actual cause instead of re-guessing from raw TS type-soup.
-  const hints = deriveErrorHints(
-    [fatalError || "", ...(consoleErrors || [])].join("\n"),
-  );
+  const hints = deriveErrorHints([fatalError || "", ...(consoleErrors || [])].join("\n"));
   if (hints.length > 0) {
     prompt += `## How to fix\n\n`;
     prompt += hints.map((h) => `- ${h}`).join("\n") + "\n\n";
@@ -320,6 +356,9 @@ export async function buildResult({
   // report layer to surface dependency-install issues separately from
   // code errors in the fix loop.
   npmInstallFailures = 0,
+  // Validation cycles where a transient toolchain flake (tsc failure
+  // contradicting on-disk state) was healed by a single retry.
+  tscFlakes = 0,
 }) {
   // Token-usage breakdown. Prompt caching splits input tokens across
   // three buckets billed at different rates: uncached at 1.0×,
@@ -389,6 +428,7 @@ export async function buildResult({
     residualLint,
     residualAxe,
     npmInstallFailures,
+    tscFlakes,
   };
   await writeFile(resolve(iterDir, "_meta.json"), JSON.stringify(meta, null, 2), "utf-8");
 

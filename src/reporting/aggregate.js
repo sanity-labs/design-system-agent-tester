@@ -33,8 +33,19 @@ export function extractMetrics(data) {
     fixesAvg: data.fixAttempts?.average ?? null,
     fixesTotal: data.fixAttempts?.total ?? null,
     cleanOnFirstTry: data.fixAttempts?.iterationsCleanOnFirstTry ?? null,
+    // Per-stage fix counts (null on reports predating the byStage split).
+    // Build fixes = the app didn't compile/render; a11y fixes = it rendered
+    // but axe flagged violations. Kept separate so the Build table never
+    // counts accessibility repairs and vice versa.
+    buildFixesTotal: data.fixAttempts?.byStage?.build?.total ?? null,
+    buildFixesAvg: data.fixAttempts?.byStage?.build?.average ?? null,
+    buildCleanOnFirstTry: data.fixAttempts?.iterationsBuildCleanOnFirstTry ?? null,
+    a11yFixesTotal: data.fixAttempts?.byStage?.accessibility?.total ?? null,
+    a11yFixesAvg: data.fixAttempts?.byStage?.accessibility?.average ?? null,
+    lintFixesTotal: data.fixAttempts?.byStage?.lint?.total ?? null,
     npmInstallFailuresTotal: data.npmInstall?.total ?? null,
     npmInstallFailuresAffected: data.npmInstall?.affectedIterations ?? null,
+    tscFlakesTotal: data.tscFlakes?.total ?? null,
     inlineTotal: data.inlineStyles?.totalAcrossIterations ?? null,
     inlineAvg: data.inlineStyles?.averagePerIteration ?? null,
     boxInline: data.inlineStyles?.byComponent?.Box ?? 0,
@@ -79,8 +90,19 @@ const AGGREGATABLE_KEYS = [
   "fixesAvg",
   "fixesTotal",
   "cleanOnFirstTry",
+  // Per-stage fix metrics — a key extracted in extractMetrics() only
+  // reaches the summary tables if it is ALSO listed here; the aggregator
+  // averages this whitelist and drops everything else (an omitted key
+  // renders as "—" even when the report has the data).
+  "buildFixesAvg",
+  "buildFixesTotal",
+  "buildCleanOnFirstTry",
+  "a11yFixesAvg",
+  "a11yFixesTotal",
+  "lintFixesTotal",
   "npmInstallFailuresTotal",
   "npmInstallFailuresAffected",
+  "tscFlakesTotal",
   "inlineTotal",
   "inlineAvg",
   "boxInline",
@@ -156,10 +178,16 @@ const METRIC_GROUPS = [
     heading: "Build",
     rows: [
       ["Lines of code (avg)", "loc", false, 0],
-      ["Fix attempts / iter", "fixesAvg", true, 2],
-      ["Total fixes (avg per run)", "fixesTotal", true, 1],
+      // Build-stage fixes only — accessibility and lint repairs are
+      // reported in their own groups so a rendering app that needed a11y
+      // polish is never counted as a build problem.
+      ["Build fixes / iter", "buildFixesAvg", true, 2],
+      ["Build fixes (avg per run)", "buildFixesTotal", true, 1],
+      ["Fix attempts / iter (all gates)", "fixesAvg", true, 2],
+      ["Total fixes (all gates, avg per run)", "fixesTotal", true, 1],
       ["npm install failures (total)", "npmInstallFailuresTotal", true, 1],
       ["Iterations with install failure", "npmInstallFailuresAffected", true, 1],
+      ["tsc flakes healed (total)", "tscFlakesTotal", true, 1],
       // "Clean on 1st try" is computed below from cleanOnFirstTry +
       // totalIterations; it has bespoke formatting and is appended
       // automatically into this group when iteration count is known.
@@ -170,6 +198,8 @@ const METRIC_GROUPS = [
     rows: [
       ["Axe violations total", "axeTotal", true, 1],
       ["Axe violations / iter", "axeAvg", true, 2],
+      ["A11y fixes / iter", "a11yFixesAvg", true, 2],
+      ["A11y fixes (avg per run)", "a11yFixesTotal", true, 1],
     ],
   },
   {
@@ -257,21 +287,27 @@ function buildGroupColumns(group, iters) {
     ...(format ? { format } : {}),
   }));
 
-  // Inject the special-formatted "Clean on 1st try" column right after
-  // "Total fixes" when we're rendering the Build group and we know the
-  // iteration count.
+  // Inject the special-formatted "clean on 1st try" columns when we're
+  // rendering the Build group and we know the iteration count. Two
+  // variants: build-gate-only (compiled/rendered without a build fix)
+  // and all-gates (no fixes of any kind, including a11y/lint polish).
   if (group.heading === "Build" && iters) {
-    const insertAt = cols.findIndex((c) => c.key === "fixesTotal") + 1;
-    cols.splice(insertAt, 0, {
-      label: "Clean on 1st try (avg)",
-      key: "cleanOnFirstTry",
+    const cleanCol = (label, key) => ({
+      label,
+      key,
       lowerBetter: false,
       format: (agg) => {
-        if (!agg || agg.cleanOnFirstTry === null) return "—";
-        const pct = ((agg.cleanOnFirstTry / iters) * 100).toFixed(0);
-        return `${fmt(agg.cleanOnFirstTry, 1)} / ${iters} (${pct}%)`;
+        // == null catches both null and undefined; NaN appears when the
+        // aggregator averaged runs that all predate the metric.
+        if (!agg || agg[key] == null || Number.isNaN(agg[key])) return "—";
+        const pct = ((agg[key] / iters) * 100).toFixed(0);
+        return `${fmt(agg[key], 1)} / ${iters} (${pct}%)`;
       },
     });
+    const buildAt = cols.findIndex((c) => c.key === "buildFixesTotal") + 1;
+    cols.splice(buildAt, 0, cleanCol("Build-clean on 1st try (avg)", "buildCleanOnFirstTry"));
+    const allAt = cols.findIndex((c) => c.key === "fixesTotal") + 1;
+    cols.splice(allAt, 0, cleanCol("Clean on 1st try (all gates, avg)", "cleanOnFirstTry"));
   }
 
   return cols;

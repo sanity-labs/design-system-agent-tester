@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -5,11 +6,13 @@ import { parseArgs } from "node:util";
 import { generateAppPrompt, STATIC_PROMPT } from "./config/prompt-generator.js";
 import { buildUserPrompt, TEST_LABELS, TESTS } from "./config/prompts.js";
 import { computeVisualDiff } from "./evaluation/visual-diff.js";
+import { resolveCliEntry, resolveTestEnv, runDoctorGate } from "./pipeline/dsds-cli.js";
 import { iterationBuilt } from "./reporting/aggregators.js";
 import { generateReport } from "./reporting/report.js";
 import { banner, bold, dim, error, success, tag, warn } from "./util/color.js";
 import { loadEnvFile, requireApiKey } from "./util/load-env.js";
 import { isTransientError } from "./util/retry.js";
+import { acquireRunLock, releaseRunLock } from "./util/run-lock.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
@@ -42,6 +45,11 @@ const { values } = parseArgs({
       short: "m",
       default: "claude-sonnet-4-6",
     },
+    // Comma-separated list of model IDs. Runs every test across every model
+    // (tests × models × iterations). Takes precedence over --model.
+    models: {
+      type: "string",
+    },
     concurrency: {
       type: "string",
       short: "c",
@@ -60,6 +68,12 @@ const { values } = parseArgs({
     "agent-prompt": {
       type: "boolean",
       default: false,
+    },
+    // Use a fixed brief read verbatim from a file. Overrides both the static
+    // fallback and --agent-prompt, so a run is exactly reproducible — required
+    // for controlled A/B comparisons (same brief, different tooling/surface).
+    "brief-file": {
+      type: "string",
     },
     genui: {
       type: "boolean",
@@ -94,7 +108,12 @@ if (values.test === "all" && values.prompt !== undefined) {
  * @param {string}  model - Claude model used for generation
  * @returns {Promise<string>}
  */
-async function resolvePromptBrief(useAgentPrompt, model) {
+async function resolvePromptBrief(useAgentPrompt, model, briefFile) {
+  if (briefFile) {
+    const brief = readFileSync(resolve(briefFile), "utf-8");
+    console.log(`Using fixed brief from ${briefFile} (${brief.length} chars) — reproducible run.`);
+    return brief;
+  }
   if (!useAgentPrompt) {
     return STATIC_PROMPT;
   }
@@ -150,7 +169,23 @@ async function buildTimestampedRunPath() {
 async function main() {
   const testArg = values.test;
   const iterations = parseInt(values.iterations, 10);
-  const model = values.model;
+  // --models (comma-separated) wins over --model; a single-model run via
+  // either flag behaves identically (no extra path segment, plain report keys).
+  const models = values.models
+    ? [
+        ...new Set(
+          values.models
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean),
+        ),
+      ]
+    : [values.model];
+  if (models.length === 0) {
+    console.error("Error: --models must contain at least one model ID");
+    process.exit(1);
+  }
+  const multiModel = models.length > 1;
   // Default to 1 (sequential) so Lighthouse / DOM / screenshot measurements
   // aren't biased by CPU contention between parallel iterations. Pass an
   // explicit `--concurrency 2+` for runs that prioritise wall-clock time
@@ -212,12 +247,20 @@ async function main() {
   const runDirPath = await buildTimestampedRunPath();
   const runDir = resolve(ROOT, "output", runDirPath);
 
-  // Resolve the interface brief once — both prompt variants receive the same text.
-  const promptBrief = await resolvePromptBrief(useAgentPrompt, model);
+  // One harness run per machine. Concurrent runs contend for CPU, npm, and
+  // dev-server resources — widening the install/typecheck race window and
+  // skewing Lighthouse — so the second run refuses to start instead.
+  acquireRunLock({ runDir: runDirPath });
+
+  // Resolve the interface brief once — every test AND every model receives
+  // the same text, so cross-model results stay comparable.
+  const promptBrief = await resolvePromptBrief(useAgentPrompt, models[0], values["brief-file"]);
 
   console.log(banner("=== Agent Tester ==="));
   const field = (k) => dim(k.padEnd(13));
-  console.log(`${field("Model:")} ${model} (Anthropic SDK — requires ANTHROPIC_API_KEY)`);
+  console.log(
+    `${field(multiModel ? "Models:" : "Model:")} ${models.join(", ")} (Anthropic SDK — requires ANTHROPIC_API_KEY)`,
+  );
   console.log(
     `${field("Mode:")} ${genui ? "genui — EXPERIMENTAL (agent writes JSON → compiled to React)" : "build (agent writes React)"}`,
   );
@@ -234,12 +277,12 @@ async function main() {
   console.log("");
 
   if (!values.yes) {
-    const total = iterations * testLabels.length;
+    const total = iterations * testLabels.length * models.length;
     const low = (0.05 * total).toFixed(2);
     const high = (1.0 * total).toFixed(2);
     console.log(
       warn(
-        `About to run ${total} agent iterations against ${model}. Each iteration spends\nAPI tokens; the cost depends heavily on the model. As a rough guide for a\nmid-tier model (e.g. Sonnet), expect ~$0.05–$1.00 per iteration, so roughly\n$${low}–$${high} for this run. Higher-tier models (e.g. Opus) cost several times\nmore. Press Ctrl-C within 5 seconds to abort, or pass --yes to skip this warning.`,
+        `About to run ${total} agent iterations against ${models.join(", ")}. Each iteration spends\nAPI tokens; the cost depends heavily on the model. As a rough guide for a\nmid-tier model (e.g. Sonnet), expect ~$0.05–$1.00 per iteration, so roughly\n$${low}–$${high} for this run. Higher-tier models (e.g. Opus) cost several times\nmore. Press Ctrl-C within 5 seconds to abort, or pass --yes to skip this warning.`,
       ),
     );
     await new Promise((r) => setTimeout(r, 5000));
@@ -253,130 +296,178 @@ async function main() {
       console.error(error(`--genui requires a test with an \`mcp\` block; "${label}" has none.`));
       process.exit(1);
     }
+
+    // Pre-run doctor gate: when the test's design-system tooling ships the
+    // dsds CLI, verify the entire configuration (documents load and validate,
+    // lint plugins resolve, package export paths exist, spec versions align)
+    // BEFORE spending any tokens. A broken config here has previously poisoned
+    // entire runs with bogus "agent errors"; abort loudly instead.
+    const doctorCliEntry = resolveCliEntry(test);
+    if (doctorCliEntry) {
+      console.log(`${dim(`[${label}]`)} Running dsds doctor preflight…`);
+      try {
+        const doctor = await runDoctorGate(doctorCliEntry, resolveTestEnv(test));
+        if (!doctor.ok) {
+          console.error(
+            error(
+              `\n✗ dsds doctor failed for "${label}" — the test configuration or documents are broken.`,
+            ),
+          );
+          console.error(doctor.report);
+          console.error(
+            error(
+              "\nAborting: running against a broken configuration produces garbage measurements.",
+            ),
+          );
+          process.exit(1);
+        }
+        console.log(`${dim(`[${label}]`)} doctor: all checks passed`);
+      } catch (err) {
+        console.warn(
+          warn(
+            `[${label}] doctor preflight could not run (${err.message}) — continuing without it.`,
+          ),
+        );
+      }
+    }
     // In genui mode the system prompt carries the catalog + format rules, so the
     // user message is the raw brief; the React path wraps it with test framing.
     const promptContent = genui ? promptBrief : buildUserPrompt(label, promptBrief);
 
-    console.log(bold(`\n--- Running "${label}" test (${iterations} iterations) ---\n`));
+    for (const model of models) {
+      // Each model gets its own result bucket and (in multi-model runs) its
+      // own output subdirectory. The key uses a `/` so it doubles as the
+      // path fragment under runDir — the visual-diff pass resolves it
+      // directly. Single-model runs keep the plain label for back-compat
+      // with existing reports and the aggregate tooling.
+      const runKey = multiModel ? `${label}/${model}` : label;
 
-    const outputDir = resolve(runDir, label);
-    await mkdir(outputDir, { recursive: true });
+      console.log(
+        bold(
+          `\n--- Running "${label}" test${multiModel ? ` on ${model}` : ""} (${iterations} iterations) ---\n`,
+        ),
+      );
 
-    const results = [];
+      const outputDir = resolve(runDir, runKey);
+      await mkdir(outputDir, { recursive: true });
 
-    // Run iterations with bounded concurrency
-    const queue = Array.from({ length: iterations }, (_, i) => i);
-    const inFlight = new Set();
+      const results = [];
 
-    async function runNext() {
-      if (queue.length === 0) return;
-      const idx = queue.shift();
-      const iterLabel = `${label}-iter-${idx + 1}`;
-      const iterDir = resolve(outputDir, `iteration-${idx + 1}`);
-      await mkdir(iterDir, { recursive: true });
+      // Run iterations with bounded concurrency
+      const queue = Array.from({ length: iterations }, (_, i) => i);
+      const inFlight = new Set();
 
-      console.log(`${tag(iterLabel)} Starting...`);
-      const startTime = Date.now();
+      async function runNext() {
+        if (queue.length === 0) return;
+        const idx = queue.shift();
+        const iterLabel = `${runKey}-iter-${idx + 1}`;
+        const iterDir = resolve(outputDir, `iteration-${idx + 1}`);
+        await mkdir(iterDir, { recursive: true });
 
-      let lastError = null;
+        console.log(`${tag(iterLabel)} Starting...`);
+        const startTime = Date.now();
 
-      for (let attempt = 1; attempt <= MAX_ITERATION_RETRIES; attempt++) {
-        try {
-          const result = await runAgent({
-            promptContent,
-            model,
-            iterDir,
-            iterLabel,
-            testLabel: label,
-            takeScreenshots,
-            maxFixes,
-            mcpConfig: test.mcp,
-            genui,
-          });
+        let lastError = null;
 
-          const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-          console.log(`${tag(iterLabel)} ${success(`Completed in ${elapsed}s`)}`);
+        for (let attempt = 1; attempt <= MAX_ITERATION_RETRIES; attempt++) {
+          try {
+            const result = await runAgent({
+              promptContent,
+              model,
+              iterDir,
+              iterLabel,
+              testLabel: label,
+              takeScreenshots,
+              maxFixes,
+              mcpConfig: test.mcp,
+              cliConfig: test.cli ?? null,
+              genui,
+            });
 
-          results[idx] = {
-            iteration: idx + 1,
-            elapsedSeconds: parseFloat(elapsed),
-            ...result,
-          };
-          return; // success — exit retry loop
-        } catch (err) {
-          lastError = err;
-          const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+            const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+            console.log(`${tag(iterLabel)} ${success(`Completed in ${elapsed}s`)}`);
 
-          if (isTransientError(err) && attempt < MAX_ITERATION_RETRIES) {
-            const delaySec = Math.round(RETRY_DELAY_MS / 1000);
-            console.warn(
-              `${tag(iterLabel)} ${warn(`Transient error after ${elapsed}s (attempt ${attempt}/${MAX_ITERATION_RETRIES}):`)} ${err.message}`,
-            );
-            console.warn(`${tag(iterLabel)} ${warn(`Waiting ${delaySec}s before retry...`)}`);
-            await sleep(RETRY_DELAY_MS);
-            continue;
+            results[idx] = {
+              iteration: idx + 1,
+              elapsedSeconds: parseFloat(elapsed),
+              ...result,
+            };
+            return; // success — exit retry loop
+          } catch (err) {
+            lastError = err;
+            const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+            if (isTransientError(err) && attempt < MAX_ITERATION_RETRIES) {
+              const delaySec = Math.round(RETRY_DELAY_MS / 1000);
+              console.warn(
+                `${tag(iterLabel)} ${warn(`Transient error after ${elapsed}s (attempt ${attempt}/${MAX_ITERATION_RETRIES}):`)} ${err.message}`,
+              );
+              console.warn(`${tag(iterLabel)} ${warn(`Waiting ${delaySec}s before retry...`)}`);
+              await sleep(RETRY_DELAY_MS);
+              continue;
+            }
+
+            // Non-transient error or final attempt — give up
+            console.error(`${tag(iterLabel)} ${error(`Failed after ${elapsed}s:`)} ${err.message}`);
+            break;
           }
+        }
 
-          // Non-transient error or final attempt — give up
-          console.error(`${tag(iterLabel)} ${error(`Failed after ${elapsed}s:`)} ${err.message}`);
-          break;
+        // All retries exhausted or non-transient error
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+        // Persist the failure to the iteration directory. Without this a
+        // failed iteration leaves only `_prompt.txt`, so the cause is lost
+        // once the terminal scrolls — and the bug-report template asks for
+        // artifacts that wouldn't exist. Best-effort: never let a write
+        // error mask the original failure.
+        try {
+          await writeFile(
+            resolve(iterDir, "_error.txt"),
+            `${new Date().toISOString()} — iteration failed after ${elapsed}s\n\n` +
+              (lastError?.stack || lastError?.message || String(lastError)) +
+              "\n",
+            "utf-8",
+          );
+        } catch {
+          // ignore — the in-memory result below still records the message
+        }
+
+        results[idx] = {
+          iteration: idx + 1,
+          elapsedSeconds: parseFloat(elapsed),
+          testLabel: label,
+          error: lastError.message,
+          linesOfCode: 0,
+          files: [],
+          componentImports: [],
+        };
+      }
+
+      // Process queue with concurrency limit
+      async function processQueue() {
+        while (queue.length > 0 || inFlight.size > 0) {
+          while (queue.length > 0 && inFlight.size < maxConcurrency) {
+            // runNext records its own failures in `results`; a rejection
+            // here is unexpected (e.g. mkdir failed). Catch it so the
+            // tracked promise can't reject — an unhandled rejection in
+            // Promise.race would abort the whole run.
+            const promise = runNext().catch((err) => {
+              console.error(`${tag(label)} ${error("Iteration runner crashed:")} ${err.message}`);
+            });
+            inFlight.add(promise);
+            promise.then(() => inFlight.delete(promise));
+          }
+          if (inFlight.size > 0) {
+            await Promise.race(inFlight);
+          }
         }
       }
 
-      // All retries exhausted or non-transient error
-      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      await processQueue();
 
-      // Persist the failure to the iteration directory. Without this a
-      // failed iteration leaves only `_prompt.txt`, so the cause is lost
-      // once the terminal scrolls — and the bug-report template asks for
-      // artifacts that wouldn't exist. Best-effort: never let a write
-      // error mask the original failure.
-      try {
-        await writeFile(
-          resolve(iterDir, "_error.txt"),
-          `${new Date().toISOString()} — iteration failed after ${elapsed}s\n\n` +
-            (lastError?.stack || lastError?.message || String(lastError)) +
-            "\n",
-          "utf-8",
-        );
-      } catch {
-        // ignore — the in-memory result below still records the message
-      }
-
-      results[idx] = {
-        iteration: idx + 1,
-        elapsedSeconds: parseFloat(elapsed),
-        testLabel: label,
-        error: lastError.message,
-        linesOfCode: 0,
-        files: [],
-        componentImports: [],
-      };
-    }
-
-    // Process queue with concurrency limit
-    async function processQueue() {
-      while (queue.length > 0 || inFlight.size > 0) {
-        while (queue.length > 0 && inFlight.size < maxConcurrency) {
-          // runNext records its own failures in `results`; a rejection
-          // here is unexpected (e.g. mkdir failed). Catch it so the
-          // tracked promise can't reject — an unhandled rejection in
-          // Promise.race would abort the whole run.
-          const promise = runNext().catch((err) => {
-            console.error(`${tag(label)} ${error("Iteration runner crashed:")} ${err.message}`);
-          });
-          inFlight.add(promise);
-          promise.then(() => inFlight.delete(promise));
-        }
-        if (inFlight.size > 0) {
-          await Promise.race(inFlight);
-        }
-      }
-    }
-
-    await processQueue();
-
-    allResults[label] = results;
+      allResults[runKey] = results;
+    } // end per-model loop
   }
 
   // Visual diff: compare screenshots within each test

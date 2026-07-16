@@ -49,7 +49,20 @@ export function isSafeRelativePath(filePath) {
     return false;
   }
   const normalized = normalize(filePath);
-  return normalized !== ".." && !normalized.startsWith(`..${sep}`) && !normalized.startsWith("../");
+  if (normalized === ".." || normalized.startsWith(`..${sep}`) || normalized.startsWith("../")) {
+    return false;
+  }
+  // Refuse any `node_modules` segment. The harness preserves node_modules
+  // across fix-loop turns and `npm install` can materialize a `file:`/`link:`
+  // dependency there as a symlink pointing outside the sandbox; an agent
+  // path like `node_modules/<dep>/x` is lexically contained but would follow
+  // that symlink on write/read. The agent never legitimately writes into
+  // node_modules, so blocking the segment closes the vector at parse time.
+  const segments = normalized.split(/[\\/]/);
+  if (segments.includes("node_modules")) {
+    return false;
+  }
+  return true;
 }
 
 /** Drop files whose paths would escape the project directory. */
@@ -61,24 +74,59 @@ function rejectUnsafePaths(files) {
   });
 }
 
+// Agent output is untrusted and, in MCP mode, parseFiles runs on the
+// cumulative conversation buffer every turn. Cap the text before any
+// scanning so a crafted response (e.g. tens of thousands of unterminated
+// `---FILE:` anchors, or a code fence followed by a long whitespace run)
+// can't drive quadratic work and stall the single-threaded orchestrator.
+// Legitimate output is bounded by max_tokens (~128KB); this cap is far
+// above that.
+export const MAX_PARSE_BYTES = 2_000_000;
+
+/**
+ * Split `---FILE: path--- … ---END FILE---` blocks with linear-time
+ * indexOf scanning instead of a lazy `[\s\S]*?`-to-far-terminator regex
+ * (which backtracks to end-of-input at every anchor when terminators are
+ * missing — O(n²) on adversarial input).
+ */
+function parseFileBlocks(text) {
+  const files = [];
+  const OPEN = "---FILE:";
+  const CLOSE = "---END FILE---";
+  let cursor = 0;
+  while (true) {
+    const open = text.indexOf(OPEN, cursor);
+    if (open === -1) break;
+    // The path runs to the `---\n` that terminates the header line.
+    const headerEnd = text.indexOf("---\n", open + OPEN.length);
+    if (headerEnd === -1) break;
+    const close = text.indexOf(CLOSE, headerEnd + 4);
+    if (close === -1) break;
+    const filePath = text.slice(open + OPEN.length, headerEnd).trim();
+    const content = stripWrappingFence(text.slice(headerEnd + 4, close));
+    if (filePath) files.push({ path: filePath, content });
+    cursor = close + CLOSE.length;
+  }
+  return files;
+}
+
 /**
  * Parse ---FILE: path--- / ---END FILE--- blocks from the agent output.
  */
 export function parseFiles(text) {
-  const files = [];
-  const fileRegex = /---FILE:\s*(.+?)---\n([\s\S]*?)---END FILE---/g;
+  if (typeof text !== "string") return [];
+  // Neutralize the algorithmic-complexity vector before scanning.
+  if (text.length > MAX_PARSE_BYTES) text = text.slice(0, MAX_PARSE_BYTES);
+
+  const files = parseFileBlocks(text);
   let match;
 
-  while ((match = fileRegex.exec(text)) !== null) {
-    const filePath = match[1].trim();
-    const content = stripWrappingFence(match[2]);
-    files.push({ path: filePath, content });
-  }
-
-  // Fallback: try to parse fenced code blocks with filenames if no ---FILE--- blocks found
+  // Fallback: try to parse fenced code blocks with filenames if no ---FILE--- blocks found.
+  // The `[ \t]*` (not `\s*`) around the marker avoids the ambiguous whitespace
+  // partitioning that made the old `\s*\n?\s*` group backtrack quadratically.
   if (files.length === 0) {
     const fencedRegex =
-      /```(?:[a-z]*)\s*\n?\s*(?:\/\/|#|<!--)\s*(?:file:\s*)?(\S+?)(?:\s*-->)?\s*\n([\s\S]*?)```/g;
+      /```(?:[a-z]*)[ \t]*\n[ \t]*(?:\/\/|#|<!--)[ \t]*(?:file:[ \t]*)?(\S+?)(?:[ \t]*-->)?[ \t]*\n([\s\S]*?)```/g;
     while ((match = fencedRegex.exec(text)) !== null) {
       files.push({ path: match[1].trim(), content: match[2] });
     }
