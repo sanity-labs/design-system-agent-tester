@@ -181,3 +181,40 @@ describe("extractComponentImports", () => {
     expect(result.size).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Security: linear-time scan of adversarial import content (no quadratic blowup)
+// ---------------------------------------------------------------------------
+describe("extractComponentImports resists algorithmic-complexity attacks", () => {
+  it("returns promptly on a multi-megabyte `import {`-flood with no closing brace", () => {
+    const content = "import {".repeat(250_000); // exactly ~2MB, all unclosed
+    const start = process.hrtime.bigint();
+    const s = extractComponentImports([{ path: "A.tsx", content }], ["@sanity/ui"]);
+    const ms = Number(process.hrtime.bigint() - start) / 1e6;
+    expect(s.size).toBe(0);
+    expect(ms).toBeLessThan(1000); // old backtracking regex hung for minutes here
+  });
+
+  it("returns promptly on many closed-but-non-matching imports", () => {
+    const content = 'import {x} from "nope"'.repeat(100_000);
+    const start = process.hrtime.bigint();
+    extractComponentImports([{ path: "A.tsx", content }], ["@sanity/ui"]);
+    const ms = Number(process.hrtime.bigint() - start) / 1e6;
+    expect(ms).toBeLessThan(1000);
+  });
+
+  it("still extracts named + type + aliased imports from the target package", () => {
+    const content =
+      'import { Box, Button as B } from "@sanity/ui"\nimport type { P } from "@sanity/ui"';
+    const s = extractComponentImports([{ path: "A.tsx", content }], ["@sanity/ui"]);
+    expect([...s].sort()).toEqual(["Box", "Button", "P"]);
+  });
+
+  it("ignores imports from other packages", () => {
+    const s = extractComponentImports(
+      [{ path: "A.tsx", content: 'import { Card } from "other"' }],
+      ["@sanity/ui"],
+    );
+    expect(s.size).toBe(0);
+  });
+});

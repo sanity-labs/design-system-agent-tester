@@ -8,7 +8,6 @@ import { error, success, tag, warn } from "../util/color.js";
 import { isTransientError } from "../util/retry.js";
 import { execDsdsCommand, resolveCliEntry, resolveTestEnv, runCliLintGate } from "./dsds-cli.js";
 import { createMcpClient } from "./mcp-client.js";
-import { generateGenuiProjectWithMcp } from "./runner-genui.js";
 import {
   buildCurrentFilesText,
   buildFixPrompt,
@@ -819,7 +818,6 @@ export async function runAgent({
   maxGenerationRetries = 3,
   mcpConfig = null,
   cliConfig = null,
-  genui = false,
 }) {
   const systemPrompt = getSystemPrompt(testLabel);
   const fixSystemPrompt = getFixSystemPrompt(testLabel);
@@ -838,9 +836,6 @@ export async function runAgent({
   });
 
   const needsMcp = Boolean(mcpConfig);
-  if (genui && !needsMcp) {
-    throw new Error("--genui requires a test with an `mcp` block (e.g. ui4-mcp).");
-  }
 
   // Save the fully-resolved prompt for this iteration so it can be inspected
   // later to confirm every iteration received the same brief.
@@ -924,19 +919,7 @@ export async function runAgent({
     const attemptPrompt = promptContent + retryNotice;
 
     let result;
-    if (genui) {
-      // genui: agent writes a validated JSON spec, compiled to a React project.
-      // The returned files then flow through the identical pipeline below.
-      result = await generateGenuiProjectWithMcp({
-        client,
-        model,
-        promptContent: attemptPrompt,
-        iterDir,
-        iterLabel,
-        mcpConfig,
-        maxSpecFixes: maxFixes,
-      });
-    } else if (cliConfig && !mcpConfig) {
+    if (cliConfig && !mcpConfig) {
       result = await generateWithCli({
         client,
         model,
@@ -1070,9 +1053,8 @@ export async function runAgent({
 
   // --- Step 2: ordered, bounded repair loop — lint → build → accessibility ---
   if (takeScreenshots && files.some((f) => f.path === "package.json")) {
-    // Lint and a11y gate the React-code path. genui output is renderer-generated,
-    // so it keeps the build-only loop (gates skipped when gateLintAndA11y=false).
-    const gateLintAndA11y = !genui;
+    // Lint and a11y gate the React-code path (all agents write React directly).
+    const gateLintAndA11y = true;
     let exitStage = null;
     let firstTryLint = null;
     let firstTryAxe = null;

@@ -212,26 +212,6 @@ Every test in a run gets the same interface brief. That keeps results comparable
 
 Edit `briefs/default.js` (or point `briefGenerator` at your own module) to change what the agents are asked to build.
 
-## Generative UI mode (experimental)
-
-Instead of asking the agent to hand-write React, generative-UI mode asks it to
-emit a JSON UI spec that a server-side renderer turns into components. It needs
-a test with an `mcp` block whose server exposes a component **catalog** and a
-spec **validation** tool, so it only works against a design system documented
-that way — there is no generally-runnable example in this repo. Both entry
-points require such a test and will exit with a clear message if none is found:
-
-- `npm start -- --test <label> --genui` — compiles the spec to a real React app
-  and runs the full build / screenshot / measurement pipeline, producing the
-  same `report.md` as a normal run.
-- `npm run genui` — a lighter standalone runner over the briefs in
-  `src/genui/briefs.js` that measures **spec validity** (not a React build), so
-  it writes no screenshots and starts no dev server. Pass `--test <label>` to
-  pick the MCP test, or it uses the first one it finds.
-
-This mode is experimental and tied to MCP servers that expose a catalog +
-validation tool; treat it as a preview, not a stable surface.
-
 ## What the report measures
 
 | Section | Metric |
@@ -257,7 +237,6 @@ validation tool; treat it as a preview, not a stable surface.
 |---|---|
 | `npm run new-test -- <label>` | Scaffold a new test directory. |
 | `npm run summarize` | Aggregate metrics across runs. |
-| `npm run genui` | Generative-UI spec runner (experimental — needs an MCP test). |
 | `npm test` | Run unit tests. |
 
 ### Summarize across runs
