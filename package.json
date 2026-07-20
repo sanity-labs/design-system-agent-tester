@@ -7,12 +7,12 @@
   "main": "src/index.js",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/sanity-io/design-system-agent-tester.git"
+    "url": "git+https://github.com/sanity-labs/design-system-agent-tester.git"
   },
   "bugs": {
-    "url": "https://github.com/sanity-io/design-system-agent-tester/issues"
+    "url": "https://github.com/sanity-labs/design-system-agent-tester/issues"
   },
-  "homepage": "https://github.com/sanity-io/design-system-agent-tester#readme",
+  "homepage": "https://github.com/sanity-labs/design-system-agent-tester#readme",
   "author": "Sanity.io <hello@sanity.io>",
   "keywords": [
     "ai",

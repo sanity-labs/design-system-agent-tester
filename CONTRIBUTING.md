@@ -8,7 +8,7 @@ Requirements: Node.js ≥ 22.12 and a local Chromium (Puppeteer downloads
 one on install unless `PUPPETEER_SKIP_DOWNLOAD` is set).
 
 ```sh
-git clone https://github.com/sanity-io/design-system-agent-tester.git
+git clone https://github.com/sanity-labs/design-system-agent-tester.git
 cd design-system-agent-tester
 npm install
 cp agent-tester.config.example.js agent-tester.config.js
