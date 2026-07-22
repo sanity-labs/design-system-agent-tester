@@ -261,6 +261,30 @@ export function renderMarkdown(report, runDir = null) {
       }
     }
 
+    // tsconfig / project-reference scaffold errors — a broken tsconfig the
+    // agent wrote (unknown compiler option, missing/misconfigured project
+    // reference), not a flake and not an ordinary app-code bug.
+    const tscfg = data.tsconfigErrors;
+    if (tscfg && tscfg.total > 0) {
+      md += `### tsconfig / project-reference errors\n\n`;
+      md += metricTable([
+        ["Total errors", tscfg.total],
+        [
+          "Iterations with at least one error",
+          `${tscfg.affectedIterations}/${tscfg.totalIterations}`,
+        ],
+      ]);
+      md += `_A tsconfig scaffold error (TS5023, TS6053, TS6305, TS6306) means the agent's own tsconfig.json/tsconfig.app.json is invalid — often a broken project-reference setup imitating Vite's split app/node config. Not a toolchain flake and not an ordinary code bug._\n\n`;
+      const offenders = tscfg.perIteration.filter((p) => p.errors > 0);
+      if (offenders.length > 0) {
+        md += `**Per-iteration breakdown:**\n\n`;
+        for (const p of offenders) {
+          md += `- **Iteration ${p.iteration}:** ${p.errors} error(s)\n`;
+        }
+        md += `\n`;
+      }
+    }
+
     // Repair Loop — where iterations exited and residual lint/axe state.
     const rl = data.repairLoop;
     if (rl && rl.measured > 0) {
@@ -276,6 +300,23 @@ export function renderMarkdown(report, runDir = null) {
       md += `|------|---------------|--------------|-----------------|---------------|\n`;
       md += `| Lint | ${cell(rl.lint.firstTryAvg)} | ${cell(rl.lint.residualAvg)} | ${cell(rl.lint.iterationsCleanFirstTry)}/${rl.measured} | ${rl.lint.iterationsWithResidual} |\n`;
       md += `| Accessibility (axe) | ${cell(rl.axe.firstTryAvg)} | ${cell(rl.axe.residualAvg)} | ${cell(rl.axe.iterationsCleanFirstTry)}/${rl.measured} | ${rl.axe.iterationsWithResidual} |\n\n`;
+
+      // Rule-level lint telemetry: which eslint rules agents trip most (first
+      // try = shift-left/autofix candidates) and which survive the sub-loop
+      // (residual = leaks to prioritise).
+      const ruleRows = (list) =>
+        (list ?? [])
+          .slice(0, 8)
+          .map((r) => `\`${r.rule}\` (${r.count})`)
+          .join(", ");
+      if (rl.lint.topFirstTryRules?.length || rl.lint.topResidualRules?.length) {
+        md += `**Lint rules by frequency:**\n\n`;
+        if (rl.lint.topFirstTryRules?.length)
+          md += `- First-try (authored, pre-fix): ${ruleRows(rl.lint.topFirstTryRules)}\n`;
+        if (rl.lint.topResidualRules?.length)
+          md += `- Residual (survived the lint budget): ${ruleRows(rl.lint.topResidualRules)}\n`;
+        md += `\n`;
+      }
 
       md += `**Per iteration:**\n\n`;
       for (const p of rl.perIteration) {

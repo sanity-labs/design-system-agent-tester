@@ -234,6 +234,72 @@ describe("parseFiles", () => {
     expect(result[0].content).toContain("```\n\nDone.");
   });
 
+  // ─── Missing ---END FILE--- recovery ────────────────────────────────
+  //
+  // Fix-loop replies occasionally omit the closing marker on the final
+  // (often only) file block despite the system prompt showing the format.
+  // Discarding the whole reply in that case burns a fix attempt for
+  // nothing — the model's correction never reaches disk and the same
+  // error repeats next attempt. Recover the trailing content instead.
+
+  it("recovers a single ---FILE--- block missing its closing marker", () => {
+    const text = [
+      "---FILE: src/chunks/InspectorPanel.tsx---",
+      "export function InspectorPanel() { return null }",
+    ].join("\n");
+
+    const result = parseFiles(text);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].path).toBe("src/chunks/InspectorPanel.tsx");
+    expect(result[0].content).toContain("export function InspectorPanel()");
+  });
+
+  it("recovers a trailing unterminated block after earlier properly-closed blocks", () => {
+    const text = [
+      "---FILE: src/App.tsx---",
+      "properly closed content",
+      "---END FILE---",
+      "",
+      "---FILE: src/Trailing.tsx---",
+      "unterminated content",
+    ].join("\n");
+
+    const result = parseFiles(text);
+
+    expect(result).toHaveLength(2);
+    expect(result[0].path).toBe("src/App.tsx");
+    expect(result[1].path).toBe("src/Trailing.tsx");
+    expect(result[1].content).toContain("unterminated content");
+  });
+
+  it("does not guess when an unterminated block is followed by another ---FILE--- header", () => {
+    // Ambiguous: no way to know where the first file's content ends and
+    // the second file's header begins. Bail out on the unterminated one
+    // rather than swallow the next header as part of its content. Neither
+    // block has a closing marker here — if the second one did, the nearest
+    // ---END FILE--- would (pre-existing, unrelated behavior) just get
+    // matched to the first header instead, which isn't what this test is
+    // isolating.
+    const text = [
+      "---FILE: src/First.tsx---",
+      "first content, never closed",
+      "---FILE: src/Second.tsx---",
+      "second content, also never closed",
+    ].join("\n");
+
+    const result = parseFiles(text);
+
+    expect(result).toHaveLength(0);
+  });
+
+  it("strips a wrapping fence from a recovered unterminated block", () => {
+    const text = ["---FILE: src/App.tsx---", "```tsx", "export default 1;", "```"].join("\n");
+
+    const result = parseFiles(text);
+    expect(result[0].content.trim()).toBe("export default 1;");
+  });
+
   it("leaves content untouched when the body opens with a fence but doesn't close with one", () => {
     // An asymmetric fence isn't a wrapping fence — don't strip.
     const text = [

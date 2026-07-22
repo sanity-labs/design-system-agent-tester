@@ -84,5 +84,21 @@ export function deriveErrorHints(text) {
     );
   }
 
+  // 7. `@sanity/ui` components thrown with no theme context, second signature.
+  // The FATAL_PATTERNS list already recognizes the `useRootTheme()` error, but
+  // that's not the only way a missing ThemeProvider shows up. `Badge` (and
+  // other @sanity/ui components) read theme values inside styled-components
+  // via an internal `getTheme_v2` helper, which throws this exact generic
+  // TypeError when theme context is undefined — with no mention of "theme" in
+  // the message at all, so nothing else here would connect it to the cause.
+  // Confirmed by reproducing a real failing build: the full stack trace showed
+  // `getTheme_v2` → `responsiveRadiusStyle` → `<StyledBadge>`, none of which
+  // reaches the model — only `err.message` is captured, not `err.stack`.
+  if (/Cannot read properties of undefined \(reading 'v2'\)/.test(text)) {
+    hints.add(
+      'This is a missing ThemeProvider, not a component/import bug — @sanity/ui\'s internal theme reader throws this exact message (no mention of "theme") when no theme context is present. Wrap the app in <ThemeProvider theme={buildTheme()}> from @sanity/ui in main.tsx, around <App />.',
+    );
+  }
+
   return [...hints];
 }

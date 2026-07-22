@@ -6,7 +6,6 @@ import { parseArgs } from "node:util";
 import { generateAppPrompt, STATIC_PROMPT } from "./config/prompt-generator.js";
 import { buildUserPrompt, TEST_LABELS, TESTS } from "./config/prompts.js";
 import { computeVisualDiff } from "./evaluation/visual-diff.js";
-import { resolveCliEntry, resolveTestEnv, runDoctorGate } from "./pipeline/dsds-cli.js";
 import { iterationBuilt } from "./reporting/aggregators.js";
 import { generateReport } from "./reporting/report.js";
 import { banner, bold, dim, error, success, tag, warn } from "./util/color.js";
@@ -64,6 +63,14 @@ const { values } = parseArgs({
       type: "string",
       short: "f",
       default: "5",
+    },
+    // When false (`--no-fix-accessibility`), axe still runs and violations are
+    // still measured/reported — the agent just isn't sent back to FIX them, so
+    // no fix budget is spent on accessibility and an a11y repair can't regress
+    // a working build. Applies to the whole run (all tests × models).
+    "fix-accessibility": {
+      type: "boolean",
+      default: true,
     },
     "agent-prompt": {
       type: "boolean",
@@ -189,6 +196,7 @@ async function main() {
   const maxConcurrency = parseInt(values.concurrency, 10) || 1;
   const takeScreenshots = values.screenshot;
   const maxFixes = parseInt(values["max-fixes"], 10);
+  const fixAccessibility = values["fix-accessibility"];
   const useAgentPrompt = values["agent-prompt"];
 
   // Load .env ourselves — Node's --env-file parser silently drops some keys.
@@ -257,6 +265,7 @@ async function main() {
   console.log(`${field("Mode:")} build (agent writes React)`);
   console.log(`${field("Iterations:")} ${iterations}`);
   console.log(`${field("Max fixes:")} ${maxFixes}`);
+  console.log(`${field("Fix a11y:")} ${fixAccessibility}`);
   console.log(`${field("Concurrency:")} ${maxConcurrency}`);
   console.log(`${field("Screenshots:")} ${takeScreenshots}`);
   console.log(`${field("Agent prompt:")} ${useAgentPrompt}`);
@@ -284,39 +293,6 @@ async function main() {
   for (const label of testLabels) {
     const test = TESTS.find((t) => t.label === label);
 
-    // Pre-run doctor gate: when the test's design-system tooling ships the
-    // dsds CLI, verify the entire configuration (documents load and validate,
-    // lint plugins resolve, package export paths exist, spec versions align)
-    // BEFORE spending any tokens. A broken config here has previously poisoned
-    // entire runs with bogus "agent errors"; abort loudly instead.
-    const doctorCliEntry = resolveCliEntry(test);
-    if (doctorCliEntry) {
-      console.log(`${dim(`[${label}]`)} Running dsds doctor preflight…`);
-      try {
-        const doctor = await runDoctorGate(doctorCliEntry, resolveTestEnv(test));
-        if (!doctor.ok) {
-          console.error(
-            error(
-              `\n✗ dsds doctor failed for "${label}" — the test configuration or documents are broken.`,
-            ),
-          );
-          console.error(doctor.report);
-          console.error(
-            error(
-              "\nAborting: running against a broken configuration produces garbage measurements.",
-            ),
-          );
-          process.exit(1);
-        }
-        console.log(`${dim(`[${label}]`)} doctor: all checks passed`);
-      } catch (err) {
-        console.warn(
-          warn(
-            `[${label}] doctor preflight could not run (${err.message}) — continuing without it.`,
-          ),
-        );
-      }
-    }
     const promptContent = buildUserPrompt(label, promptBrief);
 
     for (const model of models) {
@@ -364,8 +340,10 @@ async function main() {
               testLabel: label,
               takeScreenshots,
               maxFixes,
+              fixAccessibility,
+              measureScreenshots: test.measure.screenshots,
+              measurePerformance: test.measure.performance,
               mcpConfig: test.mcp,
-              cliConfig: test.cli ?? null,
             });
 
             const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
@@ -459,6 +437,17 @@ async function main() {
     console.log(banner("\n\n=== Computing Visual Diffs ===\n"));
 
     for (const [label, iterations] of Object.entries(allResults)) {
+      // `label` here is the result bucket key (`testLabel` or, in multi-model
+      // runs, `testLabel/model`) — resolve back to the test config via each
+      // iteration's own `testLabel` field so the per-test `measure.visualDiff`
+      // toggle applies regardless of key shape.
+      const testLabel = iterations[0]?.testLabel ?? label;
+      const test = TESTS.find((t) => t.label === testLabel);
+      if (test && !test.measure.visualDiff) {
+        console.log(`${tag(label)} Skipping visual diff (measure.visualDiff: false)`);
+        continue;
+      }
+
       // Only diff screenshots from iterations that produced a working
       // build. A broken render's screenshot still lives on disk, but
       // comparing it to a healthy one inflates the diff percentage with

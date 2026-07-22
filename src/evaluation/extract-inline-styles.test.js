@@ -184,3 +184,34 @@ describe("extractInlineStyles resists algorithmic-complexity attacks", () => {
     expect(ms).toBeLessThan(1000);
   });
 });
+
+// SVG exclusion (P3): inline styles on raw SVG primitives are legitimate
+// (no design-system prop path) and must not dilute the DS inline-style signal.
+// ---------------------------------------------------------------------------
+describe("extractInlineStyles excludes raw SVG primitives", () => {
+  it("counts DS-component styles but not svg/line/circle/path styles", () => {
+    const content = `
+      <Box style={{ padding: 8 }}>
+        <svg style={{ width: '100%' }}>
+          <line style={{ stroke: 'red' }} />
+          <circle style={{ fill: 'blue' }} />
+          <path style={{ transform: 'translateY(2px)' }} />
+        </svg>
+      </Box>`;
+    const r = extractInlineStyles([{ path: "Bike.tsx", content }]);
+    expect(r.total).toBe(1); // only the Box
+    expect(r.byComponent).toEqual({ Box: 1 });
+    expect(r.svgExcluded).toBe(4); // svg, line, circle, path
+    expect(r.byProperty.padding).toBe(1);
+    expect(r.byProperty.stroke).toBeUndefined(); // SVG props not attributed
+    expect(r.byProperty.transform).toBeUndefined();
+  });
+
+  it("does not confuse capitalised DS components (Text/Image) with SVG text/image", () => {
+    const content = `<Text style={{ color: 'x' }} /><Image style={{ width: '1px' }} />`;
+    const r = extractInlineStyles([{ path: "A.tsx", content }]);
+    expect(r.total).toBe(2);
+    expect(r.svgExcluded).toBe(0);
+    expect(r.byComponent).toEqual({ Text: 1, Image: 1 });
+  });
+});

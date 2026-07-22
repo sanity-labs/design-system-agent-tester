@@ -66,6 +66,33 @@ export function hasConfigFallbackSignature(errorText) {
 }
 
 /**
+ * TypeScript codes that mean "the project's tsconfig/project-reference
+ * setup is broken" rather than "the app code has a bug". Distinct from the
+ * flake signatures above: these are NOT transient — retrying tsc changes
+ * nothing, because the tsconfig.json / tsconfig.app.json the agent wrote is
+ * itself invalid. Observed in practice when a model imitates Vite's split
+ * app/node tsconfig template (a `references` array) but gets a required
+ * field wrong:
+ *
+ *   TS5023 — unknown compiler option
+ *   TS6053 — a referenced project file doesn't exist
+ *   TS6305 — output file wasn't built from the expected source (project
+ *            references misconfigured)
+ *   TS6306 — a referenced project is missing `"composite": true`
+ *
+ * Tracked separately from ordinary build fixes so a run dominated by
+ * scaffold mistakes isn't indistinguishable from one full of real app-code
+ * bugs (bad imports, JSX errors, logic errors).
+ */
+const TSCONFIG_SCAFFOLD_ERROR_CODES = ["TS5023", "TS6053", "TS6305", "TS6306"];
+
+/** True when the error text carries a tsconfig/project-reference scaffold error. */
+export function isTsconfigScaffoldError(errorText) {
+  const text = errorText ?? "";
+  return TSCONFIG_SCAFFOLD_ERROR_CODES.some((code) => text.includes(`error ${code}:`));
+}
+
+/**
  * Extract missing-export claims from tsc output. Handles both forms:
  *   TS2305: Module '"@sanity/icons"' has no exported member 'AddIcon'.
  *   TS2724: '"@sanity/icons"' has no exported member named 'AddIcon'. Did you mean …

@@ -967,6 +967,106 @@ describe("generateReport rolls up npm install failures", () => {
 });
 
 // ---------------------------------------------------------------------------
+// tsconfig / project-reference scaffold error tracking
+// ---------------------------------------------------------------------------
+describe("generateReport rolls up tsconfig scaffold errors", () => {
+  it("totals errors across iterations and reports affected-iteration count", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const dir = await mkdtemp(join(tmpdir(), "at-report-"));
+
+    const iterations = [
+      {
+        iteration: 1,
+        elapsedSeconds: 5,
+        linesOfCode: 20,
+        files: [],
+        componentImports: [],
+        fixAttempts: 0,
+        exitStage: "clean",
+        tsconfigErrors: 0,
+      },
+      {
+        iteration: 2,
+        elapsedSeconds: 9,
+        linesOfCode: 22,
+        files: [],
+        componentImports: [],
+        fixAttempts: 5,
+        exitStage: "build",
+        tsconfigErrors: 4,
+      },
+      {
+        iteration: 3,
+        elapsedSeconds: 6,
+        linesOfCode: 18,
+        files: [],
+        componentImports: [],
+        fixAttempts: 1,
+        exitStage: "clean",
+        tsconfigErrors: 1,
+      },
+    ];
+
+    try {
+      await generateReport({ demo: iterations }, dir);
+      const data = JSON.parse(await readFile(join(dir, "report.json"), "utf-8")).prompts.demo;
+
+      expect(data.tsconfigErrors.total).toBe(5);
+      expect(data.tsconfigErrors.affectedIterations).toBe(2);
+      expect(data.tsconfigErrors.totalIterations).toBe(3);
+
+      const md = await readFile(join(dir, "report.md"), "utf-8");
+      expect(md).toContain("### tsconfig / project-reference errors");
+      expect(md).toContain("Total errors");
+      expect(md).toContain("**Iteration 2:** 4 error(s)");
+      expect(md).toContain("**Iteration 3:** 1 error(s)");
+      expect(md).not.toContain("**Iteration 1:** 0 error(s)");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      log.mockRestore();
+      warn.mockRestore();
+    }
+  });
+
+  it("treats older iterations missing the field as zero and omits the section when all-zero", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const dir = await mkdtemp(join(tmpdir(), "at-report-"));
+
+    const iterations = [
+      {
+        iteration: 1,
+        elapsedSeconds: 5,
+        linesOfCode: 20,
+        files: [],
+        componentImports: [],
+        fixAttempts: 0,
+        exitStage: "clean",
+        // no tsconfigErrors field at all
+      },
+    ];
+
+    try {
+      await generateReport({ demo: iterations }, dir);
+      const data = JSON.parse(await readFile(join(dir, "report.json"), "utf-8")).prompts.demo;
+      expect(data.tsconfigErrors.total).toBe(0);
+      expect(data.tsconfigErrors.affectedIterations).toBe(0);
+
+      // The per-prompt section (with its explanatory note) is conditional
+      // on total > 0, unlike the aggregate summary table's group heading
+      // above it, which always renders (with zeroed cells) regardless.
+      const md = await readFile(join(dir, "report.md"), "utf-8");
+      expect(md).not.toContain("A tsconfig scaffold error (TS5023, TS6053, TS6305, TS6306) means");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      log.mockRestore();
+      warn.mockRestore();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Fix-attempt stage split — build failures must never be conflated with
 // accessibility (or lint) repairs in the report.
 // ---------------------------------------------------------------------------

@@ -37,6 +37,7 @@ import { launchBrowser, NAV_TIMEOUT_MS, waitForRenderedContent } from "./puppete
 import {
   extractMissingExports,
   hasConfigFallbackSignature,
+  isTsconfigScaffoldError,
   memberInTypes,
   parseTsconfig,
 } from "./tsc-flake.js";
@@ -77,6 +78,11 @@ export async function validateProject(projectDir, iterLabel) {
     // retry passed. Counted in the report so infra noise is visible and
     // subtractable from agent-error analyses.
     tscFlaked: false,
+    // True when the type check failed on a tsconfig/project-reference
+    // scaffold error (see `isTsconfigScaffoldError`) — a broken config the
+    // agent wrote, not a flake (retrying changes nothing) and not an
+    // ordinary app-code bug. Counted separately in the report.
+    tsconfigError: false,
   };
 
   try {
@@ -88,7 +94,11 @@ export async function validateProject(projectDir, iterLabel) {
     const port = await getAvailablePort();
     const devServer = startDevServer(projectDir, iterLabel, port);
     result.devServer = devServer;
-    result.serverUrl = await waitForReady(devServer, port, iterDir);
+    // Owned by this validation attempt only — reset per call, so a Vite
+    // error surfaced below can never be a stale one from a prior attempt
+    // against a dev server that stayed alive across an HMR reload.
+    const serverOutput = { text: "" };
+    result.serverUrl = await waitForReady(devServer, port, iterDir, serverOutput);
 
     console.log(`${tag(iterLabel)} Dev server at ${result.serverUrl}, validating...`);
 
@@ -96,7 +106,11 @@ export async function validateProject(projectDir, iterLabel) {
     result.consoleErrors = pageResult.consoleErrors;
     result.rendered = pageResult.rendered;
 
-    const fatalError = detectFatalError(pageResult.consoleErrors, pageResult.rendered);
+    const fatalError = detectFatalError(
+      pageResult.consoleErrors,
+      pageResult.rendered,
+      serverOutput.text,
+    );
     if (fatalError) {
       result.fatalError = fatalError;
       result.success = false;
@@ -109,6 +123,7 @@ export async function validateProject(projectDir, iterLabel) {
     result.fatalError = err.message;
     result.success = false;
     if (err.stage === "install") result.installFailed = true;
+    if (err.stage === "tsconfig") result.tsconfigError = true;
     killDevServer(result.devServer);
     result.devServer = null;
     return result;
@@ -413,7 +428,12 @@ async function runTypeCheck(projectDir, iterLabel) {
   console.warn(`${tag(iterLabel)} ${warn(`Type check found ${errorCount} error(s)`)}`);
 
   if (errorCount > 0) {
-    throw new Error(`TypeScript type check failed (${errorCount} error(s)):\n${errors}`);
+    const err = new Error(`TypeScript type check failed (${errorCount} error(s)):\n${errors}`);
+    // Not a flake (retrying tsc changes nothing) — the tsconfig/project-
+    // reference setup the agent wrote is itself invalid. `stage` lets
+    // `validateProject` count this separately from ordinary app-code errors.
+    if (isTsconfigScaffoldError(errors)) err.stage = "tsconfig";
+    throw err;
   }
 
   // tsc exited non-zero but we couldn't parse any `): error TS` lines.
@@ -472,8 +492,14 @@ function startDevServer(projectDir, iterLabel, port) {
  *
  * Rejects if the process exits before ready, or if 30s elapse without a
  * signal. In both cases the full output is on disk for diagnosis.
+ *
+ * `serverOutput` (optional) is a mutable `{ text }` box the caller owns.
+ * Once ready, every subsequent chunk of dev-server output is also
+ * appended there — this is what lets `validateProject` scan for a Vite
+ * server-side error (see `extractViteServerError`) after a failed render,
+ * scoped to just this attempt's output rather than the whole file on disk.
  */
-function waitForReady(devServer, port, iterDir) {
+function waitForReady(devServer, port, iterDir, serverOutput) {
   const logPath = resolve(iterDir, "_dev_server.txt");
   const stream = createWriteStream(logPath, { flags: "a" });
   stream.write(`\n--- dev server [${new Date().toISOString()}] port=${port} ---\n`);
@@ -501,13 +527,17 @@ function waitForReady(devServer, port, iterDir) {
     function handleData(data) {
       const text = data.toString();
       stream.write(text);
-      if (resolved) return;
+      if (resolved) {
+        if (serverOutput) serverOutput.text += text;
+        return;
+      }
       preReadyOutput += text;
       if (readyPattern.test(preReadyOutput)) {
         resolved = true;
         clearTimeout(timer);
         // Leave the stream + data listeners attached so post-ready
-        // output (warnings, eventual crashes) keeps landing in the log.
+        // output (warnings, eventual crashes) keeps landing in the log
+        // (and, from here on, in `serverOutput` too).
         resolveFn(`http://localhost:${port}`);
       }
     }
@@ -594,7 +624,7 @@ const FATAL_PATTERNS = [
   /SyntaxError/i,
 ];
 
-function detectFatalError(consoleErrors, rendered) {
+export function detectFatalError(consoleErrors, rendered, serverOutput) {
   const fatalErrors = consoleErrors.filter((err) => FATAL_PATTERNS.some((pat) => pat.test(err)));
 
   if (fatalErrors.length > 0) {
@@ -602,8 +632,64 @@ function detectFatalError(consoleErrors, rendered) {
   }
 
   if (!rendered) {
+    // The browser saw nothing fatal, but that only means nothing reached
+    // it — a Vite dev-server-side error (bad import specifier, esbuild
+    // pre-transform failure) never gets to the page at all. Prefer that
+    // over the content-free fallback whenever one is present.
+    const viteError = extractViteServerError(serverOutput);
+    if (viteError) return viteError;
     return "Page did not render any visible content within the timeout period";
   }
 
   return null;
+}
+
+/**
+ * Vite dev-server-side errors (a bad import specifier it can't resolve,
+ * an esbuild pre-transform failure, etc.) are printed only to the dev
+ * server's own stdout/stderr — the browser never receives them as a
+ * `console`/`pageerror` event, so `FATAL_PATTERNS` above never sees them.
+ * The page just silently fails to render, and the fix loop previously
+ * reported the content-free "Page did not render" fallback with no way
+ * for the model to diagnose the real cause. These patterns catch the
+ * Vite/esbuild error banners so that text can be surfaced instead.
+ */
+const VITE_SERVER_ERROR_PATTERNS = [
+  /Internal server error:/i,
+  /Pre-transform error:/i,
+  /Missing ".*" specifier in ".*" package/i,
+  /Failed to resolve import/i,
+  /Failed to scan for dependencies/i,
+];
+
+/**
+ * Pull the first Vite server-error block out of dev-server output captured
+ * since the server last reported ready (see `waitForReady`). Returns the
+ * matching banner line plus its immediately-following context (Vite prints
+ * a `Plugin:`/`File:`/code-frame block that pinpoints the bad import) and
+ * stops before the noisy internal stack trace (`      at ...` frames from
+ * esbuild/vite's own source) or after a line cap, whichever comes first.
+ * Returns null if no known error banner is present.
+ */
+// eslint-disable-next-line no-control-regex -- matches raw ANSI escape codes, not arbitrary control chars
+const ANSI_ESCAPE_PATTERN = /\[[0-9;]*m/g;
+
+export function extractViteServerError(serverOutput) {
+  if (!serverOutput) return null;
+  const cleaned = serverOutput.replace(ANSI_ESCAPE_PATTERN, "");
+  const lines = cleaned.split("\n");
+  const startIdx = lines.findIndex((line) =>
+    VITE_SERVER_ERROR_PATTERNS.some((pat) => pat.test(line)),
+  );
+  if (startIdx === -1) return null;
+
+  const MAX_CONTEXT_LINES = 10;
+  const block = [];
+  for (let i = startIdx; i < lines.length && block.length < MAX_CONTEXT_LINES; i++) {
+    // Internal call-stack frames add noise without diagnostic value —
+    // stop the block there rather than dumping the whole esbuild trace.
+    if (/^\s+at\s+\S/.test(lines[i]) && block.length > 0) break;
+    block.push(lines[i]);
+  }
+  return block.join("\n").trim();
 }

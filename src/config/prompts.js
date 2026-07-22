@@ -227,6 +227,17 @@ function validateTest(raw, dirName, testDir) {
       `${where} ("${raw.label}"): \`derive\` must be a function returning an object of extra template values.`,
     );
   }
+
+  if (raw.measure !== undefined) {
+    if (!raw.measure || typeof raw.measure !== "object") {
+      throw new Error(`${where} ("${raw.label}"): \`measure\`, when set, must be an object.`);
+    }
+    for (const key of ["screenshots", "performance", "visualDiff"]) {
+      if (raw.measure[key] !== undefined && typeof raw.measure[key] !== "boolean") {
+        throw new Error(`${where} ("${raw.label}"): \`measure.${key}\` must be a boolean.`);
+      }
+    }
+  }
 }
 
 /**
@@ -243,11 +254,21 @@ function normalise(raw, dirName, testDir) {
     // normalised shape so templates can keep using `{{#if requiresMcp}}`.
     requiresMcp: Boolean(raw.mcp),
     mcp: raw.mcp ?? null,
-    // Shell-agent transport: a test with `cli` (and no `mcp`) drives the
-    // dsds CLI through a sandboxed tool instead of MCP. `requiresCli` is
-    // derived the same way for template conditionals.
-    requiresCli: Boolean(raw.cli),
-    cli: raw.cli ?? null,
+    // Shift-left (P4): when true, the generation system prompt gets the
+    // design-system lint advisory so the agent authors to the rules up front.
+    // Enable on lint-enabled tests only, so the A/B measures linting's full
+    // contribution (prevention + gate).
+    lintAdvisory: Boolean(raw.lintAdvisory),
+    // Non-core report metrics — each independently toggleable, all default
+    // true. `screenshots` gates the screenshot image capture (DOM count and
+    // semantic HTML still run); `performance` gates Lighthouse + the React
+    // profiler; `visualDiff` gates the pairwise pixel-diff pass across an
+    // iteration set.
+    measure: {
+      screenshots: raw.measure?.screenshots ?? true,
+      performance: raw.measure?.performance ?? true,
+      visualDiff: raw.measure?.visualDiff ?? true,
+    },
     docsPath: raw.docsPath ? resolveTestPath(testDir, raw.docsPath) : null,
     prompts: {
       system: resolveTestPath(testDir, raw.prompts.system),
@@ -358,7 +379,6 @@ function buildCtx(test, extra = {}) {
     packages: test.packages,
     reactVersion: test.reactVersion,
     requiresMcp: test.requiresMcp,
-    requiresCli: test.requiresCli,
     name: config.name,
     harnessRoot: PROJECT_ROOT,
     ...extra,
@@ -382,7 +402,7 @@ export function buildSystemPrompt(label) {
   const test = getTest(label);
   const tpl = loadTemplate(test.prompts.system);
   const intro = render(tpl, buildCtx(test, { docs: loadDocs(test) }));
-  return composeSystem(intro);
+  return composeSystem(intro, { lintAdvisory: test.lintAdvisory });
 }
 
 /**

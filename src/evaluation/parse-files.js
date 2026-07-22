@@ -101,7 +101,24 @@ function parseFileBlocks(text) {
     const headerEnd = text.indexOf("---\n", open + OPEN.length);
     if (headerEnd === -1) break;
     const close = text.indexOf(CLOSE, headerEnd + 4);
-    if (close === -1) break;
+    if (close === -1) {
+      // The model forgot the closing marker — this happens occasionally in
+      // fix-loop replies (the system prompt shows the format, but a reply
+      // can still end without it). If no further `---FILE:` header follows,
+      // this is unambiguously the last block: treat the rest of the text as
+      // its content instead of silently discarding the whole reply, which
+      // otherwise wastes a full fix attempt re-submitting the unchanged,
+      // still-broken file. If another header DOES follow, the boundary
+      // between the two files is ambiguous — bail out rather than guess
+      // (also what keeps a flood of unterminated headers, as in the
+      // algorithmic-complexity test below, from being treated as one file).
+      const nextOpen = text.indexOf(OPEN, headerEnd + 4);
+      if (nextOpen !== -1) break;
+      const filePath = text.slice(open + OPEN.length, headerEnd).trim();
+      const content = stripWrappingFence(text.slice(headerEnd + 4));
+      if (filePath) files.push({ path: filePath, content });
+      break;
+    }
     const filePath = text.slice(open + OPEN.length, headerEnd).trim();
     const content = stripWrappingFence(text.slice(headerEnd + 4, close));
     if (filePath) files.push({ path: filePath, content });

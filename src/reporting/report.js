@@ -193,6 +193,22 @@ export async function generateReport(allResults, outputDir, promptText = null) {
       totalIterations: validIterations.length,
     };
 
+    // tsconfig/project-reference scaffold errors — NOT a flake (retrying
+    // tsc changes nothing) and not an ordinary app-code bug: the agent's
+    // own tsconfig.json/tsconfig.app.json is invalid (see
+    // `isTsconfigScaffoldError`). Tracked separately so a run dominated by
+    // scaffold mistakes isn't indistinguishable from real code bugs.
+    const tsconfigErrorCounts = validIterations.map((r) => r.tsconfigErrors ?? 0);
+    const tsconfigErrorAnalysis = {
+      total: sum(tsconfigErrorCounts),
+      affectedIterations: tsconfigErrorCounts.filter((n) => n > 0).length,
+      totalIterations: validIterations.length,
+      perIteration: validIterations.map((r) => ({
+        iteration: r.iteration,
+        errors: r.tsconfigErrors ?? 0,
+      })),
+    };
+
     report.prompts[promptKey] = {
       model,
       modelTuning,
@@ -258,6 +274,7 @@ export async function generateReport(allResults, outputDir, promptText = null) {
       accessibility: a11yAnalysis,
       npmInstall: npmInstallAnalysis,
       tscFlakes: tscFlakeAnalysis,
+      tsconfigErrors: tsconfigErrorAnalysis,
       repairLoop: analyzeRepairLoop(validIterations),
       visualDiff: visualDiff || {
         pairwiseDiffs: [],

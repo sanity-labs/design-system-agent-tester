@@ -29,6 +29,10 @@ export { maxVal, mean, minVal, stdDev } from "./stats.js";
 export function extractMetrics(data) {
   return {
     totalIterations: data.totalIterations ?? null,
+    // Builds that ultimately rendered a working app (after the fix loop),
+    // out of every iteration attempted. `builtIterations` is null on reports
+    // predating the built/un-built split — renders as "—".
+    buildsSucceeded: data.builtIterations ?? null,
     loc: data.linesOfCode?.average ?? null,
     fixesAvg: data.fixAttempts?.average ?? null,
     fixesTotal: data.fixAttempts?.total ?? null,
@@ -46,6 +50,8 @@ export function extractMetrics(data) {
     npmInstallFailuresTotal: data.npmInstall?.total ?? null,
     npmInstallFailuresAffected: data.npmInstall?.affectedIterations ?? null,
     tscFlakesTotal: data.tscFlakes?.total ?? null,
+    tsconfigErrorsTotal: data.tsconfigErrors?.total ?? null,
+    tsconfigErrorsAffected: data.tsconfigErrors?.affectedIterations ?? null,
     inlineTotal: data.inlineStyles?.totalAcrossIterations ?? null,
     inlineAvg: data.inlineStyles?.averagePerIteration ?? null,
     boxInline: data.inlineStyles?.byComponent?.Box ?? 0,
@@ -86,6 +92,7 @@ export function extractMetrics(data) {
 }
 
 const AGGREGATABLE_KEYS = [
+  "buildsSucceeded",
   "loc",
   "fixesAvg",
   "fixesTotal",
@@ -103,6 +110,8 @@ const AGGREGATABLE_KEYS = [
   "npmInstallFailuresTotal",
   "npmInstallFailuresAffected",
   "tscFlakesTotal",
+  "tsconfigErrorsTotal",
+  "tsconfigErrorsAffected",
   "inlineTotal",
   "inlineAvg",
   "boxInline",
@@ -183,14 +192,33 @@ const METRIC_GROUPS = [
       // polish is never counted as a build problem.
       ["Build fixes / iter", "buildFixesAvg", true, 2],
       ["Build fixes (avg per run)", "buildFixesTotal", true, 1],
-      ["Fix attempts / iter (all gates)", "fixesAvg", true, 2],
-      ["Total fixes (all gates, avg per run)", "fixesTotal", true, 1],
-      ["npm install failures (total)", "npmInstallFailuresTotal", true, 1],
-      ["Iterations with install failure", "npmInstallFailuresAffected", true, 1],
       ["tsc flakes healed (total)", "tscFlakesTotal", true, 1],
-      // "Clean on 1st try" is computed below from cleanOnFirstTry +
-      // totalIterations; it has bespoke formatting and is appended
-      // automatically into this group when iteration count is known.
+      // "Builds succeeded" / "Build-clean on 1st try" are computed below
+      // from buildsSucceeded / buildCleanOnFirstTry + totalIterations;
+      // they have bespoke formatting and are appended automatically into
+      // this group when iteration count is known.
+    ],
+  },
+  {
+    // Toolchain-level retries, not a code or design-system problem — kept
+    // separate from Build so a flaky `npm install` never reads as the
+    // agent's own build quality. Mirrors the per-prompt report's own
+    // "npm install failures" section.
+    heading: "npm install failures",
+    rows: [
+      ["Total failures", "npmInstallFailuresTotal", true, 1],
+      ["Iterations affected", "npmInstallFailuresAffected", true, 1],
+    ],
+  },
+  {
+    // A broken tsconfig.json/tsconfig.app.json the agent wrote (unknown
+    // compiler option, misconfigured project reference) — not a toolchain
+    // flake (retrying tsc changes nothing) and not an ordinary app-code
+    // bug. Kept separate so it doesn't inflate the generic Build fix count.
+    heading: "tsconfig / project-reference errors",
+    rows: [
+      ["Total errors", "tsconfigErrorsTotal", true, 1],
+      ["Iterations affected", "tsconfigErrorsAffected", true, 1],
     ],
   },
   {
@@ -200,6 +228,21 @@ const METRIC_GROUPS = [
       ["Axe violations / iter", "axeAvg", true, 2],
       ["A11y fixes / iter", "a11yFixesAvg", true, 2],
       ["A11y fixes (avg per run)", "a11yFixesTotal", true, 1],
+    ],
+  },
+  {
+    // Combined across every repair gate (build + accessibility + lint) —
+    // kept out of the "Build" heading so it never reads as a build-only
+    // number. See the per-prompt "Fix Attempts" section for the same
+    // build/accessibility/lint split these summarize across.
+    heading: "Fix attempts (all gates combined)",
+    rows: [
+      ["Lint fixes (total)", "lintFixesTotal", true, 1],
+      ["Fix attempts / iter (all gates)", "fixesAvg", true, 2],
+      ["Total fixes (all gates, avg per run)", "fixesTotal", true, 1],
+      // "Clean on 1st try (all gates, avg)" is computed below from
+      // cleanOnFirstTry + totalIterations; bespoke formatting, appended
+      // automatically into this group when iteration count is known.
     ],
   },
   {
@@ -272,6 +315,22 @@ const METRIC_GROUPS = [
   },
 ];
 
+/** Builds a `{ label, key }` column with `X / N (P%)` cell formatting. */
+function rateColumn(label, key, iters) {
+  return {
+    label,
+    key,
+    lowerBetter: false,
+    format: (agg) => {
+      // == null catches both null and undefined; NaN appears when the
+      // aggregator averaged runs that all predate the metric.
+      if (!agg || agg[key] == null || Number.isNaN(agg[key])) return "—";
+      const pct = ((agg[key] / iters) * 100).toFixed(0);
+      return `${fmt(agg[key], 1)} / ${iters} (${pct}%)`;
+    },
+  };
+}
+
 /**
  * Build the column definitions for one metric group. Each column is
  * `{ label, key, lowerBetter, format? }`. `format(agg)` overrides
@@ -287,27 +346,29 @@ function buildGroupColumns(group, iters) {
     ...(format ? { format } : {}),
   }));
 
-  // Inject the special-formatted "clean on 1st try" columns when we're
-  // rendering the Build group and we know the iteration count. Two
-  // variants: build-gate-only (compiled/rendered without a build fix)
-  // and all-gates (no fixes of any kind, including a11y/lint polish).
-  if (group.heading === "Build" && iters) {
-    const cleanCol = (label, key) => ({
-      label,
-      key,
-      lowerBetter: false,
-      format: (agg) => {
-        // == null catches both null and undefined; NaN appears when the
-        // aggregator averaged runs that all predate the metric.
-        if (!agg || agg[key] == null || Number.isNaN(agg[key])) return "—";
-        const pct = ((agg[key] / iters) * 100).toFixed(0);
-        return `${fmt(agg[key], 1)} / ${iters} (${pct}%)`;
-      },
-    });
+  if (!iters) return cols;
+
+  // Inject the special-formatted "X / N (P%)" columns per group, keeping
+  // build-only outcomes in "Build" and the combined-across-gates outcome
+  // in "Fix attempts (all gates combined)" so accessibility/lint fixes
+  // are never presented as part of the Build table.
+  if (group.heading === "Build") {
+    // Headline outcome: how many builds ultimately rendered, out of all
+    // iterations attempted. Placed first so the success rate leads the table.
+    cols.unshift(rateColumn("Builds succeeded (avg)", "buildsSucceeded", iters));
     const buildAt = cols.findIndex((c) => c.key === "buildFixesTotal") + 1;
-    cols.splice(buildAt, 0, cleanCol("Build-clean on 1st try (avg)", "buildCleanOnFirstTry"));
+    cols.splice(
+      buildAt,
+      0,
+      rateColumn("Build-clean on 1st try (avg)", "buildCleanOnFirstTry", iters),
+    );
+  } else if (group.heading === "Fix attempts (all gates combined)") {
     const allAt = cols.findIndex((c) => c.key === "fixesTotal") + 1;
-    cols.splice(allAt, 0, cleanCol("Clean on 1st try (all gates, avg)", "cleanOnFirstTry"));
+    cols.splice(
+      allAt,
+      0,
+      rateColumn("Clean on 1st try (all gates, avg)", "cleanOnFirstTry", iters),
+    );
   }
 
   return cols;

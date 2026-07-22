@@ -228,6 +228,23 @@ export function analyzeRepairLoop(iterations) {
   const firstTryAxe = num("firstTryAxe");
   const residualAxe = num("residualAxe");
   const cleanFirstTry = (ft) => iterations.filter((r) => r[ft] === 0).length;
+  // Rule-level telemetry: sum eslint ruleId → count across iterations, so the
+  // report shows WHICH rules the agents actually trip (first-try) and which
+  // survive the lint sub-loop (residual). Drives rule-triage: high first-try
+  // rules are shift-left/autofix candidates; high residual rules are leaks.
+  const sumRules = (key) => {
+    const totals = {};
+    for (const r of iterations) {
+      const rules = r[key];
+      if (!rules || typeof rules !== "object") continue;
+      for (const [rule, n] of Object.entries(rules)) totals[rule] = (totals[rule] ?? 0) + n;
+    }
+    return Object.entries(totals)
+      .sort((a, b) => b[1] - a[1])
+      .map(([rule, count]) => ({ rule, count }));
+  };
+  const topFirstTryRules = sumRules("firstTryLintRules");
+  const topResidualRules = sumRules("residualLintRules");
   return {
     measured: withStage.length,
     totalIterations: iterations.length,
@@ -246,6 +263,8 @@ export function analyzeRepairLoop(iterations) {
       residualAvg: roundedMean(residualLint),
       iterationsCleanFirstTry: firstTryLint.length ? cleanFirstTry("firstTryLint") : null,
       iterationsWithResidual: residualLint.filter((n) => n > 0).length,
+      topFirstTryRules,
+      topResidualRules,
     },
     axe: {
       firstTryAvg: roundedMean(firstTryAxe),

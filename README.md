@@ -56,6 +56,7 @@ The type-check stage is hardened against toolchain races: it runs the project's 
 | `--model`, `-m` | `claude-sonnet-4-6` | Claude model ID. |
 | `--models` | — | Comma-separated model IDs. Runs every test on every model (tests × models × iterations). Takes precedence over `--model`. |
 | `--max-fixes`, `-f` | `5` | Max error→fix cycles per iteration. |
+| `--no-fix-accessibility` | — | Still measure and report axe violations, but don't send the agent back to fix them (no fix budget spent on a11y, and an a11y repair can't regress a working build). |
 | `--concurrency`, `-c` | `1` | Max parallel agent iterations. Default is sequential so Lighthouse / DOM measurements aren't biased by CPU contention. Pass `2+` to trade precision for wall-clock speed. |
 | `--no-screenshot` | — | Skip browser validation and all browser-based metrics. |
 | `--agent-prompt` | off | Generate a fresh brief from Claude (see Briefs below). |
@@ -176,6 +177,22 @@ Need a derived value (e.g. a comma-joined list)? Add a `derive(ctx)` function to
 | `docsPath` | Path to a docs file. Inlined as `{{docs}}`. |
 | `reactVersion` | String exposed as `{{reactVersion}}`. |
 | `derive` | `(ctx) => object` adding fields to template context. |
+| `measure` | `{ screenshots, performance, visualDiff }` — non-core report metrics, each an independent boolean defaulting to `true`. See below. |
+
+#### Non-core measurements (`measure`)
+
+Screenshots, Lighthouse/React-profiler performance, and the pairwise visual diff are each independently toggleable per test — useful for a test whose brief doesn't produce a meaningfully diffable UI, or to cut wall-clock time on a variant where those metrics aren't the point:
+
+```js
+// tests/<label>/config.js
+measure: {
+  screenshots: true,  // capture screenshots (DOM count / semantic HTML still run either way)
+  performance: true,  // Lighthouse + React profiler
+  visualDiff: true,    // pairwise pixel diff across the iteration set (needs `screenshots: true` to have anything to diff)
+}
+```
+
+Omit `measure` entirely, or any of its keys, to keep the default (`true`).
 
 ### Per-test MCP
 

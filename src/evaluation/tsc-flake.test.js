@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   extractMissingExports,
   hasConfigFallbackSignature,
+  isTsconfigScaffoldError,
   memberInTypes,
   parseTsconfig,
 } from "./tsc-flake.js";
@@ -61,6 +62,37 @@ describe("extractMissingExports", () => {
       { module: "@sanity/icons", member: "AddIcon" },
       { module: "@sanity/icons", member: "CloseIcon" },
     ]);
+  });
+});
+
+describe("isTsconfigScaffoldError", () => {
+  it("detects tsconfig/project-reference scaffold codes", () => {
+    expect(
+      isTsconfigScaffoldError(
+        "tsconfig.json(4,5): error TS5023: Unknown compiler option 'useDefineForModules'.",
+      ),
+    ).toBe(true);
+    expect(
+      isTsconfigScaffoldError(
+        "tsconfig.json(17,18): error TS6053: File 'tsconfig.app.json' not found.",
+      ),
+    ).toBe(true);
+    expect(
+      isTsconfigScaffoldError(
+        "error TS6305: Output file 'dist/App.d.ts' has not been built from source file 'src/App.tsx'.",
+      ),
+    ).toBe(true);
+    expect(
+      isTsconfigScaffoldError(
+        `tsconfig.json(17,18): error TS6306: Referenced project 'tsconfig.app.json' must have setting "composite": true.`,
+      ),
+    ).toBe(true);
+  });
+
+  it("ignores ordinary type errors and missing/empty input", () => {
+    expect(isTsconfigScaffoldError("error TS2322: Type 'string' is not assignable")).toBe(false);
+    expect(isTsconfigScaffoldError("")).toBe(false);
+    expect(isTsconfigScaffoldError(undefined)).toBe(false);
   });
 });
 

@@ -6,7 +6,6 @@ import { parseFiles } from "../evaluation/parse-files.js";
 import { killDevServer, validateProject } from "../evaluation/validate.js";
 import { error, success, tag, warn } from "../util/color.js";
 import { isTransientError } from "../util/retry.js";
-import { execDsdsCommand, resolveCliEntry, resolveTestEnv, runCliLintGate } from "./dsds-cli.js";
 import { createMcpClient } from "./mcp-client.js";
 import {
   buildCurrentFilesText,
@@ -412,240 +411,25 @@ async function generateWithMcp({
   }
 }
 
-/**
- * Multi-turn generation with the dsds CLI as the agent's only tool.
- *
- * The shell-agent counterpart of generateWithMcp: same conversation loop,
- * cache slider, duplicate detection, incremental ---FILE: writes, and
- * emission nudges — but the agent researches through ONE sandboxed tool
- * (`dsds_cli`) that runs `dsds …` commands (argv-split, no shell, cwd =
- * projectDir). This measures the CLI's stated audience: coding agents with
- * shell access and no MCP client.
- */
-const DSDS_CLI_TOOL = {
-  name: "dsds_cli",
-  description:
-    "Run one `dsds` CLI command against the design system, e.g. `dsds context button`, " +
-    "`dsds search card --kind component`, `dsds chunk dashboard-shell`, `dsds check-exports Box AddIcon`, " +
-    "`dsds lint src/App.tsx --apply`, `dsds brief build`. Exit codes: 0 ok · 1 usage error · 2 ran and found problems. " +
-    "Pass --json for machine-readable output. This is NOT a shell: pipes, redirects, and non-dsds commands are rejected. " +
-    "The CLI reads and checks files — it never creates or saves project files; only your ---FILE: blocks do.",
-  input_schema: {
-    type: "object",
-    properties: {
-      command: {
-        type: "string",
-        description: "The full command line, starting with `dsds`. One command per call.",
-      },
-    },
-    required: ["command"],
-  },
-};
-
-async function generateWithCli({
-  client,
-  model,
-  promptContent,
-  baseSystemPrompt,
-  iterDir,
-  iterLabel,
-  cliConfig,
-  mcpConfig,
-  projectDir,
-}) {
-  const cliEntry = resolveCliEntry({ cli: cliConfig, mcp: mcpConfig });
-  if (!cliEntry)
-    throw new Error("ui4-cli generation requires a resolvable dsds CLI entry (test.cli.entry)");
-  const cliEnv = resolveTestEnv({ cli: cliConfig, mcp: mcpConfig });
-  await mkdir(projectDir, { recursive: true });
-  console.log(`[${iterLabel}] dsds CLI transport — entry: ${cliEntry}`);
-
-  const messages = [
-    {
-      role: "user",
-      content: [{ type: "text", text: promptContent, cache_control: { type: "ephemeral" } }],
-    },
-  ];
-
-  let uncachedInputTokens = 0;
-  let cacheReadInputTokens = 0;
-  let cacheCreationInputTokens = 0;
-  let outputTokens = 0;
-  const allTextParts = [];
-  let turns = 0;
-
-  const toolLog = [];
-  const seenToolCalls = new Set();
-  let duplicateStreak = 0;
-  let duplicateTotal = 0; // cumulative, not just consecutive
-  let emissionNudges = 0;
-  let forceTextOnly = false;
-  let cacheMarker = null;
-
-  while (turns < MAX_TOOL_TURNS) {
-    turns++;
-
-    // Sliding cache breakpoint (see generateWithMcp for the rationale).
-    if (messages.length > 1) {
-      if (cacheMarker) delete cacheMarker.cache_control;
-      const lastContent = messages[messages.length - 1].content;
-      if (Array.isArray(lastContent) && lastContent.length > 0) {
-        const lastBlock = lastContent[lastContent.length - 1];
-        if (lastBlock && typeof lastBlock === "object") {
-          lastBlock.cache_control = { type: "ephemeral" };
-          cacheMarker = lastBlock;
-        }
-      }
-    }
-
-    // Convergence pressure — tuned for the CLI surface, where weaker models
-    // thrash (observed: Haiku ran to the 25-turn cap with 19 repeated commands,
-    // because the streak-only trigger misses non-consecutive repeats). Two
-    // escalating signals catch it earlier:
-    //   soft nudge — a consecutive OR cumulative repeat streak, or nearing the cap
-    //   hard force — sustained thrash (many total repeats) or almost at the cap:
-    //                block tool calls next turn so the model MUST emit files.
-    const thrashing = duplicateStreak >= 2 || duplicateTotal >= 4;
-    const hardStop = duplicateTotal >= 6 || turns >= MAX_TOOL_TURNS - 3;
-    const nudge =
-      thrashing || turns >= MAX_TOOL_TURNS - 5
-        ? "\n\nYou have done enough research. Produce ALL project files using ---FILE: path--- blocks now. Do not re-run dsds commands you have already run; if you're unsure of a component, use `dsds build <id> --answers '{…}'` ONCE to get valid JSX, then emit files."
-        : "";
-    if (hardStop) forceTextOnly = true;
-    const systemBlocks = [
-      { type: "text", text: baseSystemPrompt, cache_control: { type: "ephemeral" } },
-    ];
-    if (nudge) systemBlocks.push({ type: "text", text: nudge });
-
-    const response = await callAnthropicWithRetry(
-      client,
-      {
-        model,
-        max_tokens: 32000,
-        ...modelTuning(model),
-        ...(forceTextOnly ? { tool_choice: { type: "none" } } : {}),
-        system: systemBlocks,
-        tools: [DSDS_CLI_TOOL],
-        messages,
-      },
-      iterLabel,
-    );
-    forceTextOnly = false;
-
-    const u = response.usage ?? {};
-    uncachedInputTokens += u.input_tokens ?? 0;
-    cacheReadInputTokens += u.cache_read_input_tokens ?? 0;
-    cacheCreationInputTokens += u.cache_creation_input_tokens ?? 0;
-    outputTokens += u.output_tokens ?? 0;
-    console.log(
-      `[${iterLabel}] turn ${turns} usage: in=${u.input_tokens ?? 0} out=${u.output_tokens ?? 0} ` +
-        `cache_read=${u.cache_read_input_tokens ?? 0} cache_write=${u.cache_creation_input_tokens ?? 0} stop=${response.stop_reason}`,
-    );
-
-    const textBlocks = response.content.filter((b) => b.type === "text").map((b) => b.text);
-    allTextParts.push(...textBlocks);
-
-    // Write emitted ---FILE: blocks immediately so `dsds lint src/…` in a
-    // later turn reads them from disk (same contract as the MCP path).
-    const emittedSoFar = parseFiles(allTextParts.join("\n"));
-    if (emittedSoFar.length > 0) {
-      await writeProjectFiles(projectDir, emittedSoFar);
-    }
-
-    const toolUseBlocks = response.content.filter((b) => b.type === "tool_use");
-
-    if (response.stop_reason === "end_turn" || toolUseBlocks.length === 0) {
-      const hasScaffold = emittedSoFar.some((f) => f.path === "package.json");
-      if (!hasScaffold && emissionNudges < MAX_EMISSION_NUDGES && turns < MAX_TOOL_TURNS) {
-        emissionNudges++;
-        const status = emittedSoFar.length
-          ? `only ${emittedSoFar.length} ---FILE: block(s) (${emittedSoFar.map((f) => f.path).join(", ")}) and no package.json`
-          : "ZERO ---FILE: blocks";
-        console.log(
-          `[${iterLabel}] Turn ended with ${status} — emission nudge ${emissionNudges}/${MAX_EMISSION_NUDGES}`,
-        );
-        messages.push({ role: "assistant", content: response.content });
-        messages.push({
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: `STOP: your visible text output contains ${status}. Files composed in your reasoning were NOT output — the harness receives only the text you write. Nothing is persisted after your response ends, and nothing you passed to the dsds CLI was saved. Write out EVERY project file now — package.json, tsconfig.json, vite.config.ts, index.html, src/main.tsx, src/App.tsx, and every component/view — as complete \`---FILE: path--- … ---END FILE---\` blocks. No tool calls. No summary. Only the files.`,
-            },
-          ],
-        });
-        forceTextOnly = true;
-        continue;
-      }
-      console.log(
-        `[${iterLabel}] Generation complete after ${turns} turn(s), ${toolLog.length} CLI call(s)`,
-      );
-      break;
-    }
-
-    messages.push({ role: "assistant", content: response.content });
-
-    const toolResults = [];
-    for (const toolUse of toolUseBlocks) {
-      const commandLine = String(toolUse.input?.command ?? "");
-      const callKey = `dsds_cli:${commandLine}`;
-      const isDuplicate = seenToolCalls.has(callKey);
-      seenToolCalls.add(callKey);
-      if (isDuplicate) {
-        duplicateStreak++;
-        duplicateTotal++;
-      } else {
-        duplicateStreak = 0;
-      }
-
-      console.log(
-        `[${iterLabel}] CLI call: ${commandLine.slice(0, 110)}${isDuplicate ? " [DUPLICATE]" : ""}`,
-      );
-
-      let resultText;
-      if (isDuplicate) {
-        resultText = `You already ran \`${commandLine}\` — the result has not changed. Stop repeating commands and proceed to generate the project files.`;
-      } else {
-        const res = await execDsdsCommand(cliEntry, cliEnv, projectDir, commandLine);
-        resultText = res.output;
-      }
-
-      toolLog.push({
-        turn: turns,
-        tool: "dsds_cli",
-        input: { command: commandLine },
-        resultText,
-        resultLength: resultText.length,
-        isDuplicate,
-      });
-      toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: resultText });
-    }
-    messages.push({ role: "user", content: toolResults });
-  }
-
-  if (turns >= MAX_TOOL_TURNS) {
-    console.warn(`[${iterLabel}] Hit max tool turns (${MAX_TOOL_TURNS}) — forcing completion`);
-  }
-  if (toolLog.length > 0) {
-    await writeFile(
-      resolve(iterDir, "_cli_tool_log.json"),
-      JSON.stringify(toolLog, null, 2),
-      "utf-8",
-    );
-  }
-
-  return {
-    fullText: allTextParts.join("\n"),
-    uncachedInputTokens,
-    cacheReadInputTokens,
-    cacheCreationInputTokens,
-    outputTokens,
-  };
-}
-
 // ─── Repair-loop gate helpers ────────────────────────────────────────────────
 
 const SOURCE_LINTABLE = /\.(t|j)sx?$/;
+
+/**
+ * Aggregate eslint error messages by ruleId → count, across all files. Feeds
+ * the harness's rule-level lint telemetry (which rules fire, first-try vs
+ * residual) so high-value rules can be targeted and churn pruned.
+ */
+function countByRule(errorFiles) {
+  const byRule = {};
+  for (const f of errorFiles ?? []) {
+    for (const m of f.messages ?? []) {
+      const rule = m.ruleId || "unknown";
+      byRule[rule] = (byRule[rule] ?? 0) + 1;
+    }
+  }
+  return byRule;
+}
 
 /**
  * Lint the project's source files via the MCP, applying auto-fixes to disk.
@@ -681,7 +465,7 @@ async function runLintGate(lintClient, files) {
     if (errs.length) errorFiles.push({ ...f, messages: errs });
   }
   const remaining = errorFiles.reduce((n, f) => n + f.messages.length, 0);
-  return { remaining, files: errorFiles, warnings };
+  return { remaining, files: errorFiles, warnings, byRule: countByRule(errorFiles) };
 }
 
 /** Fix prompt for remaining (non-auto-fixable) lint violations. */
@@ -711,7 +495,12 @@ function buildLintFixPrompt(lintFiles, currentFilesText) {
 /** Fix prompt for axe violations — names what to change, where, and why. */
 function buildA11yFixPrompt(axeViolations, currentFilesText) {
   const lines = [
-    "The app builds and renders, but axe-core found accessibility violations. Fix each one in the component code that renders the offending element.",
+    "The app ALREADY BUILDS AND RENDERS. axe-core found accessibility violations. Fix each one in the component code that renders the offending element.",
+    "",
+    "CRITICAL — the build is working; do NOT regress it. Make the SMALLEST possible change that resolves the violations:",
+    "- Change ONLY what each violation requires (e.g. wrap content in a `<main>` landmark, add a label/alt/ARIA attribute, fix a contrast value).",
+    "- Do NOT rewrite files wholesale, do NOT refactor, and do NOT touch imports, types, or component APIs that are unrelated to the violations. Re-emitting a working file with an unrelated change (a hallucinated import, a renamed prop) is how a passing build gets broken.",
+    "- Re-emit ONLY the files you actually change. Leave every other file exactly as-is.",
     "",
     "## Current Project Files",
     "",
@@ -736,7 +525,7 @@ function buildA11yFixPrompt(axeViolations, currentFilesText) {
     lines.push("");
   }
   lines.push(
-    "Add a label, landmark, alt text, ARIA attribute, or fix contrast as appropriate. Output ONLY the files you changed, each as a complete `---FILE: path---` / `---END FILE---` block.",
+    "Add a label, landmark, alt text, ARIA attribute, or fix contrast as appropriate — nothing more. Output ONLY the files you changed, each as a complete `---FILE: path---` / `---END FILE---` block, and change nothing in them beyond what the violations above require.",
   );
   return lines.join("\n");
 }
@@ -815,9 +604,18 @@ export async function runAgent({
   testLabel,
   takeScreenshots,
   maxFixes = 5,
+  maxLintFixes = 2,
   maxGenerationRetries = 3,
+  // When false (CLI `--no-fix-accessibility`), axe still runs and violations
+  // are measured/recorded, but the agent is never sent back to fix them — no
+  // fix budget is spent on a11y and an a11y repair can't regress the build.
+  fixAccessibility = true,
+  // Per-test `measure.*` toggles (config.js), all default true. Screenshots
+  // still degrade gracefully when off — DOM count/semantic HTML are
+  // unaffected, and the report/visual-diff simply see no screenshot path.
+  measureScreenshots = true,
+  measurePerformance = true,
   mcpConfig = null,
-  cliConfig = null,
 }) {
   const systemPrompt = getSystemPrompt(testLabel);
   const fixSystemPrompt = getFixSystemPrompt(testLabel);
@@ -869,9 +667,17 @@ export async function runAgent({
   // contradicting on-disk state, healed by one retry). Reported via
   // `result.tscFlaked` so infra noise is subtractable from agent errors.
   let tscFlakes = 0;
+  // Validation cycles where the type check failed on a tsconfig/project-
+  // reference scaffold error (see `isTsconfigScaffoldError`) — a broken
+  // config the agent wrote, not a flake and not an ordinary app-code bug.
+  // Reported via `result.tsconfigError` and tracked separately so a run
+  // dominated by scaffold mistakes isn't indistinguishable from one full
+  // of real code bugs.
+  let tsconfigErrors = 0;
   const trackInstall = (v) => {
     if (v?.installFailed) npmInstallFailures++;
     if (v?.tscFlaked) tscFlakes++;
+    if (v?.tsconfigError) tsconfigErrors++;
   };
 
   const agentLogPath = resolve(iterDir, "_agent_log.txt");
@@ -919,19 +725,7 @@ export async function runAgent({
     const attemptPrompt = promptContent + retryNotice;
 
     let result;
-    if (cliConfig && !mcpConfig) {
-      result = await generateWithCli({
-        client,
-        model,
-        promptContent: attemptPrompt,
-        baseSystemPrompt: systemPrompt,
-        iterDir,
-        iterLabel,
-        cliConfig,
-        mcpConfig,
-        projectDir,
-      });
-    } else if (needsMcp) {
+    if (needsMcp) {
       result = await generateWithMcp({
         client,
         model,
@@ -1060,16 +854,34 @@ export async function runAgent({
     let firstTryAxe = null;
     let residualLint = null;
     let residualAxe = null;
+    // Step 1 — last known-good render. Once the app renders, the terminal
+    // result must never be WORSE than that: an accessibility fix (the only
+    // gate that re-enters the loop after a successful render) can rewrite a
+    // file and regress the build back to non-rendering, which would drag the
+    // iteration down to "unbuilt". We snapshot the rendering files (and their
+    // axe count) at each render; if the loop later exhausts its budget with a
+    // broken build, we restore this snapshot and measure it instead.
+    let lastGoodFiles = null;
+    let lastGoodAxe = null;
+    // Lint runs on its OWN bounded budget, separate from the shared build/a11y
+    // budget (`maxFixes`). Historically lint ran first each loop and `continue`d
+    // until it hit zero or exhausted the shared budget — so a model that kept
+    // emitting lint errors never reached build validation and scored "unbuilt".
+    // Now lint gets `maxLintFixes` attempts, then `lintSettled` latches and the
+    // loop falls through to build regardless of residual lint. Weak models keep
+    // their full build budget; residual lint is recorded, not fatal.
+    let lintFixAttempts = 0;
+    let lintSettled = false;
+    // Per-rule telemetry (P5): first-try vs residual eslint ruleId → count.
+    let firstTryLintRules = null;
+    let residualLintRules = null;
 
-    // The lint gate is a harness step (not the agent's choice). Preferred
-    // transport: the dsds CLI (`dsds lint --apply --json`) — one execFile per
-    // gate, no extra long-lived process. Falls back to a dedicated MCP client
-    // for setups without the CLI. Both point at projectDir via LINT_SOURCE_DIR.
-    const testShape = { cli: cliConfig, mcp: mcpConfig };
-    const gateCliEntry = gateLintAndA11y ? resolveCliEntry(testShape) : null;
-    const gateEnv = gateCliEntry ? resolveTestEnv(testShape) : null;
+    // The lint gate is a harness step (not the agent's choice). It runs through
+    // a dedicated MCP client (`dsds_lint_by_path`) spawned for the gate and
+    // pointed at projectDir via LINT_SOURCE_DIR. Absent an MCP config, the gate
+    // is simply skipped.
     let lintClient = null;
-    if (gateLintAndA11y && !gateCliEntry && mcpConfig) {
+    if (gateLintAndA11y && mcpConfig) {
       try {
         lintClient = await createMcpClient({
           ...mcpConfig,
@@ -1086,27 +898,32 @@ export async function runAgent({
     }
 
     try {
-      while (fixAttempts <= maxFixes) {
-        // ── Gate 1: Lint (cheap, first; auto-fixes are applied to disk) ──
-        if (gateCliEntry || lintClient) {
-          const lint = gateCliEntry
-            ? await runCliLintGate(gateCliEntry, gateEnv, projectDir, files)
-            : await runLintGate(lintClient, files);
+      while (true) {
+        // ── Gate 1: Lint — bounded by its OWN budget (maxLintFixes), then it
+        // latches (`lintSettled`) and the loop falls through to build. Lint
+        // never consumes the build/a11y budget and never blocks reaching a
+        // green build; residual lint is recorded, not fatal. ──
+        if (!lintSettled && lintClient) {
+          const lint = await runLintGate(lintClient, files);
           if (!lint.unavailable && !lint.error) {
             files = await readProjectFiles(projectDir, files); // pick up applied auto-fixes
-            if (firstTryLint === null) firstTryLint = lint.remaining;
+            if (firstTryLint === null) {
+              firstTryLint = lint.remaining;
+              firstTryLintRules = lint.byRule ?? null;
+            }
             residualLint = lint.remaining;
-            if (lint.remaining > 0) {
+            residualLintRules = lint.byRule ?? null;
+            if (lint.remaining > 0 && lintFixAttempts < maxLintFixes) {
+              lintFixAttempts++;
               console.log(
-                `${tag(iterLabel)} ${warn(`✗ Lint: ${lint.remaining} error(s)${lint.warnings ? `, ${lint.warnings} warning(s) ignored` : ""}`)}`,
+                `${tag(iterLabel)} ${warn(`✗ Lint: ${lint.remaining} error(s) (lint fix ${lintFixAttempts}/${maxLintFixes})${lint.warnings ? `, ${lint.warnings} warning(s) ignored` : ""}`)}`,
               );
-              if (fixAttempts >= maxFixes) {
-                exitStage = "lint";
-                break;
-              }
-              fixAttempts++;
-              exitStage = "lint";
-              fixLog.push({ attempt: fixAttempts, stage: "lint", remaining: lint.remaining });
+              fixLog.push({
+                attempt: lintFixAttempts,
+                stage: "lint",
+                remaining: lint.remaining,
+                rules: lint.byRule ?? undefined,
+              });
               const { text: lintFilesText, newHashes } = await buildCurrentFilesText(
                 projectDir,
                 files,
@@ -1123,13 +940,24 @@ export async function runAgent({
                 iterDir,
                 agentLogPath,
                 stage: "lint",
-                attempt: fixAttempts,
-                maxFixes,
+                attempt: lintFixAttempts,
+                maxFixes: maxLintFixes,
               });
               files = fix.files;
               addUsage(fix.usage);
               continue;
             }
+            // Lint is clean, or its budget is spent: latch and fall through to
+            // build. Do not `break` — build still deserves a full attempt.
+            lintSettled = true;
+            if (lint.remaining > 0) {
+              console.log(
+                `${tag(iterLabel)} ${warn(`⚠ Lint budget (${maxLintFixes}) spent with ${lint.remaining} error(s) remaining — proceeding to build`)}`,
+              );
+            }
+          } else {
+            // Gate unavailable/errored — do not retry it every loop.
+            lintSettled = true;
           }
         }
 
@@ -1142,14 +970,26 @@ export async function runAgent({
 
         try {
           if (validation.success) {
-            // Page rendered! Run every measurement against the running server.
+            // Page rendered! The accessibility gate runs first because it can
+            // send the code back for another fix. Capturing the expensive
+            // measurements (8 screenshots + DOM + semantic HTML, then
+            // Lighthouse) BEFORE that check wasted a full pass on every
+            // intermediate render that the a11y gate then discarded — an
+            // iteration that took two a11y fixes captured all 8 screenshots
+            // three times over, keeping only the last. Run the cheap axe scan
+            // first; take the heavy measurements once, below, after the gate
+            // resolves — which also means they capture the final a11y-clean
+            // state rather than an intermediate one.
             console.log(`${tag(iterLabel)} ${success("✓ Page renders successfully")}`);
-
-            const { screenshotPath, domElementCount, domHtmlBytes, semanticHtml } =
-              await runStaticMeasurements(validation.serverUrl, iterDir, iterLabel);
 
             // Run accessibility tests against the live dev server
             const a11yResults = await runAccessibility(validation.serverUrl, iterDir, iterLabel);
+
+            // Step 1: snapshot this rendering state (from disk, so it captures
+            // any applied lint auto-fixes) BEFORE the a11y gate can send it
+            // back for a fix that might regress the build.
+            lastGoodFiles = await readProjectFiles(projectDir, files);
+            lastGoodAxe = a11yResults?.axeViolationCount ?? 0;
 
             // ── Gate 3: Accessibility (React-code path only) ──
             // The app builds; now axe must pass. Violations become fix
@@ -1158,7 +998,11 @@ export async function runAgent({
               const axeCount = a11yResults.axeViolationCount ?? 0;
               if (firstTryAxe === null) firstTryAxe = axeCount;
               residualAxe = axeCount;
-              if (axeCount > 0 && fixAttempts < maxFixes) {
+              // Axe is always measured above; `fixAccessibility` gates only the
+              // repair. When off, violations are recorded but never sent back
+              // to the agent — so no fix budget is spent and an a11y rewrite
+              // can't regress the build.
+              if (fixAccessibility && axeCount > 0 && fixAttempts < maxFixes) {
                 fixAttempts++;
                 exitStage = "accessibility";
                 console.log(
@@ -1194,14 +1038,19 @@ export async function runAgent({
               }
             }
             // Reaching here, lint passed and axe is clean or out of budget.
+            // This is the final rendered state, so take the heavy measurements
+            // exactly once — screenshots + DOM + semantic HTML, then Lighthouse
+            // + React profiler (each runs its own browser).
             exitStage = gateLintAndA11y && (residualAxe ?? 0) > 0 ? "accessibility" : "clean";
 
-            // Lighthouse + React profiler (each runs its own browser)
-            const { lighthouseResults, reactProfile } = await runPerformance(
-              validation.serverUrl,
-              iterDir,
-              iterLabel,
-            );
+            const { screenshotPath, domElementCount, domHtmlBytes, semanticHtml } =
+              await runStaticMeasurements(validation.serverUrl, iterDir, iterLabel, {
+                screenshots: measureScreenshots,
+              });
+
+            const { lighthouseResults, reactProfile } = measurePerformance
+              ? await runPerformance(validation.serverUrl, iterDir, iterLabel)
+              : { lighthouseResults: null, reactProfile: null };
 
             // Save any non-fatal console errors for reference
             if (validation.consoleErrors.length > 0) {
@@ -1227,7 +1076,7 @@ export async function runAgent({
               totalCacheReadInputTokens,
               totalCacheCreationInputTokens,
               totalOutputTokens,
-              fixAttempts,
+              fixAttempts: fixAttempts + lintFixAttempts,
               fixLog,
               feedback,
               a11yResults,
@@ -1239,11 +1088,14 @@ export async function runAgent({
               runner: "api",
               exitStage,
               firstTryLint,
+              firstTryLintRules,
               firstTryAxe,
               residualLint,
+              residualLintRules,
               residualAxe,
               npmInstallFailures,
               tscFlakes,
+              tsconfigErrors,
             });
             return result;
           }
@@ -1330,6 +1182,21 @@ export async function runAgent({
         }
       }
 
+      // Step 1: the loop ended with a broken build, but an earlier attempt
+      // had produced a working render. A later fix (the a11y repair) regressed
+      // it. Reporting the broken end-state would score the iteration BELOW a
+      // build it already achieved — so roll back to the last good render and
+      // measure that instead. The residual axe it carried is the honest result.
+      if (exitStage === "build" && lastGoodFiles) {
+        console.warn(
+          `${tag(iterLabel)} ${warn("A later fix regressed a previously-working build — restoring the last good render for the final result")}`,
+        );
+        await writeProjectFiles(projectDir, lastGoodFiles);
+        files = lastGoodFiles;
+        // Reflect the restored (rendering) state, not the discarded broken one.
+        exitStage = (lastGoodAxe ?? 0) > 0 ? "accessibility" : "clean";
+      }
+
       // Fix budget exhausted. Decide whether a final measurement pass is
       // worth doing:
       //  - exitStage="build" — the in-loop validation just failed. The
@@ -1339,6 +1206,8 @@ export async function runAgent({
       //  - exitStage="lint" — lint never converged so the build wasn't
       //    tested. One final validateProject() — if it renders, capture
       //    measurements and axe; if not, skip.
+      //  - exitStage restored to "clean"/"accessibility" above — the last
+      //    good render is back on disk; the pass below measures it.
       let screenshotPath = null;
       let lastDomElementCount = null;
       let lastDomHtmlBytes = null;
@@ -1360,7 +1229,9 @@ export async function runAgent({
               domElementCount: lastDomElementCount,
               domHtmlBytes: lastDomHtmlBytes,
               semanticHtml: lastSemanticHtml,
-            } = await runStaticMeasurements(lastValidation.serverUrl, iterDir, iterLabel));
+            } = await runStaticMeasurements(lastValidation.serverUrl, iterDir, iterLabel, {
+              screenshots: measureScreenshots,
+            }));
             if (gateLintAndA11y) {
               lastA11y = await runAccessibility(lastValidation.serverUrl, iterDir, iterLabel);
               if (lastA11y && !lastA11y.summary?.skipped) {
@@ -1398,7 +1269,7 @@ export async function runAgent({
         totalCacheReadInputTokens,
         totalCacheCreationInputTokens,
         totalOutputTokens,
-        fixAttempts,
+        fixAttempts: fixAttempts + lintFixAttempts,
         fixLog,
         feedback,
         a11yResults: lastA11y,
@@ -1410,11 +1281,14 @@ export async function runAgent({
         runner: "api",
         exitStage,
         firstTryLint,
+        firstTryLintRules,
         firstTryAxe,
         residualLint,
+        residualLintRules,
         residualAxe,
         npmInstallFailures,
         tscFlakes,
+        tsconfigErrors,
       });
     } finally {
       if (lintClient) await lintClient.stop().catch(() => {});
@@ -1445,6 +1319,7 @@ export async function runAgent({
     semanticHtml: null,
     runner: "api",
     npmInstallFailures,
-    tscFlakes: 0,
+    tscFlakes,
+    tsconfigErrors,
   });
 }

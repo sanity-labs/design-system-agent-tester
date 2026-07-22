@@ -217,10 +217,17 @@ export async function buildCurrentFilesText(projectDir, files, opts = {}) {
  * Static, render-only measurements: screenshots + DOM count + semantic HTML.
  * Safe to call even on a broken page (each evaluation degrades to null).
  *
+ * @param {object} [opts]
+ * @param {boolean} [opts.screenshots=true] - per-test `measure.screenshots`
+ *   toggle. When false, the screenshot capture (and the gallery/visual-diff
+ *   input it feeds) is skipped; DOM count and semantic HTML still run.
  * @returns {Promise<{screenshotPath: string|null, domElementCount: number|null, domHtmlBytes: number|null, semanticHtml: object|null}>}
  */
-export async function runStaticMeasurements(serverUrl, iterDir, iterLabel) {
-  const screenshotPath = await captureScreenshots(serverUrl, iterDir, iterLabel);
+export async function runStaticMeasurements(serverUrl, iterDir, iterLabel, opts = {}) {
+  const { screenshots = true } = opts;
+  const screenshotPath = screenshots
+    ? await captureScreenshots(serverUrl, iterDir, iterLabel)
+    : null;
   const dom = await measureDom(serverUrl, iterLabel);
   const semanticHtml = await analyzeSemanticHtml(serverUrl, iterLabel);
   return {
@@ -348,8 +355,10 @@ export async function buildResult({
   runner,
   exitStage = null,
   firstTryLint = null,
+  firstTryLintRules = null,
   firstTryAxe = null,
   residualLint = null,
+  residualLintRules = null,
   residualAxe = null,
   // Per-iteration count of `npm install` failures across all validation
   // cycles. 0 when every install resolved cleanly. Aggregated at the
@@ -359,6 +368,10 @@ export async function buildResult({
   // Validation cycles where a transient toolchain flake (tsc failure
   // contradicting on-disk state) was healed by a single retry.
   tscFlakes = 0,
+  // Validation cycles where the type check failed on a tsconfig/project-
+  // reference scaffold error (broken config the agent wrote — not a flake,
+  // not an ordinary app-code bug). See `isTsconfigScaffoldError`.
+  tsconfigErrors = 0,
 }) {
   // Token-usage breakdown. Prompt caching splits input tokens across
   // three buckets billed at different rates: uncached at 1.0×,
@@ -424,11 +437,14 @@ export async function buildResult({
     domHtmlBytes: domHtmlBytes ?? null,
     exitStage,
     firstTryLint,
+    firstTryLintRules,
     firstTryAxe,
     residualLint,
+    residualLintRules,
     residualAxe,
     npmInstallFailures,
     tscFlakes,
+    tsconfigErrors,
   };
   await writeFile(resolve(iterDir, "_meta.json"), JSON.stringify(meta, null, 2), "utf-8");
 
@@ -460,9 +476,13 @@ export async function buildResult({
     domHtmlBytes: domHtmlBytes ?? null,
     exitStage,
     firstTryLint,
+    firstTryLintRules,
     firstTryAxe,
     residualLint,
+    residualLintRules,
     residualAxe,
     npmInstallFailures,
+    tscFlakes,
+    tsconfigErrors,
   };
 }

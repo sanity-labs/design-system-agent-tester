@@ -54,6 +54,20 @@ export const BASE_RULES = `Rules:
 - Make sure the project works with "npm install && npm run dev"
 - The FEEDBACK block must appear after all FILE blocks`;
 
+// Shift-left lint advisory (P4). Injected into the generation system prompt
+// ONLY for lint-enabled tests, so the agent authors to the design-system lint
+// rules the FIRST time instead of tripping them and paying for the fix loop.
+// These mirror the highest-frequency eslint-plugin-sanity-ui rules; keep in
+// sync with the plugin. Prevention is cheaper than the repair budget and does
+// not compete with it.
+export const LINT_ADVISORY = `Design-system lint rules — author to these up front to avoid rework:
+- Prefer props over \`style={{}}\`. Every layout/spacing/color value with a prop equivalent MUST use the prop: padding, margin, width, height, radius, overflow, tone, flexGrow/flexShrink/flexBasis. Inline \`style\` is only for values with NO prop path (transform, gradient, aspect-ratio, scrim/overlay color) and for raw SVG.
+- Icons: pass the component to \`icon\`/\`iconStart\` (never \`symbol\`). Wrap raw @sanity/icons glyphs in \`<Icon>\` and size with \`size\`, color with \`tone\` — never inline \`fontSize\`/\`color\` on an icon.
+- Never \`Box as="button"\`, and never put \`onClick\` on Box or Card. Use \`Button\`, or wrap a custom surface in \`PressArea\`.
+- Card silently ignores layout/flex props. Put \`flexGrow\`/\`width\`/\`overflow\` on a wrapping \`Box\`; use Card \`density\` for padding.
+- VStack/HStack accept only \`as\` and \`gap\`. Wrap in Box or Flex for anything else.
+- Responsive arrays: use \`undefined\` to skip a breakpoint, never \`null\`.`;
+
 export const FIX_PREAMBLE = `You are an expert frontend developer debugging a web application that fails to render.
 
 You will be given:
@@ -78,8 +92,12 @@ export const FIX_RULES_BASE = `Rules:
  * Compose a full system prompt by appending the engine-required output,
  * feedback, and base-rules blocks to the test's intro.
  */
-export function composeSystem(testIntro) {
-  return [testIntro.trim(), OUTPUT_FORMAT, FEEDBACK_FORMAT, BASE_RULES].join("\n\n").trim();
+export function composeSystem(testIntro, { lintAdvisory = false } = {}) {
+  const blocks = [testIntro.trim(), OUTPUT_FORMAT, FEEDBACK_FORMAT, BASE_RULES];
+  // Shift-left: only lint-enabled tests get the advisory, so the A/B keeps
+  // measuring linting's total contribution (prevention + gate) vs no lint.
+  if (lintAdvisory) blocks.push(LINT_ADVISORY);
+  return blocks.join("\n\n").trim();
 }
 
 /**

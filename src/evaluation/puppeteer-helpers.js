@@ -12,6 +12,18 @@ import config from "../config/load.js";
 export const NAV_TIMEOUT_MS = 30_000;
 
 /**
+ * Ceiling on a single low-level CDP command (ms) — e.g. `Page.captureScreenshot`.
+ * Puppeteer's own default is 180_000 (3 minutes), which isn't caught by
+ * `setDefaultTimeout`/`setDefaultNavigationTimeout` (those only cover
+ * navigation/waiting APIs, not raw protocol commands). A single wedged
+ * screenshot call — observed against a genuinely broken generated page —
+ * then silently eats 3 minutes even though every caller already tolerates
+ * and logs individual-shot failures. Cap it well under that so a hung
+ * command fails fast instead of stalling the whole fix loop.
+ */
+export const PROTOCOL_TIMEOUT_MS = 45_000;
+
+/**
  * Overall ceiling on a single measurement callback (ms). We run untrusted,
  * agent-generated code in the page — an infinite loop or a pathological DOM
  * can make `page.evaluate` hang forever (it has no built-in timeout). Racing
@@ -52,6 +64,7 @@ export async function launchBrowser() {
   return puppeteer.default.launch({
     headless: true,
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    protocolTimeout: PROTOCOL_TIMEOUT_MS,
   });
 }
 

@@ -11,6 +11,44 @@ const MAX_STYLE_SCAN_BYTES = 2_000_000;
 // extraction stays linear even if a `{{` is never closed.
 const MAX_STYLE_BODY_LOOKAHEAD = 10_000;
 const TAG_NAME_CHAR = /[A-Za-z0-9.]/;
+
+// Raw SVG drawing primitives. Inline styles on these (geometry, gradient stops,
+// transforms for a hand-drawn illustration) have no design-system prop path and
+// are legitimately outside the DSDS lint rules — the eslint rule ignores them,
+// so the harness metric must too, or SVG-heavy briefs (a bike preview, a chart)
+// dilute the inline-style signal and wrongly penalise agents. Tracked in
+// `svgExcluded` for transparency, not counted toward `total`/`byComponent`.
+// Matched case-sensitively: these are all lowercase, so capitalised design-
+// system components (`Text`, `Image`, `Path`) never collide.
+const SVG_TAGS = new Set([
+  "svg",
+  "path",
+  "line",
+  "circle",
+  "ellipse",
+  "rect",
+  "polygon",
+  "polyline",
+  "g",
+  "defs",
+  "stop",
+  "linearGradient",
+  "radialGradient",
+  "use",
+  "mask",
+  "clipPath",
+  "pattern",
+  "symbol",
+  "marker",
+  "text",
+  "tspan",
+  "textPath",
+  "foreignObject",
+  "filter",
+  "feGaussianBlur",
+  "feOffset",
+  "feBlend",
+]);
 const STYLE_PROP_RE = /(?:^|[,\n])\s*(?:'([^']+)'|"([^"]+)"|([a-zA-Z_$][a-zA-Z0-9_$]*))\s*:/g;
 
 /**
@@ -28,6 +66,7 @@ function scanFileContent(rawContent) {
   const byComponent = {};
   const byProperty = {};
   let total = 0;
+  let svgExcluded = 0;
   const n = content.length;
   // Name of the tag whose opening `<Tag ...` we're currently inside, or
   // null once a `>` has closed it. Mirrors the old regex's `(?=[^<>]*$)`
@@ -57,11 +96,18 @@ function scanFileContent(rawContent) {
     // Cheap gate: only attempt the `style={{` match at an 's'.
     if (ch === "s" && /^style\s*=\s*\{\s*\{/.test(content.slice(i, i + 40))) {
       const componentName = curTag || "unknown";
+      const bodyStart = i + content.slice(i, i + 40).match(/^style\s*=\s*\{\s*\{/)[0].length;
+      // Raw SVG primitive: legitimately outside the DS lint rules — count it
+      // separately and skip property attribution so it never dilutes the signal.
+      if (SVG_TAGS.has(componentName)) {
+        svgExcluded++;
+        i = bodyStart;
+        continue;
+      }
       byComponent[componentName] = (byComponent[componentName] || 0) + 1;
       total++;
 
       // Extract property names within a bounded window up to the closing `}}`.
-      const bodyStart = i + content.slice(i, i + 40).match(/^style\s*=\s*\{\s*\{/)[0].length;
       const window = content.slice(bodyStart, bodyStart + MAX_STYLE_BODY_LOOKAHEAD);
       const closeIdx = window.search(/\}\s*\}/);
       if (closeIdx !== -1) {
@@ -78,7 +124,7 @@ function scanFileContent(rawContent) {
     }
     i++;
   }
-  return { total, byComponent, byProperty };
+  return { total, byComponent, byProperty, svgExcluded };
 }
 
 /**
@@ -96,12 +142,13 @@ export function extractInlineStyles(files) {
   const globalByComponent = {};
   const globalByProperty = {};
   let globalTotal = 0;
+  let globalSvgExcluded = 0;
   const perFile = [];
 
   for (const file of files) {
     if (!isJsxFile(file.path)) continue;
 
-    const { total, byComponent, byProperty } = scanFileContent(file.content);
+    const { total, byComponent, byProperty, svgExcluded } = scanFileContent(file.content);
 
     for (const [name, n] of Object.entries(byComponent)) {
       globalByComponent[name] = (globalByComponent[name] || 0) + n;
@@ -110,6 +157,7 @@ export function extractInlineStyles(files) {
       globalByProperty[prop] = (globalByProperty[prop] || 0) + n;
     }
     globalTotal += total;
+    globalSvgExcluded += svgExcluded;
 
     if (total > 0) {
       perFile.push({ path: file.path, total, byComponent });
@@ -120,6 +168,8 @@ export function extractInlineStyles(files) {
     total: globalTotal,
     byComponent: globalByComponent,
     byProperty: globalByProperty,
+    // Raw-SVG inline styles, excluded from `total` — reported for transparency.
+    svgExcluded: globalSvgExcluded,
     perFile,
   };
 }

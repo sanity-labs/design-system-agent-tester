@@ -28,6 +28,20 @@ describe("prompts engine", () => {
       }
     });
 
+    it("defaults every `measure.*` toggle to true when a test doesn't set it", () => {
+      for (const t of TESTS) {
+        expect(typeof t.measure).toBe("object");
+        expect(typeof t.measure.screenshots).toBe("boolean");
+        expect(typeof t.measure.performance).toBe("boolean");
+        expect(typeof t.measure.visualDiff).toBe("boolean");
+        // None of the committed tests opt out, so every discovered test
+        // should show the true default.
+        expect(t.measure.screenshots).toBe(true);
+        expect(t.measure.performance).toBe(true);
+        expect(t.measure.visualDiff).toBe(true);
+      }
+    });
+
     it("labels are unique", () => {
       const set = new Set(TEST_LABELS);
       expect(set.size).toBe(TEST_LABELS.length);

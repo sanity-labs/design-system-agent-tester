@@ -135,6 +135,40 @@ describe("renderMetricsTables", () => {
     // alpha has fewer axe violations (lower is better) → it wins that column.
     expect(md).toContain("✓");
   });
+
+  it("shows builds-ultimately-succeeded per test as `X / N (P%)` in the Build group", () => {
+    const withBuilds = {
+      alpha: { ...aggregates.alpha, buildsSucceeded: 3 }, // 3/3 = 100%
+      beta: { ...aggregates.beta, buildsSucceeded: 1 }, // 1/3 = 33%
+    };
+    const md = renderMetricsTables(["alpha", "beta"], withBuilds);
+    expect(md).toContain("Builds succeeded (avg)");
+    // Counts are averaged across runs, so they render with one decimal.
+    expect(md).toContain("3.0 / 3 (100%)");
+    expect(md).toContain("1.0 / 3 (33%)");
+  });
+
+  it("renders builds-succeeded as `—` when the metric is absent (older reports)", () => {
+    const md = renderMetricsTables(["alpha"], { alpha: aggregates.alpha });
+    // aggregates.alpha has no buildsSucceeded key.
+    expect(md).toContain("Builds succeeded (avg)");
+    expect(md).toContain("—");
+  });
+
+  it("reports tsconfig/project-reference errors in their own group, separate from Build and npm install", () => {
+    const withTsconfigErrors = {
+      alpha: { ...aggregates.alpha, tsconfigErrorsTotal: 0, tsconfigErrorsAffected: 0 },
+      beta: { ...aggregates.beta, tsconfigErrorsTotal: 4, tsconfigErrorsAffected: 1 },
+    };
+    const md = renderMetricsTables(["alpha", "beta"], withTsconfigErrors);
+    expect(md).toContain("### tsconfig / project-reference errors");
+    expect(md).toContain("Total errors");
+    expect(md).toContain("Iterations affected");
+
+    // Not folded into the Build group's own metrics.
+    const buildSection = md.slice(md.indexOf("### Build"), md.indexOf("### npm install failures"));
+    expect(buildSection).not.toContain("tsconfig");
+  });
 });
 
 // Sanity: the stats re-exported from aggregate.js are the unified ones.
