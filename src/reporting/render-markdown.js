@@ -289,7 +289,7 @@ export function renderMarkdown(report, runDir = null) {
     const rl = data.repairLoop;
     if (rl && rl.measured > 0) {
       md += `### Repair Loop\n\n`;
-      md += `Where each iteration exited the ordered lint → build → accessibility loop, and how many violations remained.\n\n`;
+      md += `Where each iteration exited the ordered build → lint → accessibility loop, and how many violations remained.\n\n`;
       md += `| Exit stage | Iterations |\n|------------|------------|\n`;
       md += `| ✓ clean (all gates passed) | ${rl.stageCounts.clean} |\n`;
       md += `| ✗ lint (budget exhausted) | ${rl.stageCounts.lint} |\n`;

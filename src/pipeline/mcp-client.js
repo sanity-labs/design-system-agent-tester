@@ -226,14 +226,25 @@ class McpClient extends EventEmitter {
 
   /**
    * Convert MCP tool definitions to Anthropic SDK tool format.
+   *
+   * @param {string[]} [exclude] - Tool names to drop entirely. A prompt
+   *   instruction telling the model not to call a tool is advisory — the
+   *   model can still see and invoke it, and its own schema `description`
+   *   (server-authored, outside this harness's control) may actively
+   *   encourage calling it regardless of what the system prompt says.
+   *   Omitting a tool from this list is the only way to *guarantee* the
+   *   model can't reach for it.
    * @returns {Array<{name: string, description: string, input_schema: object}>}
    */
-  getToolsForAnthropic() {
-    return this.getTools().map((t) => ({
-      name: t.name,
-      description: t.description || "",
-      input_schema: t.inputSchema || { type: "object", properties: {} },
-    }));
+  getToolsForAnthropic(exclude = []) {
+    const excludeSet = new Set(exclude);
+    return this.getTools()
+      .filter((t) => !excludeSet.has(t.name))
+      .map((t) => ({
+        name: t.name,
+        description: t.description || "",
+        input_schema: t.inputSchema || { type: "object", properties: {} },
+      }));
   }
 
   /**

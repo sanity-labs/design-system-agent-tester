@@ -1,17 +1,16 @@
 /**
- * Turn raw TypeScript / build errors into actionable, design-system-aware fix
- * hints — "pair each error with its fix, not just the error."
+ * Turn raw TypeScript / build errors into actionable, generic fix hints —
+ * "pair each error with its fix, not just the error."
  *
  * Weak models (Haiku) re-guess when handed only the raw TS type-soup
- * (`… Omit<ButtonProps & Omit<HTMLProps<…>>>`). Naming the component, the bad
- * prop, and the valid props converges the repair far faster.
+ * (`… Omit<ButtonProps & Omit<HTMLProps<…>>>`). Naming the component and the
+ * bad prop converges the repair far faster than the raw compiler output alone.
  *
- * Note on prop lists: we deliberately do NOT enumerate "valid props" from a
- * static map. The DSDS docs can drift from the installed package version (e.g.
- * Button's `level`), and a wrong "accepts: …" list would tell the model to
- * re-add the very prop the compiler just rejected. The compiler is authoritative
- * about which prop is invalid; the hint trusts it and points to the live,
- * version-synced tool (dsds_build_component) for the real prop set.
+ * Deliberately generic: this file ships to every user of the harness
+ * regardless of which design system (if any) their tests target, so it must
+ * not assume a specific package, component library, or MCP tool exists.
+ * Product-specific hints (e.g. "this package's ThemeProvider is called X")
+ * belong in that test's own config, not here.
  */
 
 /**
@@ -30,40 +29,25 @@ export function deriveErrorHints(text) {
     const prop = m[1];
     const component = m[2];
     hints.add(
-      `\`${component}\` has no \`${prop}\` prop (the type checker rejected it) — remove it, do not re-add it. For the authoritative prop set for this version, call dsds_build_component(identifier="${component}").`,
+      `\`${component}\` has no \`${prop}\` prop (the type checker rejected it) — remove it, do not re-add it. Check the component's actual type definition for the correct prop name before re-emitting.`,
     );
   }
 
-  // 2. Hallucinated import: `Module '"@sanity-labs/ui-poc"' has no exported member 'X'`
-  const importRe = /has no exported member(?: named)? '([^']+)'/g;
-  while ((m = importRe.exec(text)) !== null) {
-    const name = m[1];
-    if (/provider|theme|root/i.test(name)) {
-      hints.add(
-        `\`${name}\` is not a ui-poc export — ui-poc is CSS-driven and has no theme provider. Render components directly; the stylesheet is imported once in main.tsx.`,
-      );
-    } else {
-      hints.add(
-        `\`${name}\` is not exported by @sanity-labs/ui-poc. Verify the name with dsds_check_exports — do not guess. Common ones: Box, Button, Card, Flex, Grid, Stack→VStack/HStack, Text, Heading, Icon, IconButton.`,
-      );
-    }
-  }
-
-  // 3. Boolean prop given a string: `Type 'string' is not assignable to type 'Responsive<boolean>'`
+  // 2. Boolean prop given a string: `Type 'string' is not assignable to type 'Responsive<boolean>'`
   if (/is not assignable to type '(?:Responsive<boolean>|boolean)'/.test(text)) {
     hints.add(
       'A boolean prop was given a string (e.g. `fullWidth="true"`). Use the bare prop (`fullWidth`) or a brace boolean (`fullWidth={false}`), never a string.',
     );
   }
 
-  // 4. Number where a CSS string is expected.
+  // 3. Number where a CSS string is expected.
   if (/is not assignable to type 'Responsive<string>'/.test(text)) {
     hints.add(
       'A sizing/grid prop (width, gridTemplateColumns, …) was given a number. These take CSS strings — use `width="320px"` or `gridTemplateColumns="repeat(3, 1fr)"`. (Spacing props like padding/gap are the opposite — integers.)',
     );
   }
 
-  // 5. Implicit any on a parameter (TS7006) — almost always an event handler.
+  // 4. Implicit any on a parameter (TS7006) — almost always an event handler.
   const anyRe = /Parameter '([^']+)' implicitly has an 'any' type/g;
   const anyParams = new Set();
   while ((m = anyRe.exec(text)) !== null) anyParams.add(m[1]);
@@ -73,7 +57,7 @@ export function deriveErrorHints(text) {
     );
   }
 
-  // 6. Agent edited scaffold/config files it should leave alone.
+  // 5. Agent edited scaffold/config files it should leave alone.
   if (
     /tsconfig\.(?:json|app\.json|node\.json)|Unknown compiler option|'files' list .* is empty/i.test(
       text,
@@ -81,22 +65,6 @@ export function deriveErrorHints(text) {
   ) {
     hints.add(
       "Do not modify tsconfig.json / tsconfig.*.json or other scaffold files — they are pre-configured and valid. Only edit files under `src/`.",
-    );
-  }
-
-  // 7. `@sanity/ui` components thrown with no theme context, second signature.
-  // The FATAL_PATTERNS list already recognizes the `useRootTheme()` error, but
-  // that's not the only way a missing ThemeProvider shows up. `Badge` (and
-  // other @sanity/ui components) read theme values inside styled-components
-  // via an internal `getTheme_v2` helper, which throws this exact generic
-  // TypeError when theme context is undefined — with no mention of "theme" in
-  // the message at all, so nothing else here would connect it to the cause.
-  // Confirmed by reproducing a real failing build: the full stack trace showed
-  // `getTheme_v2` → `responsiveRadiusStyle` → `<StyledBadge>`, none of which
-  // reaches the model — only `err.message` is captured, not `err.stack`.
-  if (/Cannot read properties of undefined \(reading 'v2'\)/.test(text)) {
-    hints.add(
-      'This is a missing ThemeProvider, not a component/import bug — @sanity/ui\'s internal theme reader throws this exact message (no mention of "theme") when no theme context is present. Wrap the app in <ThemeProvider theme={buildTheme()}> from @sanity/ui in main.tsx, around <App />.',
     );
   }
 

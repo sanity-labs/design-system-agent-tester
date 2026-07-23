@@ -238,6 +238,17 @@ function validateTest(raw, dirName, testDir) {
       }
     }
   }
+
+  if (raw.effort !== undefined && raw.effort !== null) {
+    const validEffortLevels = ["low", "medium", "high", "xhigh", "max"];
+    if (!validEffortLevels.includes(raw.effort)) {
+      throw new Error(
+        `${where} ("${raw.label}"): \`effort\` must be one of ${validEffortLevels.join(", ")} (or omitted/null). ` +
+          `Only applied to models that accept \`output_config.effort\` — silently ignored on others (e.g. any Haiku). ` +
+          `Ignored on Fable/Mythos too: they're hardcoded to "medium" regardless of this value (see modelTuning in runner-api.js).`,
+      );
+    }
+  }
 }
 
 /**
@@ -269,6 +280,14 @@ function normalise(raw, dirName, testDir) {
       performance: raw.measure?.performance ?? true,
       visualDiff: raw.measure?.visualDiff ?? true,
     },
+    // Per-test `output_config.effort` override — "low"/"medium"/"high"/
+    // "xhigh"/"max", or null (no override; the model's own API default
+    // applies). Silently ignored on models that don't accept the parameter
+    // (e.g. any Haiku), so one value is safe to set across a multi-model
+    // run. Also ignored on reasoning models (Fable/Mythos) — they're
+    // hardcoded to "medium" regardless of this field; see `modelTuning`
+    // in runner-api.js for why.
+    effort: raw.effort ?? null,
     docsPath: raw.docsPath ? resolveTestPath(testDir, raw.docsPath) : null,
     prompts: {
       system: resolveTestPath(testDir, raw.prompts.system),
@@ -387,6 +406,18 @@ function buildCtx(test, extra = {}) {
   return { ...base, ...derived };
 }
 
+// Adaptive thinking is always-on and non-optional for these model families
+// (Anthropic docs: `thinking: {type: "disabled"}` is rejected on both) — the
+// only lever is how much they think, not whether. Templates use this to keep
+// reasoning-model-specific instructions (e.g. the self-lint workflow) scoped
+// to the models that actually need them.
+export function isReasoningModel(model) {
+  return (
+    typeof model === "string" &&
+    (model.startsWith("claude-fable") || model.startsWith("claude-mythos"))
+  );
+}
+
 // ─── Public builders ────────────────────────────────────────────────
 
 /**
@@ -398,10 +429,13 @@ function buildCtx(test, extra = {}) {
  * file is read once and cached, so referencing `{{docs}}` here costs
  * the same as referencing it from the user template.
  */
-export function buildSystemPrompt(label) {
+export function buildSystemPrompt(label, model = null) {
   const test = getTest(label);
   const tpl = loadTemplate(test.prompts.system);
-  const intro = render(tpl, buildCtx(test, { docs: loadDocs(test) }));
+  const intro = render(
+    tpl,
+    buildCtx(test, { docs: loadDocs(test), isReasoningModel: isReasoningModel(model) }),
+  );
   return composeSystem(intro, { lintAdvisory: test.lintAdvisory });
 }
 

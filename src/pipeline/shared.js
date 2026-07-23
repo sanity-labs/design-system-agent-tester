@@ -25,9 +25,9 @@ import { deriveErrorHints } from "./error-hints.js";
 
 // ─── Prompt accessors ────────────────────────────────────────────────
 
-/** Returns the system prompt for a given test label. */
-export function getSystemPrompt(testLabel) {
-  return buildSystemPrompt(testLabel);
+/** Returns the system prompt for a given test label and model. */
+export function getSystemPrompt(testLabel, model) {
+  return buildSystemPrompt(testLabel, model);
 }
 
 /** Returns the fix-cycle system prompt for a given test label. */

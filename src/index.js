@@ -343,6 +343,7 @@ async function main() {
               fixAccessibility,
               measureScreenshots: test.measure.screenshots,
               measurePerformance: test.measure.performance,
+              effort: test.effort,
               mcpConfig: test.mcp,
             });
 

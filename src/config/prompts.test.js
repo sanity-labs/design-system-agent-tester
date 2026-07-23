@@ -4,6 +4,7 @@ import {
   buildSystemPrompt,
   buildUserPrompt,
   getTest,
+  isReasoningModel,
   TEST_LABELS,
   TESTS,
 } from "./prompts.js";
@@ -28,17 +29,14 @@ describe("prompts engine", () => {
       }
     });
 
-    it("defaults every `measure.*` toggle to true when a test doesn't set it", () => {
+    it("normalises `measure` to booleans on every discovered test", () => {
+      // Local, gitignored `tests.internal/` configs may legitimately opt out
+      // (e.g. to cut cost on maintainer runs) — assert shape, not value.
       for (const t of TESTS) {
         expect(typeof t.measure).toBe("object");
         expect(typeof t.measure.screenshots).toBe("boolean");
         expect(typeof t.measure.performance).toBe("boolean");
         expect(typeof t.measure.visualDiff).toBe("boolean");
-        // None of the committed tests opt out, so every discovered test
-        // should show the true default.
-        expect(t.measure.screenshots).toBe(true);
-        expect(t.measure.performance).toBe(true);
-        expect(t.measure.visualDiff).toBe(true);
       }
     });
 
@@ -49,6 +47,26 @@ describe("prompts engine", () => {
 
     it("TESTS is frozen", () => {
       expect(Object.isFrozen(TESTS)).toBe(true);
+    });
+  });
+
+  describe("isReasoningModel", () => {
+    it("matches Fable and Mythos model IDs", () => {
+      expect(isReasoningModel("claude-fable-5")).toBe(true);
+      expect(isReasoningModel("claude-mythos-5")).toBe(true);
+      expect(isReasoningModel("claude-mythos-preview")).toBe(true);
+    });
+
+    it("does not match other model families", () => {
+      expect(isReasoningModel("claude-sonnet-4-6")).toBe(false);
+      expect(isReasoningModel("claude-haiku-4-5")).toBe(false);
+      expect(isReasoningModel("claude-opus-4-8")).toBe(false);
+    });
+
+    it("handles null/undefined/non-string input without throwing", () => {
+      expect(isReasoningModel(null)).toBe(false);
+      expect(isReasoningModel(undefined)).toBe(false);
+      expect(isReasoningModel(42)).toBe(false);
     });
   });
 

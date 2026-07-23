@@ -178,6 +178,7 @@ Need a derived value (e.g. a comma-joined list)? Add a `derive(ctx)` function to
 | `reactVersion` | String exposed as `{{reactVersion}}`. |
 | `derive` | `(ctx) => object` adding fields to template context. |
 | `measure` | `{ screenshots, performance, visualDiff }` — non-core report metrics, each an independent boolean defaulting to `true`. See below. |
+| `effort` | `"low"` \| `"medium"` \| `"high"` \| `"xhigh"` \| `"max"`, or omitted/`null` for no override. Sets `output_config.effort` on every request for this test. Silently ignored on models that don't accept the parameter (any Haiku; older Sonnet/Opus). See below. |
 
 #### Non-core measurements (`measure`)
 
@@ -193,6 +194,21 @@ measure: {
 ```
 
 Omit `measure` entirely, or any of its keys, to keep the default (`true`).
+
+#### Model effort (`effort`)
+
+Some Claude models accept an `output_config.effort` request parameter ("low" through "max") that trades capability for token spend — see [Anthropic's effort docs](https://platform.claude.com/docs/en/build-with-claude/effort). Set it per test to tune cost/behavior for whichever models that test runs against:
+
+```js
+// tests/<label>/config.js
+effort: "medium",
+```
+
+The harness only sends `output_config.effort` to models that actually accept it (currently: Fable, Mythos, Sonnet 4.6+, Opus 4.5+ — see `EFFORT_SUPPORTED_PREFIXES` in `runner-api.js`); it's silently omitted for any other model (e.g. every Haiku generation), so one `effort` value is safe to set even in a multi-model run.
+
+**Reasoning models (Fable/Mythos) are hardcoded to `"medium"` and ignore this field entirely** — their adaptive thinking is always on and cannot be disabled, and at the API default (`"high"`) they've been observed composing entire files inside never-returned thinking and only emitting a summary instead of the project. `"medium"` is the only value validated end-to-end; `"low"` was tried (2026-07-22) and reproduced that exact failure — Fable abandoned file emission mid-generation and crashed the iteration. A test's `effort` field still applies normally to every other supported model.
+
+`effort` also gates `{{isReasoningModel}}` in the system-prompt template context — a test's `system.md` can use `{{#if isReasoningModel}}…{{/if}}` / `{{#unless isReasoningModel}}…{{/unless}}` to keep reasoning-model-specific instructions (e.g. an explicit self-lint workflow) scoped to the models that actually need them, without paying their token cost on every other model.
 
 ### Per-test MCP
 

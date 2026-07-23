@@ -1,6 +1,7 @@
 import { appendFile, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
+import { isReasoningModel } from "../config/prompts.js";
 import { parseFeedback } from "../evaluation/parse-feedback.js";
 import { parseFiles } from "../evaluation/parse-files.js";
 import { killDevServer, validateProject } from "../evaluation/validate.js";
@@ -60,17 +61,51 @@ async function callAnthropicWithRetry(client, params, label = "") {
   }
 }
 
+// Models that accept `output_config.effort` at the API level (per Anthropic's
+// effort docs). Haiku (any generation), older Sonnet/Opus (4, 4.1), and any
+// model not listed here reject the param outright — `modelTuning` never sends
+// it to them, regardless of what a test config asks for. Fable/Mythos are
+// listed for accuracy (they do accept the param) but never reach this check
+// in practice — `modelTuning` hardcodes them to "medium" before this list is
+// ever consulted; see the doc comment above `modelTuning`.
+const EFFORT_SUPPORTED_PREFIXES = [
+  "claude-fable",
+  "claude-mythos", // covers both Mythos 5 and Mythos Preview
+  "claude-opus-4-8",
+  "claude-opus-4-7",
+  "claude-opus-4-6",
+  "claude-opus-4-5",
+  "claude-sonnet-5",
+  "claude-sonnet-4-6",
+];
+
+function modelSupportsEffort(model) {
+  return typeof model === "string" && EFFORT_SUPPORTED_PREFIXES.some((p) => model.startsWith(p));
+}
+
 /**
- * Extra request params for reasoning models. Fable's thinking is always on
- * and cannot be disabled; at the default (high) effort it deliberates
- * extensively — observed composing entire project files inside its thinking
- * (which is never returned by the API) and then "summarizing" instead of
- * emitting them as ---FILE: blocks. Lower effort shifts it from deliberation
- * to action. Gated by model: output_config is rejected by e.g. Haiku 4.5.
+ * Extra request params for the model. `effort` is a per-test config override
+ * (config.js `effort` field) — applied only when the model actually accepts
+ * `output_config.effort`; silently omitted otherwise so an effort value set
+ * for one model in a multi-model run never 400s against an unsupported one.
+ *
+ * Reasoning models (Fable/Mythos) are HARDCODED to "medium", ignoring any
+ * test-level `effort` — validated end-to-end at this value; other levels are
+ * untested and "low" reproduced the exact failure this cap exists to prevent
+ * (2026-07-22: Fable at "low" abandoned file emission mid-generation and
+ * summarized instead, crashing the iteration). Their adaptive thinking is
+ * always on and cannot be disabled (`thinking: {type: "disabled"}` is
+ * rejected); at "high" (the API default) Fable was separately observed
+ * composing entire project files inside its thinking (never returned by the
+ * API) and then "summarizing" instead of emitting them as ---FILE: blocks.
+ * Every other supported model uses the test's configured `effort` as-is.
  */
-function modelTuning(model) {
-  if (model.startsWith("claude-fable") || model.startsWith("claude-mythos")) {
+function modelTuning(model, effort = null) {
+  if (isReasoningModel(model)) {
     return { output_config: { effort: "medium" } };
+  }
+  if (effort && modelSupportsEffort(model)) {
+    return { output_config: { effort } };
   }
   return {};
 }
@@ -84,11 +119,11 @@ function modelTuning(model) {
  * subsequent attempts within the ~5-minute cache TTL hit the cached
  * prefix and are billed at ~10% of the normal input rate.
  */
-async function generateSimple({ client, model, promptContent, systemPrompt }) {
+async function generateSimple({ client, model, promptContent, systemPrompt, effort = null }) {
   const response = await callAnthropicWithRetry(client, {
     model,
     max_tokens: 32000,
-    ...modelTuning(model),
+    ...modelTuning(model, effort),
     system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
     messages: [{ role: "user", content: promptContent }],
   });
@@ -126,6 +161,7 @@ async function generateWithMcp({
   iterLabel,
   mcpConfig,
   projectDir,
+  effort = null,
 }) {
   let mcpClient;
   try {
@@ -144,7 +180,18 @@ async function generateWithMcp({
     };
     mcpClient = await createMcpClient(mcpConfigWithSource);
 
-    const mcpTools = mcpClient.getToolsForAnthropic();
+    // Non-reasoning models are told in system.md not to self-lint (the
+    // harness's own post-hoc gate does it for free) — but a prompt
+    // instruction is advisory, and the lint tools' own schema descriptions
+    // (server-authored, outside this harness's control) actively say the
+    // opposite ("lint your finished component code"). Observed in practice
+    // (2026-07-22): Haiku called dsds_lint_by_path 3 times in one iteration
+    // despite the instruction not to. Omitting the tools entirely is the
+    // only way to guarantee the model can't reach for them; this doesn't
+    // affect the harness's own separate lint-gate MCP client.
+    const mcpTools = isReasoningModel(model)
+      ? mcpClient.getToolsForAnthropic()
+      : mcpClient.getToolsForAnthropic(["dsds_lint_by_path", "dsds_lint_inline"]);
     const mcpInstructions = mcpClient.getInstructions() || "";
 
     console.log(`[${iterLabel}] MCP ready — ${mcpTools.length} tools available`);
@@ -236,7 +283,7 @@ async function generateWithMcp({
         {
           model,
           max_tokens: 32000,
-          ...modelTuning(model),
+          ...modelTuning(model, effort),
           // On an emission-nudge turn the model must write files as text, not
           // reach for the lint tool again. Changing tool_choice invalidates
           // the conversation cache for this one request — acceptable, since
@@ -548,6 +595,7 @@ async function runRepair({
   attempt,
   maxFixes,
   logNote = "",
+  effort = null,
 }) {
   await appendFile(
     agentLogPath,
@@ -559,6 +607,7 @@ async function runRepair({
     model,
     promptContent: fixPrompt,
     systemPrompt: fixSystemPrompt,
+    effort,
   });
   const fixText = resp.fullText;
   await writeFile(resolve(iterDir, `_fix_response_${attempt}.txt`), fixText, "utf-8");
@@ -615,14 +664,20 @@ export async function runAgent({
   // unaffected, and the report/visual-diff simply see no screenshot path.
   measureScreenshots = true,
   measurePerformance = true,
+  // Per-test `effort` override (config.js), e.g. "low"/"medium"/"high"/"xhigh"/
+  // "max". Applied only to models that accept `output_config.effort` — see
+  // `modelTuning`. Also gates `{{isReasoningModel}}` in the system prompt, so
+  // reasoning-model-specific instructions (the self-lint workflow) stay scoped
+  // to Fable/Mythos regardless of what effort value is configured.
+  effort = null,
   mcpConfig = null,
 }) {
-  const systemPrompt = getSystemPrompt(testLabel);
+  const systemPrompt = getSystemPrompt(testLabel, model);
   const fixSystemPrompt = getFixSystemPrompt(testLabel);
   // Per-model request overrides (e.g. Fable's effort cap in modelTuning())
   // are recorded in _meta.json and the report, so tuned results are never
   // mistaken for default-settings results when comparing models.
-  const tuning = modelTuning(model);
+  const tuning = modelTuning(model, effort);
   const tuningNote = Object.keys(tuning).length > 0 ? tuning : null;
   // Sonnet 4.6 generation can take 2-3 minutes per call. The default SDK
   // timeout is 10 min with 2 retries (30 min worst-case per call). Increase
@@ -735,6 +790,7 @@ export async function runAgent({
         iterLabel,
         mcpConfig,
         projectDir,
+        effort,
       });
     } else {
       result = await generateSimple({
@@ -742,6 +798,7 @@ export async function runAgent({
         model,
         promptContent: attemptPrompt,
         systemPrompt,
+        effort,
       });
     }
 
@@ -863,16 +920,34 @@ export async function runAgent({
     // broken build, we restore this snapshot and measure it instead.
     let lastGoodFiles = null;
     let lastGoodAxe = null;
-    // Lint runs on its OWN bounded budget, separate from the shared build/a11y
-    // budget (`maxFixes`). Historically lint ran first each loop and `continue`d
-    // until it hit zero or exhausted the shared budget — so a model that kept
-    // emitting lint errors never reached build validation and scored "unbuilt".
-    // Now lint gets `maxLintFixes` attempts, then `lintSettled` latches and the
-    // loop falls through to build regardless of residual lint. Weak models keep
-    // their full build budget; residual lint is recorded, not fatal.
+    // Lint has two distinct halves that behave very differently:
+    //  - AUTO-FIX (the ~2/3 of eslint-plugin-sanity-ui rules with `fixable:
+    //    "code"`): a deterministic AST transform, not an agent rewrite. It's
+    //    safe to run on ANY write, including code that's never been
+    //    build-validated — so it runs unconditionally at the top of every
+    //    loop iteration, on every generation/fix attempt, free of charge.
+    //  - REMAINDER (rules `apply:true` can't fix — semantic/structural or
+    //    content the agent must author): only escalated to an agent fix
+    //    prompt once the build has been confirmed rendering at least once
+    //    (inside the `validation.success` branch below). Editing code that's
+    //    never been validated is how a lint-fix rewrite can introduce (or
+    //    mask) a build-breaking regression with no way to tell which
+    //    happened — observed in practice (2026-07-22). Once inside the
+    //    success branch, a lint-fix that regresses the build is caught by
+    //    the SAME mechanism that already protects against a11y-fix
+    //    regressions (Step 1 below / the post-loop restore): the next loop
+    //    iteration's validateProject() simply fails like any other
+    //    regression, and if the build-fix budget can't recover it, the
+    //    post-loop restore falls back to `lastGoodFiles`.
+    // `maxLintFixes` bounds the REMAINDER escalation only; auto-fix is
+    // unbounded (unbounded, because each call is cheap and side-effect-free
+    // beyond the files it touches).
     let lintFixAttempts = 0;
     let lintSettled = false;
     // Per-rule telemetry (P5): first-try vs residual eslint ruleId → count.
+    // "First try" now means "the first post-render check", not "before any
+    // build attempt" — a build that never renders has no shippable code to
+    // report lint compliance for, so these stay null for build failures.
     let firstTryLintRules = null;
     let residualLintRules = null;
 
@@ -899,65 +974,18 @@ export async function runAgent({
 
     try {
       while (true) {
-        // ── Gate 1: Lint — bounded by its OWN budget (maxLintFixes), then it
-        // latches (`lintSettled`) and the loop falls through to build. Lint
-        // never consumes the build/a11y budget and never blocks reaching a
-        // green build; residual lint is recorded, not fatal. ──
-        if (!lintSettled && lintClient) {
-          const lint = await runLintGate(lintClient, files);
-          if (!lint.unavailable && !lint.error) {
+        // ── Auto-fix pass: unconditional, every iteration, on whatever was
+        // just written (initial generation or any fix attempt). Mechanical
+        // and deterministic (not an agent rewrite), so it's safe even before
+        // the build has ever been validated. Captured in `lastLintResult` so
+        // the post-render remainder check below doesn't need a second call —
+        // nothing writes files between here and validateProject(). ──
+        let lastLintResult = null;
+        if (lintClient) {
+          const autofix = await runLintGate(lintClient, files);
+          if (!autofix.unavailable && !autofix.error) {
             files = await readProjectFiles(projectDir, files); // pick up applied auto-fixes
-            if (firstTryLint === null) {
-              firstTryLint = lint.remaining;
-              firstTryLintRules = lint.byRule ?? null;
-            }
-            residualLint = lint.remaining;
-            residualLintRules = lint.byRule ?? null;
-            if (lint.remaining > 0 && lintFixAttempts < maxLintFixes) {
-              lintFixAttempts++;
-              console.log(
-                `${tag(iterLabel)} ${warn(`✗ Lint: ${lint.remaining} error(s) (lint fix ${lintFixAttempts}/${maxLintFixes})${lint.warnings ? `, ${lint.warnings} warning(s) ignored` : ""}`)}`,
-              );
-              fixLog.push({
-                attempt: lintFixAttempts,
-                stage: "lint",
-                remaining: lint.remaining,
-                rules: lint.byRule ?? undefined,
-              });
-              const { text: lintFilesText, newHashes } = await buildCurrentFilesText(
-                projectDir,
-                files,
-                { previousHashes: previousFileHashes },
-              );
-              previousFileHashes = newHashes;
-              const fix = await runRepair({
-                client,
-                model,
-                fixSystemPrompt,
-                fixPrompt: buildLintFixPrompt(lint.files, lintFilesText),
-                files,
-                projectDir,
-                iterDir,
-                agentLogPath,
-                stage: "lint",
-                attempt: lintFixAttempts,
-                maxFixes: maxLintFixes,
-              });
-              files = fix.files;
-              addUsage(fix.usage);
-              continue;
-            }
-            // Lint is clean, or its budget is spent: latch and fall through to
-            // build. Do not `break` — build still deserves a full attempt.
-            lintSettled = true;
-            if (lint.remaining > 0) {
-              console.log(
-                `${tag(iterLabel)} ${warn(`⚠ Lint budget (${maxLintFixes}) spent with ${lint.remaining} error(s) remaining — proceeding to build`)}`,
-              );
-            }
-          } else {
-            // Gate unavailable/errored — do not retry it every loop.
-            lintSettled = true;
+            lastLintResult = autofix;
           }
         }
 
@@ -970,25 +998,101 @@ export async function runAgent({
 
         try {
           if (validation.success) {
-            // Page rendered! The accessibility gate runs first because it can
-            // send the code back for another fix. Capturing the expensive
-            // measurements (8 screenshots + DOM + semantic HTML, then
-            // Lighthouse) BEFORE that check wasted a full pass on every
+            console.log(`${tag(iterLabel)} ${success("✓ Page renders successfully")}`);
+
+            // Step 1: snapshot this rendering state IMMEDIATELY — before
+            // EITHER the lint-remainder gate or the a11y gate can send the
+            // code back for a fix that regresses the build. Without this
+            // snapshotted here (not after the lint gate), a lint-fix
+            // regression mid-loop would have no known-good state to fall
+            // back to.
+            lastGoodFiles = await readProjectFiles(projectDir, files);
+
+            // ── Gate 2: Lint remainder (non-auto-fixable violations only) —
+            // only reached once the build is confirmed rendering. See the
+            // comment above the auto-fix pass at the top of this loop for
+            // why escalation is deferred this far. `lastLintResult` is this
+            // iteration's auto-fix result from the top of the loop; nothing
+            // has written files since, so it's still accurate here. ──
+            if (!lintSettled && lintClient) {
+              if (lastLintResult) {
+                if (firstTryLint === null) {
+                  firstTryLint = lastLintResult.remaining;
+                  firstTryLintRules = lastLintResult.byRule ?? null;
+                }
+                residualLint = lastLintResult.remaining;
+                residualLintRules = lastLintResult.byRule ?? null;
+                if (lastLintResult.remaining > 0 && lintFixAttempts < maxLintFixes) {
+                  lintFixAttempts++;
+                  console.log(
+                    `${tag(iterLabel)} ${warn(`✗ Lint: ${lastLintResult.remaining} error(s) (lint fix ${lintFixAttempts}/${maxLintFixes})${lastLintResult.warnings ? `, ${lastLintResult.warnings} warning(s) ignored` : ""}`)}`,
+                  );
+                  fixLog.push({
+                    attempt: lintFixAttempts,
+                    stage: "lint",
+                    remaining: lastLintResult.remaining,
+                    rules: lastLintResult.byRule ?? undefined,
+                  });
+                  // Without this, a violation file that hasn't changed since
+                  // the last hash snapshot gets elided to a manifest line —
+                  // the agent is told the violation exists but never shown
+                  // the file contents to fix it. Observed in practice
+                  // (2026-07-22): the agent's own fix response reasoned
+                  // through this exact gap ("I cannot fix files I cannot
+                  // see") and left every violation in an elided file intact
+                  // across both attempts.
+                  const lintReferencedPaths = [
+                    ...new Set((lastLintResult.files ?? []).map((f) => f.filename ?? f.path)),
+                  ];
+                  const { text: lintFilesText, newHashes } = await buildCurrentFilesText(
+                    projectDir,
+                    files,
+                    { previousHashes: previousFileHashes, errorReferencedPaths: lintReferencedPaths },
+                  );
+                  previousFileHashes = newHashes;
+                  const fix = await runRepair({
+                    client,
+                    model,
+                    fixSystemPrompt,
+                    fixPrompt: buildLintFixPrompt(lastLintResult.files, lintFilesText),
+                    files,
+                    projectDir,
+                    iterDir,
+                    agentLogPath,
+                    stage: "lint",
+                    attempt: lintFixAttempts,
+                    maxFixes: maxLintFixes,
+                    effort,
+                  });
+                  files = fix.files;
+                  addUsage(fix.usage);
+                  continue; // dev server is killed in the finally below
+                }
+                lintSettled = true;
+                if (lastLintResult.remaining > 0) {
+                  console.log(
+                    `${tag(iterLabel)} ${warn(`⚠ Lint budget (${maxLintFixes}) spent with ${lastLintResult.remaining} error(s) remaining — proceeding to accessibility`)}`,
+                  );
+                }
+              } else {
+                // Gate unavailable/errored this pass — don't retry escalation.
+                lintSettled = true;
+              }
+            }
+
+            // The accessibility gate runs after lint settles because it can
+            // ALSO send the code back for another fix. Capturing the
+            // expensive measurements (8 screenshots + DOM + semantic HTML,
+            // then Lighthouse) BEFORE that check wasted a full pass on every
             // intermediate render that the a11y gate then discarded — an
             // iteration that took two a11y fixes captured all 8 screenshots
             // three times over, keeping only the last. Run the cheap axe scan
             // first; take the heavy measurements once, below, after the gate
             // resolves — which also means they capture the final a11y-clean
             // state rather than an intermediate one.
-            console.log(`${tag(iterLabel)} ${success("✓ Page renders successfully")}`);
 
             // Run accessibility tests against the live dev server
             const a11yResults = await runAccessibility(validation.serverUrl, iterDir, iterLabel);
-
-            // Step 1: snapshot this rendering state (from disk, so it captures
-            // any applied lint auto-fixes) BEFORE the a11y gate can send it
-            // back for a fix that might regress the build.
-            lastGoodFiles = await readProjectFiles(projectDir, files);
             lastGoodAxe = a11yResults?.axeViolationCount ?? 0;
 
             // ── Gate 3: Accessibility (React-code path only) ──
@@ -1013,10 +1117,18 @@ export async function runAgent({
                   stage: "accessibility",
                   violations: a11yResults.axeViolations.map((v) => v.id),
                 });
+                // No `previousHashes` here (unlike the build/lint gates): axe
+                // violations carry a DOM selector + rendered HTML, not a file
+                // path, so there's no reliable way to compute which files are
+                // "referenced" and safe to elide. Eliding by hash alone risks
+                // the same bug found in the lint gate (2026-07-22) — a
+                // violation's file getting hidden from the fix prompt because
+                // it happened not to change on the previous attempt. Always
+                // showing full content here trades a little token cost for
+                // guaranteed correctness.
                 const { text: a11yFilesText, newHashes } = await buildCurrentFilesText(
                   projectDir,
                   files,
-                  { previousHashes: previousFileHashes },
                 );
                 previousFileHashes = newHashes;
                 const fix = await runRepair({
@@ -1031,6 +1143,7 @@ export async function runAgent({
                   stage: "accessibility",
                   attempt: fixAttempts,
                   maxFixes,
+                  effort,
                 });
                 files = fix.files;
                 addUsage(fix.usage);
@@ -1139,11 +1252,26 @@ export async function runAgent({
 
           // Build the fix prompt with current files + errors. On attempts
           // ≥ 2, unchanged-and-not-error-referenced files become a
-          // manifest entry instead of full content.
+          // manifest entry instead of full content — UNLESS the regex above
+          // found zero real project-file paths in the error text, which
+          // happens for browser `pageerror` failures (e.g. a runtime
+          // TypeError whose message names a bundled/minified path, or no
+          // path at all). In that case we have no reliable signal for which
+          // file is actually broken, so eliding by stale hash risks hiding
+          // the very file that needs fixing — observed in practice
+          // (2026-07-22): the agent explicitly reasoned "since I don't have
+          // visibility into which file has this import... the most likely
+          // culprit is one of the component files," guessed wrong, and
+          // introduced a new, unrelated regression. Falling back to full
+          // content for every file is the same trade made for the a11y gate.
+          const filesTextOpts =
+            errorReferencedPaths.length > 0
+              ? { previousHashes: previousFileHashes, errorReferencedPaths }
+              : {};
           const { text: currentFilesText, newHashes } = await buildCurrentFilesText(
             projectDir,
             files,
-            { previousHashes: previousFileHashes, errorReferencedPaths },
+            filesTextOpts,
           );
           previousFileHashes = newHashes;
           const fixPrompt = buildFixPrompt(
@@ -1166,6 +1294,7 @@ export async function runAgent({
             attempt: fixAttempts,
             maxFixes,
             logNote: `Fatal error: ${(validation.fatalError || "none").split("\n")[0]}\nConsole errors: ${validation.consoleErrors.length}`,
+            effort,
           });
           files = fix.files;
           addUsage(fix.usage);
