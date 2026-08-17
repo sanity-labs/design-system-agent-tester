@@ -1,18 +1,27 @@
 #!/usr/bin/env node
 /**
- * clean-diff-images.js — Delete visual-diff PNGs from `output/`.
+ * clean-diff-images.js — Delete visual-diff PNGs and/or screenshots from
+ * `output/`.
  *
  * The harness emits one `diff_iter<N>_vs_iter<M>.png` per pair of
  * iterations under each prompt's directory (see
  * `src/evaluation/visual-diff.js`). For an N-iteration run that's
- * N(N-1)/2 PNGs per test × however many tests ran. They're useful
- * during a review of one specific run but accumulate fast across
- * historical runs. This script reclaims that space without touching
- * the original screenshots (`screenshot-*.png`) or anything else.
+ * N(N-1)/2 PNGs per test × however many tests ran. It also emits up to
+ * 8 screenshots per iteration — `screenshot.png` (primary) plus
+ * `screenshot-{breakpoint}-{scheme}.png` for the other breakpoint/
+ * color-scheme combos (see `src/evaluation/screenshot.js`). Both kinds
+ * are useful during a review of one specific run but accumulate fast
+ * across historical runs. This script reclaims that space.
+ *
+ * By default only diff images are deleted (the original behavior).
+ * Pass --screenshots to also delete screenshots, or --screenshots-only
+ * to delete screenshots and leave diff images alone.
  *
  * Usage:
- *   npm run clean-diff-images                # delete after listing
- *   npm run clean-diff-images -- --dry-run   # just list, don't delete
+ *   npm run clean-diff-images                        # diffs only (default)
+ *   npm run clean-diff-images -- --screenshots        # diffs + screenshots
+ *   npm run clean-diff-images -- --screenshots-only   # screenshots only
+ *   npm run clean-diff-images -- --dry-run            # just list, don't delete
  */
 import { readdir, stat, unlink } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
@@ -29,33 +38,44 @@ const OUTPUT_DIR = resolve(PROJECT_ROOT, "output");
 // start with `diff_` doesn't get caught up.
 const DIFF_RE = /^diff_iter\d+_vs_iter\d+\.png$/;
 
+// Match exactly the harness's screenshot output naming (see
+// `src/evaluation/screenshot.js`):
+//   screenshot.png, screenshot-tablet-dark.png, …
+const SCREENSHOT_RE = /^screenshot(-[a-z]+-[a-z]+)?\.png$/;
+
 const { values } = parseArgs({
   options: {
     "dry-run": { type: "boolean", default: false },
+    screenshots: { type: "boolean", default: false },
+    "screenshots-only": { type: "boolean", default: false },
     help: { type: "boolean", short: "h", default: false },
   },
 });
 
 if (values.help) {
   console.log(`
-clean-diff-images — Delete \`diff_iter<N>_vs_iter<M>.png\` files
-under \`output/\`.
+clean-diff-images — Delete \`diff_iter<N>_vs_iter<M>.png\` files and/or
+\`screenshot*.png\` files under \`output/\`.
 
 Usage:
-  npm run clean-diff-images                # delete after listing
-  npm run clean-diff-images -- --dry-run   # just list, don't delete
-
-The original \`screenshot-*.png\` captures are not touched.
+  npm run clean-diff-images                        # diffs only (default)
+  npm run clean-diff-images -- --screenshots        # diffs + screenshots
+  npm run clean-diff-images -- --screenshots-only   # screenshots only
+  npm run clean-diff-images -- --dry-run            # just list, don't delete
 `);
   process.exit(0);
 }
 
+const includeDiffs = !values["screenshots-only"];
+const includeScreenshots = values.screenshots || values["screenshots-only"];
+
 /**
- * Walk recursively, collecting files whose basename matches DIFF_RE.
- * Skips `node_modules` because the harness never puts diff images
- * there anyway and walking into one would waste a lot of time.
+ * Walk recursively, collecting files whose basename matches any of the
+ * given regexes. Skips `node_modules` because the harness never puts
+ * these files there anyway and walking into one would waste a lot of
+ * time.
  */
-async function findDiffImages(dir, results = []) {
+async function findMatching(dir, patterns, results = []) {
   let entries;
   try {
     entries = await readdir(dir, { withFileTypes: true });
@@ -67,8 +87,8 @@ async function findDiffImages(dir, results = []) {
     const child = join(dir, entry.name);
     if (entry.isDirectory()) {
       if (entry.name === "node_modules") continue;
-      await findDiffImages(child, results);
-    } else if (entry.isFile() && DIFF_RE.test(entry.name)) {
+      await findMatching(child, patterns, results);
+    } else if (entry.isFile() && patterns.some((re) => re.test(entry.name))) {
       results.push(child);
     }
   }
@@ -82,10 +102,20 @@ function formatBytes(n) {
   return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
-const found = await findDiffImages(OUTPUT_DIR);
+const patterns = [
+  ...(includeDiffs ? [DIFF_RE] : []),
+  ...(includeScreenshots ? [SCREENSHOT_RE] : []),
+];
+const kindLabel = includeDiffs && includeScreenshots
+  ? "diff/screenshot images"
+  : includeScreenshots
+    ? "screenshot images"
+    : "diff images";
+
+const found = await findMatching(OUTPUT_DIR, patterns);
 
 if (found.length === 0) {
-  console.log(`No diff images found under ${OUTPUT_DIR}.`);
+  console.log(`No ${kindLabel} found under ${OUTPUT_DIR}.`);
   process.exit(0);
 }
 
@@ -102,7 +132,7 @@ await Promise.all(
   }),
 );
 
-console.log(`Found ${found.length} diff images totaling ${formatBytes(total)}.`);
+console.log(`Found ${found.length} ${kindLabel} totaling ${formatBytes(total)}.`);
 
 if (values["dry-run"]) {
   // Show a sample so the user can sanity-check the regex.

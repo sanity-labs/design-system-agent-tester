@@ -149,4 +149,35 @@ describe("detectFatalError", () => {
     const serverOutput = "Internal server error: this happened earlier but the page still mounted";
     expect(detectFatalError([], true, serverOutput)).toBeNull();
   });
+
+  // Regression: a "successful" render can still be a completely broken app —
+  // some library's own graceful-degradation message (e.g. @sanity/ui's
+  // ThemeProvider on a missing `theme` prop) rendered as ordinary page text,
+  // no thrown error, no console output. `rendered=true` alone can't catch
+  // this; see `detectRenderFailureSignature` (2026-07-25).
+  it("treats a rendered page matching a renderFailureSignature as fatal", () => {
+    const bodyText = 'ThemeProvider: no "theme" property provided';
+    const signatures = [/ThemeProvider:\s*no\s*"?theme"?\s*property\s*provided/i];
+    const result = detectFatalError([], true, "", bodyText, signatures);
+    expect(result).toContain("known failure signature");
+    expect(result).toContain("ThemeProvider");
+  });
+
+  it("does not flag a normal render when no signature is configured", () => {
+    const bodyText = 'ThemeProvider: no "theme" property provided';
+    expect(detectFatalError([], true, "", bodyText, [])).toBeNull();
+    expect(detectFatalError([], true, "", bodyText)).toBeNull();
+  });
+
+  it("does not flag a real app just because it renders unrelated text", () => {
+    const bodyText = "Welcome to the dashboard. Total users: 1,204.";
+    const signatures = [/ThemeProvider:\s*no\s*"?theme"?\s*property\s*provided/i];
+    expect(detectFatalError([], true, "", bodyText, signatures)).toBeNull();
+  });
+
+  it("accepts a plain string signature (compiled as a case-insensitive regex)", () => {
+    const bodyText = "Something Went Wrong — please refresh";
+    const result = detectFatalError([], true, "", bodyText, ["something went wrong"]);
+    expect(result).toContain("known failure signature");
+  });
 });

@@ -103,7 +103,14 @@ export async function generateReport(allResults, outputDir, promptText = null) {
     // A single combined count conflates broken apps with working apps that
     // needed polish, so each stage is measured separately (the combined
     // number is kept for back-compat with older reports).
-    const stageFixes = (r, stage) => (r.fixLog || []).filter((e) => e.stage === stage).length;
+    // `final: true` entries (see runner-api.js) record the validation state
+    // AFTER the fix budget was exhausted — a diagnostic snapshot, not a new
+    // fix attempt. Counting it here inflated "fixes per iteration" above the
+    // configured budget (observed: reported 5.30 average against a 5-fix
+    // cap). Excluded from the count; still present in `fixLog` itself for
+    // display / root-cause use.
+    const stageFixes = (r, stage) =>
+      (r.fixLog || []).filter((e) => e.stage === stage && !e.final).length;
     const fixCounts = validIterations.map((r) => r.fixAttempts ?? 0);
     const buildFixCounts = validIterations.map((r) => stageFixes(r, "build"));
     const a11yFixCounts = validIterations.map((r) => stageFixes(r, "accessibility"));

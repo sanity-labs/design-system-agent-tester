@@ -671,6 +671,15 @@ export async function runAgent({
   // to Fable/Mythos regardless of what effort value is configured.
   effort = null,
   mcpConfig = null,
+  // Test-supplied patterns (config.js `renderFailureSignatures`) matched
+  // against the rendered page's visible text. Catches a library's own
+  // graceful-degradation message (e.g. a UI kit's ThemeProvider rendering
+  // an error string when a required prop is missing) rendering as ordinary
+  // page content — no thrown error, no console output, "something is on
+  // the page" per the existing render check, but the app is completely
+  // broken. Empty by default; see `detectRenderFailureSignature` in
+  // evaluation/validate.js for why this lives in test config, not here.
+  renderFailureSignatures = [],
 }) {
   const systemPrompt = getSystemPrompt(testLabel, model);
   const fixSystemPrompt = getFixSystemPrompt(testLabel);
@@ -951,10 +960,8 @@ export async function runAgent({
     let firstTryLintRules = null;
     let residualLintRules = null;
 
-    // The lint gate is a harness step (not the agent's choice). It runs through
-    // a dedicated MCP client (`dsds_lint_by_path`) spawned for the gate and
-    // pointed at projectDir via LINT_SOURCE_DIR. Absent an MCP config, the gate
-    // is simply skipped.
+    // The lint gate is a harness step (not the agent's choice). It talks to
+    // a dedicated MCP client pointed at projectDir via LINT_SOURCE_DIR.
     let lintClient = null;
     if (gateLintAndA11y && mcpConfig) {
       try {
@@ -993,7 +1000,9 @@ export async function runAgent({
           `[${iterLabel}] Validating project${fixAttempts > 0 ? ` (after fix #${fixAttempts})` : ""}...`,
         );
 
-        const validation = await validateProject(projectDir, iterLabel);
+        const validation = await validateProject(projectDir, iterLabel, {
+          renderFailureSignatures,
+        });
         trackInstall(validation);
 
         try {
@@ -1218,6 +1227,26 @@ export async function runAgent({
             console.warn(
               `${tag(iterLabel)} ${error(`✗ Fix budget (${maxFixes}) exhausted with the BUILD still failing — giving up`)}`,
             );
+            // Record THIS validation's failure before giving up. Without
+            // this, fixLog's last entry is always the failure that PROMPTED
+            // the last fix attempt, not the result of that attempt — the
+            // true final error (whatever the last fix actually produced,
+            // including "it silently succeeded and something else broke,"
+            // or even a transient flake) was previously invisible in
+            // _meta.json entirely, visible only by reading the raw
+            // _tsc_check.txt / _dev_server.txt log files by hand. Observed
+            // in practice (2026-07-25): an iteration's reported "final
+            // error" in fixLog was stale — the actual last validation call
+            // showed `tsc` passing cleanly, meaning the fix worked and a
+            // separate, unlogged issue (render/runtime) was the true cause
+            // of giving up.
+            fixLog.push({
+              attempt: fixAttempts,
+              stage: "build",
+              final: true,
+              errors: validation.consoleErrors,
+              fatalError: validation.fatalError,
+            });
             exitStage = "build";
             break;
           }
@@ -1349,7 +1378,9 @@ export async function runAgent({
         );
       } else {
         console.log(`[${iterLabel}] Taking screenshot of final state...`);
-        const lastValidation = await validateProject(projectDir, iterLabel);
+        const lastValidation = await validateProject(projectDir, iterLabel, {
+          renderFailureSignatures,
+        });
         trackInstall(lastValidation);
         try {
           if (lastValidation.success) {

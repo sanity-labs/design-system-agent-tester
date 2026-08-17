@@ -1078,17 +1078,22 @@ describe("generateReport splits fix attempts by repair stage", () => {
 
     const base = { elapsedSeconds: 5, linesOfCode: 20, files: [], componentImports: [] };
     const iterations = [
-      // Never rendered: 5 build fixes.
+      // Never rendered: 5 build fixes, plus the post-budget-exhaustion
+      // `final: true` snapshot (see runner-api.js) — a diagnostic record of
+      // the last validation, not a 6th fix attempt. Must not inflate the count.
       {
         ...base,
         iteration: 1,
         fixAttempts: 5,
         exitStage: "build",
-        fixLog: Array.from({ length: 5 }, (_, i) => ({
-          attempt: i + 1,
-          stage: "build",
-          fatalError: "boom",
-        })),
+        fixLog: [
+          ...Array.from({ length: 5 }, (_, i) => ({
+            attempt: i + 1,
+            stage: "build",
+            fatalError: "boom",
+          })),
+          { attempt: 5, stage: "build", final: true, fatalError: "still boom" },
+        ],
       },
       // Rendered fine, needed a11y polish: 4 accessibility + 1 lint fixes.
       {

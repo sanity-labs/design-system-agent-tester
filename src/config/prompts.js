@@ -249,6 +249,21 @@ function validateTest(raw, dirName, testDir) {
       );
     }
   }
+
+  if (raw.renderFailureSignatures !== undefined) {
+    if (!Array.isArray(raw.renderFailureSignatures)) {
+      throw new Error(
+        `${where} ("${raw.label}"): \`renderFailureSignatures\`, when set, must be an array of strings or RegExps.`,
+      );
+    }
+    for (const sig of raw.renderFailureSignatures) {
+      if (typeof sig !== "string" && !(sig instanceof RegExp)) {
+        throw new Error(
+          `${where} ("${raw.label}"): each \`renderFailureSignatures\` entry must be a string or a RegExp.`,
+        );
+      }
+    }
+  }
 }
 
 /**
@@ -288,6 +303,11 @@ function normalise(raw, dirName, testDir) {
     // hardcoded to "medium" regardless of this field; see `modelTuning`
     // in runner-api.js for why.
     effort: raw.effort ?? null,
+    // Patterns matched against the rendered page's visible text; a match
+    // is treated as a fatal error even though the page technically
+    // rendered something. See `detectRenderFailureSignature` in
+    // evaluation/validate.js.
+    renderFailureSignatures: raw.renderFailureSignatures ?? [],
     docsPath: raw.docsPath ? resolveTestPath(testDir, raw.docsPath) : null,
     prompts: {
       system: resolveTestPath(testDir, raw.prompts.system),

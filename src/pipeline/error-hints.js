@@ -34,14 +34,18 @@ export function deriveErrorHints(text) {
   }
 
   // 2. Boolean prop given a string: `Type 'string' is not assignable to type 'Responsive<boolean>'`
-  if (/is not assignable to type '(?:Responsive<boolean>|boolean)'/.test(text)) {
+  // Note: no trailing `'` anchor — optional props (the overwhelming majority)
+  // render as `'Responsive<boolean> | undefined'`, not `'Responsive<boolean>'`
+  // exactly. Anchoring on the closing quote meant this never matched a real
+  // optional-prop error (2026-07-25).
+  if (/is not assignable to type '(?:Responsive<boolean>|boolean)/.test(text)) {
     hints.add(
       'A boolean prop was given a string (e.g. `fullWidth="true"`). Use the bare prop (`fullWidth`) or a brace boolean (`fullWidth={false}`), never a string.',
     );
   }
 
-  // 3. Number where a CSS string is expected.
-  if (/is not assignable to type 'Responsive<string>'/.test(text)) {
+  // 3. Number where a CSS string is expected. Same trailing-quote fix as #2.
+  if (/is not assignable to type 'Responsive<string>/.test(text)) {
     hints.add(
       'A sizing/grid prop (width, gridTemplateColumns, …) was given a number. These take CSS strings — use `width="320px"` or `gridTemplateColumns="repeat(3, 1fr)"`. (Spacing props like padding/gap are the opposite — integers.)',
     );

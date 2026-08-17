@@ -29,6 +29,7 @@
     "summarize": "node src/reporting/summarize.js",
     "new-test": "node src/scripts/new-test.js",
     "clean-output": "node src/scripts/clean-output.js",
+    "capture-screenshots": "node src/scripts/capture-screenshots.js",
     "clean-diff-images": "node src/scripts/clean-diff-images.js",
     "test": "vitest run",
     "test:watch": "vitest",

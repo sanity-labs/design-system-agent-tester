@@ -345,6 +345,7 @@ async function main() {
               measurePerformance: test.measure.performance,
               effort: test.effort,
               mcpConfig: test.mcp,
+              renderFailureSignatures: test.renderFailureSignatures,
             });
 
             const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);

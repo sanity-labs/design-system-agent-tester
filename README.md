@@ -270,6 +270,8 @@ Edit `briefs/default.js` (or point `briefGenerator` at your own module) to chang
 |---|---|
 | `npm run new-test -- <label>` | Scaffold a new test directory. |
 | `npm run summarize` | Aggregate metrics across runs. |
+| `npm run capture-screenshots -- <path>` | Capture screenshots for a completed run's iterations after the fact (e.g. tests run with `measure.screenshots: false`). |
+| `npm run clean-output` | Reclaim disk space by deleting `node_modules` under `output/`. |
 | `npm test` | Run unit tests. |
 
 ### Summarize across runs

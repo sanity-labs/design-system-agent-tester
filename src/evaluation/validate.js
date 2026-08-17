@@ -51,6 +51,11 @@ const DEV_SERVER_READY_TIMEOUT_MS = 30_000;
  *
  * @param {string} projectDir
  * @param {string} iterLabel
+ * @param {object} [opts]
+ * @param {Array<string|RegExp>} [opts.renderFailureSignatures] - test-supplied
+ *   patterns (config.js `renderFailureSignatures`); a rendered page whose
+ *   body text matches one is treated as a fatal error, not a success. See
+ *   `detectRenderFailureSignature`.
  * @returns {Promise<{
  *   success: boolean,
  *   serverUrl: string|null,
@@ -60,7 +65,8 @@ const DEV_SERVER_READY_TIMEOUT_MS = 30_000;
  *   fatalError: string|null
  * }>}
  */
-export async function validateProject(projectDir, iterLabel) {
+export async function validateProject(projectDir, iterLabel, opts = {}) {
+  const { renderFailureSignatures = [] } = opts;
   const result = {
     success: false,
     serverUrl: null,
@@ -110,6 +116,8 @@ export async function validateProject(projectDir, iterLabel) {
       pageResult.consoleErrors,
       pageResult.rendered,
       serverOutput.text,
+      pageResult.bodyText,
+      renderFailureSignatures,
     );
     if (fatalError) {
       result.fatalError = fatalError;
@@ -598,11 +606,21 @@ async function checkPageRender(serverUrl, iterLabel) {
 
     const rendered = await waitForRenderedContent(page, { iterLabel });
 
-    return { consoleErrors, rendered };
+    // Captured regardless of `rendered` — some failure modes render a
+    // library's own graceful-degradation message as ordinary visible text
+    // (no thrown error, no console output), which satisfies "something is
+    // on the page" while the app is completely broken. `rendered` alone
+    // can't tell the two apart; see `renderFailureSignatures` below.
+    const bodyText = await page
+      .evaluate(() => document.body.innerText)
+      .catch(() => "");
+
+    return { consoleErrors, rendered, bodyText };
   } catch (err) {
     return {
       consoleErrors: [`[validation-error] ${err.message}`],
       rendered: false,
+      bodyText: "",
     };
   } finally {
     await browser.close();
@@ -624,7 +642,39 @@ const FATAL_PATTERNS = [
   /SyntaxError/i,
 ];
 
-export function detectFatalError(consoleErrors, rendered, serverOutput) {
+/**
+ * Detect a rendered page whose entire visible content is a library's own
+ * graceful-degradation message rather than the app — e.g. a UI kit's
+ * `ThemeProvider` catching a missing required prop and rendering an error
+ * string in place of the tree, instead of throwing. This satisfies both
+ * existing checks (some DOM is present, no console/pageerror fires) while
+ * shipping a completely broken app, so neither `FATAL_PATTERNS` nor the
+ * `rendered` flag ever catches it on its own.
+ *
+ * Deliberately generic and empty by default: this file ships to every user
+ * of the harness, so it can't assume any specific library's error text.
+ * A test supplies its own signatures via `test.renderFailureSignatures`
+ * (an array of strings or RegExps) in its config.js — see
+ * `tests.internal/ui4-mcp/config.js` for a worked example.
+ */
+export function detectRenderFailureSignature(bodyText, signatures) {
+  if (!bodyText || !signatures?.length) return null;
+  for (const sig of signatures) {
+    const pattern = sig instanceof RegExp ? sig : new RegExp(sig, "i");
+    if (pattern.test(bodyText)) {
+      return bodyText.trim().slice(0, 300);
+    }
+  }
+  return null;
+}
+
+export function detectFatalError(
+  consoleErrors,
+  rendered,
+  serverOutput,
+  bodyText = "",
+  renderFailureSignatures = [],
+) {
   const fatalErrors = consoleErrors.filter((err) => FATAL_PATTERNS.some((pat) => pat.test(err)));
 
   if (fatalErrors.length > 0) {
@@ -639,6 +689,11 @@ export function detectFatalError(consoleErrors, rendered, serverOutput) {
     const viteError = extractViteServerError(serverOutput);
     if (viteError) return viteError;
     return "Page did not render any visible content within the timeout period";
+  }
+
+  const signatureMatch = detectRenderFailureSignature(bodyText, renderFailureSignatures);
+  if (signatureMatch) {
+    return `Page rendered a known failure signature instead of the app: "${signatureMatch}"`;
   }
 
   return null;
