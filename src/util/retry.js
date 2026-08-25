@@ -31,6 +31,11 @@ export function isTransientError(err) {
     msg.includes("socket hang up") ||
     msg.includes("timed out") ||
     msg.includes("timeout") ||
+    // Node's generic fetch() failure message — used by the local-model
+    // (Ollama) client, which has no HTTP status/error-code envelope of its
+    // own to inspect. Broad, but every case caught here is already a
+    // connection failure by definition (fetch() only throws this for one).
+    msg.includes("fetch failed") ||
     msg.includes("rate limit") ||
     msg.includes("overloaded") ||
     msg.includes("internal server error") ||

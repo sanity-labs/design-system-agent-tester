@@ -185,11 +185,24 @@ export async function buildCurrentFilesText(projectDir, files, opts = {}) {
 
     const wasUnchanged = previousHashes && previousHashes.get(file.path) === hash;
     const errorReferenced = errorRefs.has(file.path);
+    // package.json is never elided, referenced or not. A "Cannot find
+    // module 'X'" error names the FILE THAT IMPORTS X (e.g. vite.config.ts)
+    // in its stack, never package.json itself — so the one file that
+    // actually needs the fix (add X as a dependency) was exactly the file
+    // getting elided under the referenced-paths heuristic. Observed
+    // 2026-08-19: with package.json elided to a manifest line, a model
+    // asked to fix a missing-devDependency error had no visibility into
+    // its current dependencies/versions and fabricated an entirely
+    // different, wrong package.json from scratch (dropped real packages,
+    // wrong React version, an invalid alias version string) instead of
+    // adding one line. It's also small — eliding it saves negligible
+    // tokens next to that failure mode.
+    const isPackageJson = file.path === "package.json";
 
     // Show full content if: this is the first call (no previousHashes),
     // OR the file changed since previous, OR the file is mentioned in
-    // current errors.
-    if (!previousHashes || !wasUnchanged || errorReferenced) {
+    // current errors, OR it's package.json.
+    if (!previousHashes || !wasUnchanged || errorReferenced || isPackageJson) {
       fullParts.push(`--- ${file.path} ---\n${content}\n--- end ---`);
     } else {
       manifest.push(file.path);

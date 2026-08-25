@@ -61,8 +61,32 @@ export function deriveErrorHints(text) {
     );
   }
 
-  // 5. Agent edited scaffold/config files it should leave alone.
+  // 5. Missing devDependency crashes the dev server (or a Node-level
+  // `require`/`import` failure elsewhere) instead of raising a tsc error —
+  // e.g. `vite.config.ts` importing `@vitejs/plugin-react` without it being
+  // declared in package.json. Generic Node error text, not design-system-
+  // specific: any package can be missing this way. Observed 2026-08-19: a
+  // weaker model was shown this exact error twice in a row across two fix
+  // attempts and made no change both times — the fix (add the package to
+  // package.json) apparently wasn't obvious from the raw error alone.
+  const missingModuleRe = /Cannot find module '([^']+)'/g;
+  const missingModules = new Set();
+  while ((m = missingModuleRe.exec(text)) !== null) missingModules.add(m[1]);
+  if (missingModules.size) {
+    hints.add(
+      `${[...missingModules].map((p) => `\`${p}\``).join(", ")} ${missingModules.size > 1 ? "are" : "is"} imported somewhere but missing from package.json. Add ${missingModules.size > 1 ? "them" : "it"} to \`dependencies\` or \`devDependencies\` (whichever matches how it's used) — do not remove the import.`,
+    );
+  }
+
+  // 6. Agent edited scaffold/config files it should leave alone. Only fires
+  // when a tsconfig *exists* and was misconfigured — NOT when one is
+  // missing outright, which needs the opposite instruction (emit one).
+  // Every prior test of this hint used Claude, which never omits
+  // tsconfig.json from its initial scaffold, so this contradiction had no
+  // chance to fire until a weaker model's incomplete scaffold exposed it.
+  const tsconfigMissing = /tsconfig\.(?:json|app\.json|node\.json)\s+is missing/i.test(text);
   if (
+    !tsconfigMissing &&
     /tsconfig\.(?:json|app\.json|node\.json)|Unknown compiler option|'files' list .* is empty/i.test(
       text,
     )

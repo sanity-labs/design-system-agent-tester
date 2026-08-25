@@ -566,10 +566,19 @@ function waitForReady(devServer, port, iterDir, serverOutput) {
       if (resolved) return;
       resolved = true;
       clearTimeout(timer);
+      // A crash before "ready" (e.g. a missing devDependency the model
+      // forgot to declare, like `@vitejs/plugin-react`) has its real cause
+      // sitting right there in `preReadyOutput` — without this, the model
+      // only ever sees "exited with code 1", never WHY, and burns a fix
+      // attempt guessing (observed 2026-08-19 with a local model: 2 fix
+      // attempts spent blind before the budget ran out, when the actual
+      // cause — an undeclared `@vitejs/plugin-react` — was one line away).
+      const viteError = extractViteServerError(preReadyOutput);
       rejectFn(
         new Error(
-          `Dev server exited with code ${code} before becoming ready. ` +
-            `See ${logPath} for full output.`,
+          `Dev server exited with code ${code} before becoming ready.` +
+            (viteError ? ` ${viteError}` : "") +
+            ` See ${logPath} for full output.`,
         ),
       );
     });
@@ -715,6 +724,13 @@ const VITE_SERVER_ERROR_PATTERNS = [
   /Missing ".*" specifier in ".*" package/i,
   /Failed to resolve import/i,
   /Failed to scan for dependencies/i,
+  // vite.config.ts itself failing to load (e.g. it imports a devDependency
+  // the model forgot to declare in package.json, like `@vitejs/plugin-react`)
+  // crashes the process before any of the Vite-specific banners above ever
+  // print — this is a plain Node `require()`/`import` failure instead.
+  /failed to load config from/i,
+  /error when starting dev server:/i,
+  /Cannot find (module|package) /i,
 ];
 
 /**

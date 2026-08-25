@@ -47,6 +47,33 @@ describe("deriveErrorHints", () => {
     expect(hints.some((h) => h.includes("Do not modify tsconfig.json"))).toBe(true);
   });
 
+  it("does NOT hint 'do not modify tsconfig' when tsconfig.json is missing outright", () => {
+    const text =
+      "tsconfig.json is missing — the project scaffold is broken. Emit a tsconfig.json at the project root.";
+    const hints = deriveErrorHints(text);
+    expect(hints.some((h) => h.includes("Do not modify tsconfig.json"))).toBe(false);
+  });
+
+  it("hints at a missing devDependency behind a 'Cannot find module' crash", () => {
+    const text =
+      "Dev server exited with code 1 before becoming ready. failed to load config from " +
+      "/project/vite.config.ts\nerror when starting dev server:\n" +
+      "Error: Cannot find module '@vitejs/plugin-react'\nRequire stack:\n- /project/vite.config.ts";
+    const hints = deriveErrorHints(text);
+    expect(hints.some((h) => h.includes("@vitejs/plugin-react") && h.includes("package.json"))).toBe(
+      true,
+    );
+  });
+
+  it("names every missing module when more than one is reported", () => {
+    const text =
+      "Cannot find module 'left-pad'\nCannot find module '@vitejs/plugin-react'";
+    const hints = deriveErrorHints(text);
+    const hint = hints.find((h) => h.includes("package.json"));
+    expect(hint).toContain("left-pad");
+    expect(hint).toContain("@vitejs/plugin-react");
+  });
+
   it("de-duplicates repeated identical hints", () => {
     const text = [
       "tsconfig.json(4,5): error TS5023: Unknown compiler option 'foo'.",

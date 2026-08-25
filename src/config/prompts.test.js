@@ -40,6 +40,21 @@ describe("prompts engine", () => {
       }
     });
 
+    it("passes through `preflight` from raw config (null if absent, never undefined)", () => {
+      // Regression test: `normalise()` builds its output as an explicit
+      // whitelist of named fields. A config.js key not added to that
+      // whitelist is silently dropped — no error, no warning — which is
+      // exactly what happened to `preflight` (2026-08-21): it worked when a
+      // test's config module was imported and called directly, but the
+      // real CLI path (which reads through `TESTS`, i.e. through
+      // `normalise()`) never saw it, so the hook silently never ran. This
+      // asserts the field exists in normalise()'s output for every test —
+      // `null` is fine, `undefined` means the whitelist dropped it again.
+      for (const t of TESTS) {
+        expect(t.preflight === null || typeof t.preflight === "function").toBe(true);
+      }
+    });
+
     it("labels are unique", () => {
       const set = new Set(TEST_LABELS);
       expect(set.size).toBe(TEST_LABELS.length);

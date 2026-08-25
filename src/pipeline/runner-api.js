@@ -6,8 +6,10 @@ import { parseFeedback } from "../evaluation/parse-feedback.js";
 import { parseFiles } from "../evaluation/parse-files.js";
 import { killDevServer, validateProject } from "../evaluation/validate.js";
 import { error, success, tag, warn } from "../util/color.js";
+import { isLocalModel } from "../util/local-model.js";
 import { isTransientError } from "../util/retry.js";
 import { createMcpClient } from "./mcp-client.js";
+import { createOllamaClient } from "./ollama-client.js";
 import {
   buildCurrentFilesText,
   buildFixPrompt,
@@ -111,6 +113,23 @@ function modelTuning(model, effort = null) {
 }
 
 /**
+ * Whether a tool-call log satisfies a test's own grounding check —
+ * `mcpConfig.groundingCheck` (see the doc comment above its use in
+ * `generateWithMcp`). A test that configures no `groundingCheck` is always
+ * considered grounded: this harness has no built-in idea of what "verified
+ * against the real docs" means for an arbitrary MCP server, so absent
+ * config means no opinion, not a default pattern.
+ *
+ * @param {{pattern: RegExp} | null} groundingCheck
+ * @param {Array<{tool: string}>} toolLog
+ * @returns {boolean}
+ */
+export function isGroundedByToolLog(groundingCheck, toolLog) {
+  if (!groundingCheck) return true;
+  return toolLog.some((t) => groundingCheck.pattern.test(t.tool));
+}
+
+/**
  * Simple single-shot generation (no MCP tools).
  *
  * The system prompt is wrapped as a single text block with
@@ -167,9 +186,9 @@ async function generateWithMcp({
   try {
     console.log(`[${iterLabel}] Starting MCP server...`);
     // The project directory must exist before the MCP starts so it can read
-    // files the agent writes (lint-by-path). The MCP is told where the agent's
-    // files live via LINT_SOURCE_DIR so `dsds_lint_by_path({ path })` resolves
-    // against the project, not the dsds-mcp install dir.
+    // files the agent writes (a self-lint tool, if the server has one, needs
+    // this to resolve paths against the project instead of its own install
+    // dir).
     await mkdir(projectDir, { recursive: true });
     const mcpConfigWithSource = {
       ...mcpConfig,
@@ -181,17 +200,20 @@ async function generateWithMcp({
     mcpClient = await createMcpClient(mcpConfigWithSource);
 
     // Non-reasoning models are told in system.md not to self-lint (the
-    // harness's own post-hoc gate does it for free) — but a prompt
-    // instruction is advisory, and the lint tools' own schema descriptions
-    // (server-authored, outside this harness's control) actively say the
-    // opposite ("lint your finished component code"). Observed in practice
-    // (2026-07-22): Haiku called dsds_lint_by_path 3 times in one iteration
-    // despite the instruction not to. Omitting the tools entirely is the
-    // only way to guarantee the model can't reach for them; this doesn't
-    // affect the harness's own separate lint-gate MCP client.
+    // harness's own post-hoc gate does it for free, see runLintGate below) —
+    // but a prompt instruction is advisory, and a lint tool's own schema
+    // description (server-authored, outside this harness's control) can
+    // actively say the opposite ("lint your finished component code").
+    // Observed in practice (2026-07-22, one test's self-lint tool): Haiku
+    // called it 3 times in one iteration despite the instruction not to.
+    // Omitting the tool(s) entirely is the only way to guarantee the model
+    // can't reach for them. A test opts into this by listing the relevant
+    // tool name(s) in its `mcp.excludeToolsForNonReasoningModels` config —
+    // empty/absent means no exclusion.
+    const excludedTools = mcpConfig.excludeToolsForNonReasoningModels ?? [];
     const mcpTools = isReasoningModel(model)
       ? mcpClient.getToolsForAnthropic()
-      : mcpClient.getToolsForAnthropic(["dsds_lint_by_path", "dsds_lint_inline"]);
+      : mcpClient.getToolsForAnthropic(excludedTools);
     const mcpInstructions = mcpClient.getInstructions() || "";
 
     console.log(`[${iterLabel}] MCP ready — ${mcpTools.length} tools available`);
@@ -233,6 +255,25 @@ async function generateWithMcp({
     // In-conversation emission recovery (see MAX_EMISSION_NUDGES).
     let emissionNudges = 0;
     let forceTextOnly = false;
+    // In-conversation grounding recovery: a full scaffold with ZERO calls to
+    // any per-component verification tool means every prop/export name in it
+    // is unverified against the real docs — observed in practice (2026-08-18,
+    // one test's MCP server): a model emitted a complete, plausible-looking
+    // project after calling only a broad context-brief tool once, and two of
+    // its type errors (a non-exported compound-component name, a tone/level
+    // prop confusion) survived every one of 5 build-fix attempts, because
+    // nothing ever told the model the real contract. One bounded nudge,
+    // separate from MAX_EMISSION_NUDGES (a different failure: files present
+    // but unverified, not files missing).
+    //
+    // A test opts into this by setting `mcp.groundingCheck` to
+    // `{ pattern: <RegExp matching its own verification tool names>, nudge:
+    // <STOP message naming those tools> }` — absent means this harness has
+    // no opinion on what "verified" means for a given MCP server, so the
+    // check is skipped entirely.
+    const groundingCheck = mcpConfig.groundingCheck ?? null;
+    let groundingNudges = 0;
+    const MAX_GROUNDING_NUDGES = 1;
     // The block currently carrying the sliding conversation cache breakpoint.
     let cacheMarker = null;
 
@@ -322,11 +363,11 @@ async function generateWithMcp({
       allTextParts.push(...textBlocks);
 
       // Write any ---FILE: path--- blocks the agent has emitted so far to disk
-      // immediately, so a subsequent `dsds_lint_by_path({ path })` call in this
-      // (or a later) turn can read them instead of the agent re-pasting the
-      // full source as a `code` argument. parseFiles() reads the cumulative
-      // text, so revised files overwrite earlier versions; writeProjectFiles
-      // rewrites the whole set each call.
+      // immediately, so a subsequent self-lint tool call (if the MCP server
+      // has one) in this (or a later) turn can read them from disk instead
+      // of the agent re-pasting the full source as a `code` argument.
+      // parseFiles() reads the cumulative text, so revised files overwrite
+      // earlier versions; writeProjectFiles rewrites the whole set each call.
       const emittedSoFar = parseFiles(allTextParts.join("\n"));
       if (emittedSoFar.length > 0) {
         await writeProjectFiles(projectDir, emittedSoFar);
@@ -363,6 +404,26 @@ async function generateWithMcp({
           forceTextOnly = true;
           continue;
         }
+
+        if (
+          hasScaffold &&
+          groundingCheck &&
+          !isGroundedByToolLog(groundingCheck, toolLog) &&
+          groundingNudges < MAX_GROUNDING_NUDGES &&
+          turns < MAX_TOOL_TURNS
+        ) {
+          groundingNudges++;
+          console.log(
+            `[${iterLabel}] Scaffold emitted with ZERO component lookups — grounding nudge ${groundingNudges}/${MAX_GROUNDING_NUDGES}`,
+          );
+          messages.push({ role: "assistant", content: response.content });
+          messages.push({
+            role: "user",
+            content: [{ type: "text", text: groundingCheck.nudge }],
+          });
+          continue;
+        }
+
         console.log(
           `[${iterLabel}] Generation complete after ${turns} turn(s), ${toolLog.length} tool call(s)`,
         );
@@ -487,13 +548,16 @@ function countByRule(errorFiles) {
  * `backgroundColor`). Gating on those would burn repair attempts on something the
  * model can't clear, so warnings are reported (for the report) but never trigger
  * a repair. Returns { remaining (errors), files (error messages only), warnings }.
+ *
+ * `toolName` is the test's own `mcp.lintTool` config — this harness has no
+ * built-in idea of what a "lint" tool is called on any given MCP server.
  */
-async function runLintGate(lintClient, files) {
+export async function runLintGate(lintClient, files, toolName) {
   const sources = files.filter((f) => SOURCE_LINTABLE.test(f.path));
   if (!sources.length) return { remaining: 0, files: [], warnings: 0 };
   let result;
   try {
-    result = await lintClient.callTool("dsds_lint_by_path", {
+    result = await lintClient.callTool(toolName, {
       apply: true,
       files: sources.map((f) => ({ path: f.path, filename: f.path })),
     });
@@ -692,10 +756,16 @@ export async function runAgent({
   // timeout is 10 min with 2 retries (30 min worst-case per call). Increase
   // the per-request timeout to 15 min and reduce retries to 1 so a slow
   // call doesn't block the entire run.
-  const client = new Anthropic({
-    timeout: 15 * 60 * 1000, // 15 minutes
-    maxRetries: 1,
-  });
+  // A model ID containing a colon (e.g. "qwen2.5-coder:14b") is an Ollama
+  // tag, never a Claude model — route it through the local shim instead of
+  // the Anthropic SDK. See ollama-client.js for the translation and its
+  // documented limitations.
+  const client = isLocalModel(model)
+    ? createOllamaClient()
+    : new Anthropic({
+        timeout: 15 * 60 * 1000, // 15 minutes
+        maxRetries: 1,
+      });
 
   const needsMcp = Boolean(mcpConfig);
 
@@ -961,9 +1031,13 @@ export async function runAgent({
     let residualLintRules = null;
 
     // The lint gate is a harness step (not the agent's choice). It talks to
-    // a dedicated MCP client pointed at projectDir via LINT_SOURCE_DIR.
+    // a dedicated MCP client pointed at projectDir via LINT_SOURCE_DIR, and
+    // only activates when the test configures `mcp.lintTool` — the name of
+    // the MCP tool to call. No `lintTool` means this test's MCP server
+    // either has no lint tool or the test opts out; either way, the harness
+    // has no built-in idea of what to call.
     let lintClient = null;
-    if (gateLintAndA11y && mcpConfig) {
+    if (gateLintAndA11y && mcpConfig && mcpConfig.lintTool) {
       try {
         lintClient = await createMcpClient({
           ...mcpConfig,
@@ -989,7 +1063,7 @@ export async function runAgent({
         // nothing writes files between here and validateProject(). ──
         let lastLintResult = null;
         if (lintClient) {
-          const autofix = await runLintGate(lintClient, files);
+          const autofix = await runLintGate(lintClient, files, mcpConfig.lintTool);
           if (!autofix.unavailable && !autofix.error) {
             files = await readProjectFiles(projectDir, files); // pick up applied auto-fixes
             lastLintResult = autofix;

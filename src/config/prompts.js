@@ -315,6 +315,10 @@ function normalise(raw, dirName, testDir) {
       fixSystem: raw.prompts.fixSystem ? resolveTestPath(testDir, raw.prompts.fixSystem) : null,
     },
     derive: raw.derive ?? null,
+    // Optional per-test hook run once before that test's iterations start
+    // (see index.js). Not derived from anything else here — pass through
+    // as-is, whatever a test's own config.js supplies (or nothing).
+    preflight: raw.preflight ?? null,
   };
 }
 

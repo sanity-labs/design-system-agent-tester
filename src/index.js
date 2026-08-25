@@ -10,6 +10,7 @@ import { iterationBuilt } from "./reporting/aggregators.js";
 import { generateReport } from "./reporting/report.js";
 import { banner, bold, dim, error, success, tag, warn } from "./util/color.js";
 import { loadEnvFile, requireApiKey } from "./util/load-env.js";
+import { isLocalModel } from "./util/local-model.js";
 import { isTransientError } from "./util/retry.js";
 import { acquireRunLock, releaseRunLock } from "./util/run-lock.js";
 
@@ -108,7 +109,7 @@ if (values.test === "all" && values.prompt !== undefined) {
  * PRD-style interface brief, then returns it.
  *
  * @param {boolean} useAgentPrompt
- * @param {string}  model - Claude model used for generation
+ * @param {string}  model - The run's target model (may be a local Ollama tag)
  * @returns {Promise<string>}
  */
 async function resolvePromptBrief(useAgentPrompt, model, briefFile) {
@@ -121,8 +122,15 @@ async function resolvePromptBrief(useAgentPrompt, model, briefFile) {
     return STATIC_PROMPT;
   }
 
-  console.log("Generating interface brief with agent...");
-  const brief = await generateAppPrompt({ model });
+  // Brief generation always calls the Anthropic API directly (it's a
+  // one-off PRD-writing step, not the model under test) — passing through
+  // a local Ollama tag here 404s against Anthropic. Fall back to the
+  // default Claude model whenever the run's target model isn't one.
+  const briefModel = isLocalModel(model) ? undefined : model;
+  console.log(
+    `Generating interface brief with agent${briefModel ? "" : " (local run target — using default Claude model for brief generation)"}...`,
+  );
+  const brief = await generateAppPrompt(briefModel ? { model: briefModel } : {});
   console.log(`\n--- Generated interface brief ---\n${brief}\n---\n`);
   return brief;
 }
@@ -201,7 +209,11 @@ async function main() {
 
   // Load .env ourselves — Node's --env-file parser silently drops some keys.
   loadEnvFile(resolve(ROOT, ".env"));
-  requireApiKey();
+  // An Ollama tag (colon in the model ID) runs entirely locally — no
+  // Anthropic key needed for that model. A mixed run (some local, some
+  // Claude) still needs the key for its Claude models.
+  const allModelsLocal = models.every(isLocalModel);
+  if (!allModelsLocal) requireApiKey();
 
   if (isNaN(maxFixes) || maxFixes < 0) {
     console.error("Error: --max-fixes must be a non-negative integer");
@@ -260,7 +272,9 @@ async function main() {
   console.log(banner("=== Agent Tester ==="));
   const field = (k) => dim(k.padEnd(13));
   console.log(
-    `${field(multiModel ? "Models:" : "Model:")} ${models.join(", ")} (Anthropic SDK — requires ANTHROPIC_API_KEY)`,
+    `${field(multiModel ? "Models:" : "Model:")} ${models.join(", ")}${
+      allModelsLocal ? " (local via Ollama)" : " (Anthropic SDK — requires ANTHROPIC_API_KEY)"
+    }`,
   );
   console.log(`${field("Mode:")} build (agent writes React)`);
   console.log(`${field("Iterations:")} ${iterations}`);
@@ -278,13 +292,14 @@ async function main() {
 
   if (!values.yes) {
     const total = iterations * testLabels.length * models.length;
-    const low = (0.05 * total).toFixed(2);
-    const high = (1.0 * total).toFixed(2);
-    console.log(
-      warn(
-        `About to run ${total} agent iterations against ${models.join(", ")}. Each iteration spends\nAPI tokens; the cost depends heavily on the model. As a rough guide for a\nmid-tier model (e.g. Sonnet), expect ~$0.05–$1.00 per iteration, so roughly\n$${low}–$${high} for this run. Higher-tier models (e.g. Opus) cost several times\nmore. Press Ctrl-C within 5 seconds to abort, or pass --yes to skip this warning.`,
-      ),
-    );
+    const message = allModelsLocal
+      ? `About to run ${total} agent iterations against ${models.join(", ")} (local — no API cost).\nWall-clock time depends on model size and machine; expect it to run noticeably\nslower per iteration than a cloud model. Press Ctrl-C within 5 seconds to abort,\nor pass --yes to skip this warning.`
+      : (() => {
+          const low = (0.05 * total).toFixed(2);
+          const high = (1.0 * total).toFixed(2);
+          return `About to run ${total} agent iterations against ${models.join(", ")}. Each iteration spends\nAPI tokens; the cost depends heavily on the model. As a rough guide for a\nmid-tier model (e.g. Sonnet), expect ~$0.05–$1.00 per iteration, so roughly\n$${low}–$${high} for this run. Higher-tier models (e.g. Opus) cost several times\nmore. Press Ctrl-C within 5 seconds to abort, or pass --yes to skip this warning.`;
+        })();
+    console.log(warn(message));
     await new Promise((r) => setTimeout(r, 5000));
   }
 
@@ -292,6 +307,12 @@ async function main() {
 
   for (const label of testLabels) {
     const test = TESTS.find((t) => t.label === label);
+
+    // Optional per-test hook — a test declares this itself (see
+    // tests.internal/ui4-mcp/config.js for the DSDS-specific example) if it
+    // has something worth checking before iterations start. The harness
+    // doesn't know or care what a test's tooling is.
+    if (typeof test.preflight === "function") test.preflight();
 
     const promptContent = buildUserPrompt(label, promptBrief);
 

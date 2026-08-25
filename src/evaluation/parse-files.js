@@ -97,10 +97,23 @@ function parseFileBlocks(text) {
   while (true) {
     const open = text.indexOf(OPEN, cursor);
     if (open === -1) break;
-    // The path runs to the `---\n` that terminates the header line.
-    const headerEnd = text.indexOf("---\n", open + OPEN.length);
-    if (headerEnd === -1) break;
-    const close = text.indexOf(CLOSE, headerEnd + 4);
+    // The header line runs to its own terminating newline. A well-formed
+    // header ends the line in "---" (---FILE: path---) — tolerate one that
+    // omits it (---FILE: path) too: a model that emits real, well-formed
+    // file content but drops these three characters on the header line
+    // shouldn't have the whole block silently discarded. This also fixes a
+    // latent bug in the stricter version: searching forward for the next
+    // literal "---\n" (instead of stopping at the header's own newline)
+    // could walk past a missing trailing "---" into the file's own content
+    // and match one deep inside a later, unrelated block.
+    const lineEnd = text.indexOf("\n", open + OPEN.length);
+    if (lineEnd === -1) break;
+    let headerLine = text.slice(open + OPEN.length, lineEnd);
+    if (headerLine.endsWith("---")) headerLine = headerLine.slice(0, -3);
+    const filePath = headerLine.trim();
+    const contentStart = lineEnd + 1;
+
+    const close = text.indexOf(CLOSE, contentStart);
     if (close === -1) {
       // The model forgot the closing marker — this happens occasionally in
       // fix-loop replies (the system prompt shows the format, but a reply
@@ -112,15 +125,13 @@ function parseFileBlocks(text) {
       // between the two files is ambiguous — bail out rather than guess
       // (also what keeps a flood of unterminated headers, as in the
       // algorithmic-complexity test below, from being treated as one file).
-      const nextOpen = text.indexOf(OPEN, headerEnd + 4);
+      const nextOpen = text.indexOf(OPEN, contentStart);
       if (nextOpen !== -1) break;
-      const filePath = text.slice(open + OPEN.length, headerEnd).trim();
-      const content = stripWrappingFence(text.slice(headerEnd + 4));
+      const content = stripWrappingFence(text.slice(contentStart));
       if (filePath) files.push({ path: filePath, content });
       break;
     }
-    const filePath = text.slice(open + OPEN.length, headerEnd).trim();
-    const content = stripWrappingFence(text.slice(headerEnd + 4, close));
+    const content = stripWrappingFence(text.slice(contentStart, close));
     if (filePath) files.push({ path: filePath, content });
     cursor = close + CLOSE.length;
   }

@@ -15,6 +15,7 @@ describe("isTransientError", () => {
     "500 Internal Server Error",
     "502 Bad Gateway",
     "503 Service Unavailable",
+    "Could not reach local Ollama at http://127.0.0.1:11434/api/chat: fetch failed",
   ])("treats %j as transient", (message) => {
     expect(isTransientError(new Error(message))).toBe(true);
   });

@@ -42,6 +42,44 @@ describe("parseFiles", () => {
     expect(result[2].path).toBe("src/utils/helpers.ts");
   });
 
+  it("tolerates a header missing its trailing --- (observed with qwen2.5-coder:14b)", () => {
+    const text = [
+      "---FILE: package.json",
+      '{ "name": "app" }',
+      "---END FILE---",
+      "",
+      "---FILE: src/main.tsx",
+      "console.log('hi')",
+      "---END FILE---",
+    ].join("\n");
+
+    const result = parseFiles(text);
+
+    expect(result).toHaveLength(2);
+    expect(result[0].path).toBe("package.json");
+    expect(result[0].content).toContain('"name": "app"');
+    expect(result[1].path).toBe("src/main.tsx");
+    expect(result[1].content).toContain("console.log");
+  });
+
+  it("does not let a missing trailing --- on the header swallow the file's own content", () => {
+    // Regression guard for the bug the tolerant header fix also happened to
+    // close: searching forward for the next literal "---\n" (instead of
+    // stopping at the header line's own newline) could walk straight past
+    // a missing "---" into the file body and match one embedded in it.
+    const text = [
+      "---FILE: src/App.tsx",
+      "const x = 'a---b';",
+      "---END FILE---",
+    ].join("\n");
+
+    const result = parseFiles(text);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].path).toBe("src/App.tsx");
+    expect(result[0].content.trim()).toBe("const x = 'a---b';");
+  });
+
   it("returns an empty array when there are no file blocks", () => {
     const text = "Just some plain text with no file markers.";
     expect(parseFiles(text)).toEqual([]);

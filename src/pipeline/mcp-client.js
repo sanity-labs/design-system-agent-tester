@@ -6,6 +6,27 @@ import { EventEmitter } from "node:events";
 const MAX_STDERR_TAIL = 8 * 1024;
 
 /**
+ * Pure conversion of MCP tool definitions to Anthropic SDK tool format,
+ * dropping any name in `exclude`. Extracted from `getToolsForAnthropic` so
+ * it's testable without spawning an MCP server. See that method's doc
+ * comment for why exclusion exists.
+ *
+ * @param {Array<{name: string, description?: string, inputSchema?: object}>} tools
+ * @param {string[]} [exclude]
+ * @returns {Array<{name: string, description: string, input_schema: object}>}
+ */
+export function toAnthropicTools(tools, exclude = []) {
+  const excludeSet = new Set(exclude);
+  return tools
+    .filter((t) => !excludeSet.has(t.name))
+    .map((t) => ({
+      name: t.name,
+      description: t.description || "",
+      input_schema: t.inputSchema || { type: "object", properties: {} },
+    }));
+}
+
+/**
  * Hard cap on the stdout reassembly buffer. A misbehaving server that
  * never emits a newline (or floods binary) would otherwise grow this
  * unbounded. 16 MB is far above any real JSON-RPC line.
@@ -16,9 +37,9 @@ const MAX_BUFFER_BYTES = 16 * 1024 * 1024;
 // per-client `stop()` runs from `finally` blocks and handles the
 // happy path, but Ctrl-C (SIGINT) and unhandled crashes skip
 // `finally` in Node, leaving children orphaned. Each run before this
-// fix accumulated ~6 dsds-mcp processes; over weeks of usage that
-// reached 45+ on the test machine. The handlers below SIGTERM every
-// tracked child on any abnormal exit signal.
+// fix accumulated several orphaned MCP server processes per run; over
+// weeks of usage that reached 45+ on the test machine. The handlers
+// below SIGTERM every tracked child on any abnormal exit signal.
 const _liveProcs = new Set();
 let _exitHandlersInstalled = false;
 function _ensureExitHandlers() {
@@ -237,14 +258,7 @@ class McpClient extends EventEmitter {
    * @returns {Array<{name: string, description: string, input_schema: object}>}
    */
   getToolsForAnthropic(exclude = []) {
-    const excludeSet = new Set(exclude);
-    return this.getTools()
-      .filter((t) => !excludeSet.has(t.name))
-      .map((t) => ({
-        name: t.name,
-        description: t.description || "",
-        input_schema: t.inputSchema || { type: "object", properties: {} },
-      }));
+    return toAnthropicTools(this.getTools(), exclude);
   }
 
   /**

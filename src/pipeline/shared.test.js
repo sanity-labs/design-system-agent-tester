@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { buildFixPrompt, resolveWithinProject } from "./shared.js";
+import { buildCurrentFilesText, buildFixPrompt, resolveWithinProject } from "./shared.js";
 
 // ─── resolveWithinProject ────────────────────────────────────────────
 
@@ -72,6 +72,51 @@ describe("resolveWithinProject rejects symlink escapes", () => {
     // macOS tmpdir is under a symlinked /var → /private/var; the check must
     // canonicalize the root too so this does not falsely trip.
     expect(resolveWithinProject(root, "src/App.tsx")).toBe(resolve(root, "src/App.tsx"));
+  });
+});
+
+// ─── buildCurrentFilesText ───────────────────────────────────────────
+
+describe("buildCurrentFilesText", () => {
+  let projectDir;
+
+  beforeAll(() => {
+    projectDir = mkdtempSync(join(tmpdir(), "at-files-"));
+    writeFileSync(join(projectDir, "package.json"), '{"name":"app"}', "utf-8");
+    writeFileSync(join(projectDir, "App.tsx"), "export default function App() {}", "utf-8");
+  });
+
+  afterAll(() => {
+    rmSync(projectDir, { recursive: true, force: true });
+  });
+
+  // Regression (2026-08-19): a "Cannot find module 'X'" error names the file
+  // that IMPORTS X (e.g. vite.config.ts) in its stack trace, never
+  // package.json itself — so package.json was eligible for elision on every
+  // fix round where it wasn't the most recently touched file, even though
+  // it's exactly the file a missing-dependency fix needs to edit. A model
+  // asked to fix such an error with package.json elided to a manifest line
+  // fabricated an entirely different, wrong package.json from scratch
+  // instead of adding one line, having no visibility into its real content.
+  it("never elides package.json, even when unchanged and not error-referenced", async () => {
+    const files = [
+      { path: "package.json", content: '{"name":"app"}' },
+      { path: "App.tsx", content: "export default function App() {}" },
+    ];
+    const first = await buildCurrentFilesText(projectDir, files);
+
+    // Second call: nothing changed, and the (unrelated) error references
+    // neither file by path — App.tsx would normally be elided here.
+    const second = await buildCurrentFilesText(projectDir, files, {
+      previousHashes: first.newHashes,
+      errorReferencedPaths: ["vite.config.ts"],
+    });
+
+    expect(second.text).toContain("--- package.json ---");
+    expect(second.text).toContain('{"name":"app"}');
+    expect(second.text).toContain("## Unchanged files (contents elided)");
+    expect(second.text).toContain("- App.tsx");
+    expect(second.text).not.toContain("--- App.tsx ---");
   });
 });
 

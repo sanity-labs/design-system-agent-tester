@@ -113,6 +113,30 @@ describe("extractViteServerError", () => {
     const result = extractViteServerError(output);
     expect(result).toContain('Missing "./styles" specifier');
   });
+
+  // Regression: vite.config.ts itself failing to load (e.g. it imports a
+  // devDependency the model forgot to declare in package.json) crashes the
+  // process before any of the Vite-specific banners above ever print — a
+  // plain Node require() failure instead. Observed 2026-08-19: a local
+  // model's vite.config.ts imported `@vitejs/plugin-react` without adding
+  // it to devDependencies; the dev server crashed and the harness reported
+  // only "exited with code 1" with no way for the model to know why.
+  it("extracts a vite.config.ts load failure caused by a missing devDependency", () => {
+    const output = [
+      "failed to load config from /project/vite.config.ts",
+      "error when starting dev server:",
+      "Error: Cannot find module '@vitejs/plugin-react'",
+      "Require stack:",
+      "- /project/vite.config.ts",
+      "    at Module._resolveFilename (node:internal/modules/cjs/loader:1421:15)",
+    ].join("\n");
+
+    const result = extractViteServerError(output);
+
+    expect(result).toContain("failed to load config from");
+    expect(result).toContain("Cannot find module '@vitejs/plugin-react'");
+    expect(result).not.toContain("at Module._resolveFilename");
+  });
 });
 
 // ---------------------------------------------------------------------------
