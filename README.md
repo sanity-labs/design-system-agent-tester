@@ -1,6 +1,6 @@
 # Design system agent tester
 
-Tests AI agents' ability to use a design system. Each test runs a group of agents against the same prompt to build an interface; results are averaged, compared, and collated into a report.
+Tests AI agents' ability to use a design system. Each test runs a group of agents against the same prompt to build an interface; results are averaged, compared, and collated into a report. Read all about it in our [Sanity blog post](https://www.sanity.io/engineering/design-system-evals?utm_source=github&utm_medium=readme).
 
 ## Setup
 
