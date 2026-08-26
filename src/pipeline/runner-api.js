@@ -728,6 +728,9 @@ export async function runAgent({
   // unaffected, and the report/visual-diff simply see no screenshot path.
   measureScreenshots = true,
   measurePerformance = true,
+  // Per-test `measure.colorSchemes` (config.js). Restricts the screenshot
+  // grid and the axe sweep to the modes the system actually ships.
+  measureColorSchemes = ["light", "dark"],
   // Per-test `effort` override (config.js), e.g. "low"/"medium"/"high"/"xhigh"/
   // "max". Applied only to models that accept `output_config.effort` — see
   // `modelTuning`. Also gates `{{isReasoningModel}}` in the system prompt, so
@@ -1175,7 +1178,9 @@ export async function runAgent({
             // state rather than an intermediate one.
 
             // Run accessibility tests against the live dev server
-            const a11yResults = await runAccessibility(validation.serverUrl, iterDir, iterLabel);
+            const a11yResults = await runAccessibility(validation.serverUrl, iterDir, iterLabel, {
+              colorSchemes: measureColorSchemes,
+            });
             lastGoodAxe = a11yResults?.axeViolationCount ?? 0;
 
             // ── Gate 3: Accessibility (React-code path only) ──
@@ -1242,6 +1247,7 @@ export async function runAgent({
             const { screenshotPath, domElementCount, domHtmlBytes, semanticHtml } =
               await runStaticMeasurements(validation.serverUrl, iterDir, iterLabel, {
                 screenshots: measureScreenshots,
+                colorSchemes: measureColorSchemes,
               });
 
             const { lighthouseResults, reactProfile } = measurePerformance
@@ -1465,9 +1471,12 @@ export async function runAgent({
               semanticHtml: lastSemanticHtml,
             } = await runStaticMeasurements(lastValidation.serverUrl, iterDir, iterLabel, {
               screenshots: measureScreenshots,
+              colorSchemes: measureColorSchemes,
             }));
             if (gateLintAndA11y) {
-              lastA11y = await runAccessibility(lastValidation.serverUrl, iterDir, iterLabel);
+              lastA11y = await runAccessibility(lastValidation.serverUrl, iterDir, iterLabel, {
+                colorSchemes: measureColorSchemes,
+              });
               if (lastA11y && !lastA11y.summary?.skipped) {
                 if (firstTryAxe === null) firstTryAxe = lastA11y.axeViolationCount ?? 0;
                 residualAxe = lastA11y.axeViolationCount ?? 0;

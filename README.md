@@ -77,7 +77,7 @@ Other config fields — see inline docs in `src/config/prompts.js` for full deta
 | `mcp` | MCP server for this test (see below). |
 | `docsPath` | Docs file inlined as `{{docs}}`. |
 | `reactVersion` | Exposed as `{{reactVersion}}`. |
-| `measure` | `{ screenshots, performance, visualDiff }` booleans, default `true`. |
+| `measure` | `{ screenshots, performance, visualDiff }` booleans, default `true`, plus `colorSchemes` — which of `"light"` / `"dark"` the browser passes measure, default both. |
 | `effort` | `"low"` – `"max"`, sets `output_config.effort` where supported. |
 | `preflight` | `() => void` run before iterations start — abort the run on a broken fixture/config. |
 

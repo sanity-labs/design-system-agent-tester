@@ -234,12 +234,15 @@ export async function buildCurrentFilesText(projectDir, files, opts = {}) {
  * @param {boolean} [opts.screenshots=true] - per-test `measure.screenshots`
  *   toggle. When false, the screenshot capture (and the gallery/visual-diff
  *   input it feeds) is skipped; DOM count and semantic HTML still run.
+ * @param {string[]} [opts.colorSchemes=["light","dark"]] - per-test
+ *   `measure.colorSchemes`. Restricts the screenshot grid to the modes the
+ *   system under test actually ships.
  * @returns {Promise<{screenshotPath: string|null, domElementCount: number|null, domHtmlBytes: number|null, semanticHtml: object|null}>}
  */
 export async function runStaticMeasurements(serverUrl, iterDir, iterLabel, opts = {}) {
-  const { screenshots = true } = opts;
+  const { screenshots = true, colorSchemes } = opts;
   const screenshotPath = screenshots
-    ? await captureScreenshots(serverUrl, iterDir, iterLabel)
+    ? await captureScreenshots(serverUrl, iterDir, iterLabel, { colorSchemes })
     : null;
   const dom = await measureDom(serverUrl, iterLabel);
   const semanticHtml = await analyzeSemanticHtml(serverUrl, iterLabel);
@@ -254,10 +257,19 @@ export async function runStaticMeasurements(serverUrl, iterDir, iterLabel, opts 
 /**
  * Run the axe-core accessibility scan, returning null (not throwing) on
  * failure so a measurement error never aborts the iteration.
+ *
+ * @param {object} [opts]
+ * @param {string[]} [opts.colorSchemes=["light","dark"]] - per-test
+ *   `measure.colorSchemes`. A single-mode system has no second mode to scan.
  */
-export async function runAccessibility(serverUrl, iterDir, iterLabel) {
+export async function runAccessibility(serverUrl, iterDir, iterLabel, opts = {}) {
   try {
-    return await runAccessibilityTests({ serverUrl, iterDir, iterLabel });
+    return await runAccessibilityTests({
+      serverUrl,
+      iterDir,
+      iterLabel,
+      colorSchemes: opts.colorSchemes,
+    });
   } catch (err) {
     console.warn(`${tag(iterLabel)} ${warn("⚠ A11y tests failed:")} ${err.message}`);
     return null;

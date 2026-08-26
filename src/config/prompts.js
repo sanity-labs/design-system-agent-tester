@@ -237,6 +237,19 @@ function validateTest(raw, dirName, testDir) {
         throw new Error(`${where} ("${raw.label}"): \`measure.${key}\` must be a boolean.`);
       }
     }
+    if (raw.measure.colorSchemes !== undefined) {
+      const schemes = raw.measure.colorSchemes;
+      if (
+        !Array.isArray(schemes) ||
+        schemes.length === 0 ||
+        schemes.some((s) => s !== "light" && s !== "dark")
+      ) {
+        throw new Error(
+          `${where} ("${raw.label}"): \`measure.colorSchemes\` must be a non-empty array ` +
+            `containing only "light" and/or "dark".`,
+        );
+      }
+    }
   }
 
   if (raw.effort !== undefined && raw.effort !== null) {
@@ -294,6 +307,13 @@ function normalise(raw, dirName, testDir) {
       screenshots: raw.measure?.screenshots ?? true,
       performance: raw.measure?.performance ?? true,
       visualDiff: raw.measure?.visualDiff ?? true,
+      // Which `prefers-color-scheme` values the browser passes run under.
+      // A system that ships one mode by contract has no second mode to
+      // measure: the dark axe scan scores whatever dark styling the *agent*
+      // invented as if it were the system's, and half the screenshots are
+      // duplicates of the light ones. Defaults to both, so a system that does
+      // ship dark is unaffected.
+      colorSchemes: raw.measure?.colorSchemes ?? ["light", "dark"],
     },
     // Per-test `output_config.effort` override — "low"/"medium"/"high"/
     // "xhigh"/"max", or null (no override; the model's own API default

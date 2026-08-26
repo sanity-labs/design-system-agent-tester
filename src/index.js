@@ -364,6 +364,7 @@ async function main() {
               fixAccessibility,
               measureScreenshots: test.measure.screenshots,
               measurePerformance: test.measure.performance,
+              measureColorSchemes: test.measure.colorSchemes,
               effort: test.effort,
               mcpConfig: test.mcp,
               renderFailureSignatures: test.renderFailureSignatures,
