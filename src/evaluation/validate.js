@@ -482,7 +482,11 @@ function startDevServer(projectDir, iterLabel, port) {
   return spawn("npm", ["run", "dev", "--", "--port", String(port), "--strictPort"], {
     cwd: projectDir,
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, BROWSER: "none" },
+    // NO_COLOR / FORCE_COLOR=0: the readiness banner is parsed, not just
+    // logged. A coloured banner also makes `_dev_server.txt` harder to read
+    // afterwards. `waitForReady` strips escapes anyway — this is the belt to
+    // that brace, and it keeps the file on disk plain.
+    env: { ...process.env, BROWSER: "none", NO_COLOR: "1", FORCE_COLOR: "0" },
     // Own process group on POSIX so killDevServer can signal npm AND
     // the Vite child it spawns in one shot.
     detached: process.platform !== "win32",
@@ -514,6 +518,16 @@ function waitForReady(devServer, port, iterDir, serverOutput) {
 
   const readyPattern = new RegExp(`https?:\\/\\/localhost:${port}\\b|ready in \\d+\\s*ms`, "i");
 
+  // Vite splits its banner with SGR escapes when colour is on —
+  // `ready in \x1b[0m\x1b[1m89\x1b[22m ms`, and `localhost:\x1b[1m5173` —
+  // so neither half of the pattern above matches the raw bytes. Colour is on
+  // whenever FORCE_COLOR is set in the environment, which is true of most
+  // agent and CI shells and is inherited by the dev server. The symptom is
+  // that every iteration times out after 30s, the agent is told its app would
+  // not start, and it spends its entire fix budget removing dependencies that
+  // were never the problem.
+  const stripAnsi = (text) => text.replace(/\x1b\[[0-9;]*m/g, "");
+
   let resolved = false;
   let preReadyOutput = "";
 
@@ -540,7 +554,8 @@ function waitForReady(devServer, port, iterDir, serverOutput) {
         return;
       }
       preReadyOutput += text;
-      if (readyPattern.test(preReadyOutput)) {
+      // Match on the stripped copy; the log keeps whatever the server wrote.
+      if (readyPattern.test(stripAnsi(preReadyOutput))) {
         resolved = true;
         clearTimeout(timer);
         // Leave the stream + data listeners attached so post-ready
