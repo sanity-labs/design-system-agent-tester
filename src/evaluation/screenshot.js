@@ -44,16 +44,25 @@ export const COLOR_SCHEMES = [
  * @param {string} serverUrl
  * @param {string} iterDir
  * @param {string} [iterLabel]
+ * @param {object} [opts]
+ * @param {string[]} [opts.colorSchemes] — restrict to these schemes (per-test
+ *   `measure.colorSchemes`). Omitted means both.
  * @returns {Promise<string|null>} — path to the primary (laptop/light) screenshot, or null on failure
  */
-export async function captureScreenshots(serverUrl, iterDir, iterLabel) {
+export async function captureScreenshots(serverUrl, iterDir, iterLabel, opts = {}) {
+  // An unknown or empty selection would silently capture nothing, which reads
+  // downstream as "the browser failed" rather than "nothing was asked for".
+  const wanted = opts.colorSchemes?.length
+    ? COLOR_SCHEMES.filter((cs) => opts.colorSchemes.includes(cs.name))
+    : COLOR_SCHEMES;
+  const schemes = wanted.length ? wanted : COLOR_SCHEMES;
   const logPath = resolve(iterDir, "_screenshot.txt");
   const lines = [`\n--- screenshots [${new Date().toISOString()}] serverUrl=${serverUrl} ---`];
   const log = (msg) => lines.push(msg);
 
   let browser;
   let primaryPath = null;
-  const total = SCREENSHOT_BREAKPOINTS.length * COLOR_SCHEMES.length;
+  const total = SCREENSHOT_BREAKPOINTS.length * schemes.length;
   let okCount = 0;
 
   try {
@@ -62,7 +71,7 @@ export async function captureScreenshots(serverUrl, iterDir, iterLabel) {
     page.setDefaultTimeout(NAV_TIMEOUT_MS);
     page.setDefaultNavigationTimeout(NAV_TIMEOUT_MS);
 
-    for (const cs of COLOR_SCHEMES) {
+    for (const cs of schemes) {
       try {
         await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: cs.scheme }]);
       } catch (err) {

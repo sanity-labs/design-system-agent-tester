@@ -39,9 +39,15 @@ const AXE_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa", "best-
  * @param {string} opts.serverUrl - The dev server URL to test
  * @param {string} opts.iterDir  - Directory for this iteration's output
  * @param {string} opts.iterLabel - Label for logging
+ * @param {string[]} [opts.colorSchemes] - restrict to these schemes (per-test
+ *   `measure.colorSchemes`). Omitted means both.
  * @returns {Promise<object>} A11y results object (never throws)
  */
-export async function runAccessibilityTests({ serverUrl, iterDir, iterLabel }) {
+export async function runAccessibilityTests({ serverUrl, iterDir, iterLabel, colorSchemes }) {
+  // A system that ships light only has no dark mode to audit. Scanning one
+  // anyway measures whatever dark styling the agent invented and files it
+  // under the design system's score.
+  const scanDark = !colorSchemes?.length || colorSchemes.includes("dark");
   console.log(`[${iterLabel}] Running accessibility tests (axe-core)...`);
 
   let browser = null;
@@ -96,27 +102,29 @@ export async function runAccessibilityTests({ serverUrl, iterDir, iterLabel }) {
     const lightResult = await runAxe();
 
     // ── Scan 2: Dark mode ─────────────────────────────────────────────────
-    await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "dark" }]);
-    // Allow CSS transitions to settle
-    await page.evaluate(() => new Promise((r) => setTimeout(r, 500)));
-
-    // Re-inject axe-core (media change may have triggered navigation in some
-    // SPAs). If re-injection fails we must NOT run a dark scan — doing so
-    // would silently re-run against the stale light-mode axe global and
-    // report bogus dark numbers. Skip the dark scan entirely instead.
-    let darkInjected = true;
-    try {
-      await page.evaluate(axeSource);
-    } catch {
-      darkInjected = false;
-    }
-
     let darkResult = null;
-    if (darkInjected) {
+    if (scanDark) {
+      await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "dark" }]);
+      // Allow CSS transitions to settle
+      await page.evaluate(() => new Promise((r) => setTimeout(r, 500)));
+
+      // Re-inject axe-core (media change may have triggered navigation in some
+      // SPAs). If re-injection fails we must NOT run a dark scan — doing so
+      // would silently re-run against the stale light-mode axe global and
+      // report bogus dark numbers. Skip the dark scan entirely instead.
+      let darkInjected = true;
       try {
-        darkResult = await runAxe();
+        await page.evaluate(axeSource);
       } catch {
-        darkResult = null;
+        darkInjected = false;
+      }
+
+      if (darkInjected) {
+        try {
+          darkResult = await runAxe();
+        } catch {
+          darkResult = null;
+        }
       }
     }
 
@@ -188,7 +196,12 @@ export async function runAccessibilityTests({ serverUrl, iterDir, iterLabel }) {
             passCount: (darkResult.passes || []).length,
             incompleteCount: (darkResult.incomplete || []).length,
           }
-        : null,
+        : // Distinguish "not asked for" from "tried and failed". Both are
+          // `null` otherwise, and a reader of the JSON cannot tell a
+          // deliberately light-only system from a broken dark scan.
+          scanDark
+          ? null
+          : { skipped: "measure.colorSchemes excludes dark" },
       summary: {
         totalViolations: allViolations.length,
         lightViolations: lightViolations.length,

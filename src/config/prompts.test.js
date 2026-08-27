@@ -40,6 +40,20 @@ describe("prompts engine", () => {
       }
     });
 
+    it("normalises `measure.colorSchemes` to a non-empty subset of light/dark", () => {
+      // Same whitelist hazard as `preflight` below: a field normalise()
+      // forgets is silently dropped, and the only symptom is a dark axe scan
+      // that a light-only system asked not to have. `undefined` here means
+      // the whitelist dropped it again.
+      for (const t of TESTS) {
+        expect(Array.isArray(t.measure.colorSchemes)).toBe(true);
+        expect(t.measure.colorSchemes.length).toBeGreaterThan(0);
+        for (const scheme of t.measure.colorSchemes) {
+          expect(["light", "dark"]).toContain(scheme);
+        }
+      }
+    });
+
     it("passes through `preflight` from raw config (null if absent, never undefined)", () => {
       // Regression test: `normalise()` builds its output as an explicit
       // whitelist of named fields. A config.js key not added to that
