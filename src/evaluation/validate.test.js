@@ -204,4 +204,51 @@ describe("detectFatalError", () => {
     const result = detectFatalError([], true, "", bodyText, ["something went wrong"]);
     expect(result).toContain("known failure signature");
   });
+
+  // Regression (2026-09-03): a Tailwind build step that never ran (the
+  // `@tailwindcss/vite` plugin missing from vite.config.ts) produces valid
+  // HTML with browser-default styling — `rendered` true, no console error,
+  // no matching failure signature. Two shad-cn-mcp iterations were scored
+  // as successful builds while shipping zero CSS.
+  describe("minStylesheetRules", () => {
+    it("flags a rendered page whose stylesheet build step never ran", () => {
+      const result = detectFatalError([], true, "", "Real app content", [], 0, 50);
+      expect(result).toContain("almost no CSS was applied");
+      expect(result).toContain("0 stylesheet rule(s)");
+      expect(result).toContain("at least 50");
+    });
+
+    it("passes a page that carries plenty of CSS rules", () => {
+      expect(detectFatalError([], true, "", "Real app content", [], 4231, 50)).toBeNull();
+    });
+
+    it("is disabled by default and when the floor is 0", () => {
+      expect(detectFatalError([], true, "", "Real app content", [], 0, 0)).toBeNull();
+      expect(detectFatalError([], true, "", "Real app content", [])).toBeNull();
+    });
+
+    it("treats an unknown (null) count as unmeasured, never as a failure", () => {
+      // `page.evaluate` failed — absence of evidence is not evidence of
+      // absence, so a null count must never fail an otherwise-good build.
+      expect(detectFatalError([], true, "", "Real app content", [], null, 50)).toBeNull();
+    });
+
+    it("passes a page exactly at the configured floor", () => {
+      expect(detectFatalError([], true, "", "Real app content", [], 50, 50)).toBeNull();
+    });
+
+    it("still prefers a real console error over the stylesheet check", () => {
+      const result = detectFatalError(
+        ["does not provide an export named 'SearchIcon'"],
+        true,
+        "",
+        "",
+        [],
+        0,
+        50,
+      );
+      expect(result).toContain("does not provide an export named");
+      expect(result).not.toContain("almost no CSS");
+    });
+  });
 });

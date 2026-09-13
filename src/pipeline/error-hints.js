@@ -78,21 +78,33 @@ export function deriveErrorHints(text) {
     );
   }
 
-  // 6. Agent edited scaffold/config files it should leave alone. Only fires
-  // when a tsconfig *exists* and was misconfigured — NOT when one is
-  // missing outright, which needs the opposite instruction (emit one).
-  // Every prior test of this hint used Claude, which never omits
-  // tsconfig.json from its initial scaffold, so this contradiction had no
-  // chance to fire until a weaker model's incomplete scaffold exposed it.
-  const tsconfigMissing = /tsconfig\.(?:json|app\.json|node\.json)\s+is missing/i.test(text);
+  // 6. The project's own tsconfig is misconfigured.
+  //
+  // The agent AUTHORS every file in this harness, tsconfig.json included —
+  // there is no pre-provided scaffold. So a compiler-config error can only
+  // be fixed by editing that file, and the hint has to say so.
+  //
+  // This previously emitted the exact opposite ("Do not modify
+  // tsconfig.json … they are pre-configured and valid. Only edit files
+  // under `src/`."), which fired on ANY error text merely containing
+  // "tsconfig.json". That made TS5070 / TS5023 / TS6306 / TS6310
+  // unwinnable: tsc reports them against tsconfig.json, the hint forbade
+  // touching tsconfig.json, and the model burned its whole fix budget
+  // editing `src/` files that were never the problem (observed
+  // 2026-09-03 — a model hit TS5070 and never once tried the one edit
+  // that resolves it). Config errors are now paired with the fix, like
+  // every other hint here.
+  // Keep in sync with TSCONFIG_SCAFFOLD_ERROR_CODES in evaluation/tsc-flake.js
+  // — the same codes the report counts as scaffold errors. TS6142 is
+  // deliberately excluded: it doubles as a configless-tsc flake signature
+  // (see isProbablyConfiglessRun), which the retry path already handles.
+  const configErrorCodes = /TS5023|TS5070|TS6053|TS6305|TS6306|TS6310/;
   if (
-    !tsconfigMissing &&
-    /tsconfig\.(?:json|app\.json|node\.json)|Unknown compiler option|'files' list .* is empty/i.test(
-      text,
-    )
+    configErrorCodes.test(text) ||
+    /Unknown compiler option|'files' list .* is empty/i.test(text)
   ) {
     hints.add(
-      "Do not modify tsconfig.json / tsconfig.*.json or other scaffold files — they are pre-configured and valid. Only edit files under `src/`.",
+      "This is a compiler-configuration error, not an app-code error — it can only be fixed by editing the tsconfig.json you emitted. Re-emit tsconfig.json with the offending option corrected or removed. Prefer a single tsconfig.json with no `references` array (drop any `tsconfig.app.json` / `tsconfig.node.json` and fold their options in), and when `module` is `ESNext` set `\"moduleResolution\": \"bundler\"` explicitly — omitting it defaults to `classic`, which conflicts with `resolveJsonModule` and modern package `exports`. Do NOT weaken type checking (`strict: false`, `skipLibCheck`, `// @ts-nocheck`) to silence app-code errors.",
     );
   }
 

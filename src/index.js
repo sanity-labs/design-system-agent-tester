@@ -65,6 +65,29 @@ const { values } = parseArgs({
       short: "f",
       default: "5",
     },
+    // Budget for the post-render LINT remainder gate, separate from
+    // `--max-fixes` (which is the build/a11y budget). Auto-fixable lint
+    // issues are always applied mechanically regardless of this — it bounds
+    // only how many times the AGENT is sent back for violations autofix
+    // could not resolve.
+    //
+    // DEFAULT 0 — an iteration finishes once the page renders. Lint
+    // compliance is still measured and reported
+    // (`firstTryLint`/`residualLint`/`byRule`); the agent just isn't sent
+    // back for violations autofix couldn't resolve. Raise it to re-enable
+    // post-render lint repair.
+    //
+    // Was hardcoded to 2, then made a flag, then defaulted to 0 on
+    // 2026-09-11: post-render escalation was the only reason an iteration
+    // kept working after a successful render, and it regressed a working
+    // build in 6 of 701 iterations (a render-clean app re-emitted scaffold
+    // files during a lint fix and broke its own type check). The mechanical
+    // auto-fix pass is unaffected and still runs BEFORE the render check,
+    // where it helps reach a render rather than second-guessing one.
+    "max-lint-fixes": {
+      type: "string",
+      default: "0",
+    },
     // When false (`--no-fix-accessibility`), axe still runs and violations are
     // still measured/reported — the agent just isn't sent back to FIX them, so
     // no fix budget is spent on accessibility and an a11y repair can't regress
@@ -204,6 +227,7 @@ async function main() {
   const maxConcurrency = parseInt(values.concurrency, 10) || 1;
   const takeScreenshots = values.screenshot;
   const maxFixes = parseInt(values["max-fixes"], 10);
+  const maxLintFixes = parseInt(values["max-lint-fixes"], 10);
   const fixAccessibility = values["fix-accessibility"];
   const useAgentPrompt = values["agent-prompt"];
 
@@ -217,6 +241,11 @@ async function main() {
 
   if (isNaN(maxFixes) || maxFixes < 0) {
     console.error("Error: --max-fixes must be a non-negative integer");
+    process.exit(1);
+  }
+
+  if (isNaN(maxLintFixes) || maxLintFixes < 0) {
+    console.error("Error: --max-lint-fixes must be a non-negative integer");
     process.exit(1);
   }
 
@@ -279,6 +308,7 @@ async function main() {
   console.log(`${field("Mode:")} build (agent writes React)`);
   console.log(`${field("Iterations:")} ${iterations}`);
   console.log(`${field("Max fixes:")} ${maxFixes}`);
+  console.log(`${field("Max lint fixes:")} ${maxLintFixes}`);
   console.log(`${field("Fix a11y:")} ${fixAccessibility}`);
   console.log(`${field("Concurrency:")} ${maxConcurrency}`);
   console.log(`${field("Screenshots:")} ${takeScreenshots}`);
@@ -309,7 +339,7 @@ async function main() {
     const test = TESTS.find((t) => t.label === label);
 
     // Optional per-test hook — a test declares this itself (see
-    // tests.internal/ui4-mcp/config.js for the DSDS-specific example) if it
+    // tests.internal/ui5-mcp/config.js for the DSDS-specific example) if it
     // has something worth checking before iterations start. The harness
     // doesn't know or care what a test's tooling is.
     if (typeof test.preflight === "function") test.preflight();
@@ -361,12 +391,15 @@ async function main() {
               testLabel: label,
               takeScreenshots,
               maxFixes,
+              maxLintFixes,
               fixAccessibility,
               measureScreenshots: test.measure.screenshots,
               measurePerformance: test.measure.performance,
               effort: test.effort,
               mcpConfig: test.mcp,
+              cliConfig: test.cli,
               renderFailureSignatures: test.renderFailureSignatures,
+              minStylesheetRules: test.minStylesheetRules,
             });
 
             const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
@@ -525,8 +558,16 @@ async function main() {
 // failed"). Only the known CDP/teardown signatures are ignored; any
 // other rejection is logged with its stack and crashes the process, the
 // same as Node's default.
+// `performance mark has not been set` is lighthouse-logger/marky failing to
+// close a timing mark. It is a logging failure inside Lighthouse, thrown from
+// a timer callback nothing awaits, and it says nothing about the iteration's
+// code — the measurement is already being retried/skipped by
+// evaluation/lighthouse.js. Lighthouse runs are serialized to prevent the
+// collision that causes it (see withLighthouseLock); this entry is the
+// backstop so a stray late timer can never take the whole run down again
+// (it did, on 2026-09-09/13.32).
 const TOLERATED_REJECTION_RE =
-  /Target closed|Protocol error|Session closed|checkForQuiet|WebSocket is not open|Most likely the page has been closed/i;
+  /Target closed|Protocol error|Session closed|checkForQuiet|WebSocket is not open|Most likely the page has been closed|performance mark has not been set/i;
 
 process.on("unhandledRejection", (reason) => {
   const msg = reason instanceof Error ? reason.message : String(reason);

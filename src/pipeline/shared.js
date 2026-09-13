@@ -409,8 +409,13 @@ export async function buildResult({
         .map((p) => p?.name)
         .filter((n) => typeof n === "string" && n.length > 0)
     : [];
+  // Plus any local import prefixes this test declares (`componentImportPaths`)
+  // — for copy-in design systems whose components are vendored into the
+  // project instead of installed. Empty for every package-based test, which
+  // leaves their counts unchanged.
+  const componentImportPaths = test?.componentImportPaths ?? [];
 
-  const componentImports = extractComponentImports(files, packageNames);
+  const componentImports = extractComponentImports(files, packageNames, componentImportPaths);
   const inlineStyles = extractInlineStyles(files);
   const componentUsage = extractComponentUsageCounts(files);
 

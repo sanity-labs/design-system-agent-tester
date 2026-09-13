@@ -94,10 +94,15 @@ mcp: {
   lintTool: "your_lint_tool",                        // optional — harness's post-render lint gate
   excludeToolsForNonReasoningModels: ["your_lint_tool"], // optional
   groundingCheck: { pattern: /your_verify_tool/i, nudge: "…" }, // optional
+  fixLoop: false,                                    // optional — default true
 }
 ```
 
 See the inline comments in `src/pipeline/runner-api.js` for what each optional field does. `{{#if requiresMcp}}` is true in templates whenever an `mcp` block is present.
+
+**The fix loop gets the same tools as the build.** Repair turns spawn the server and register its tools, exactly as initial generation does. Set `fixLoop: false` to make repair turns tool-free.
+
+This default flipped on 2026-09-09. Before that, every fix attempt was a stateless call carrying only the fix-system prompt and the broken files — no conversation history and no tools — which left the fix loop strictly less informed than the build that preceded it. It penalised tests whose knowledge lives in the MCP rather than in a hand-written fix prompt. In one Haiku run a front-loading arm spent all 16 of its fix rounds on the same `@sanity/icons` import trap and passed none of its first three iterations, because recovering needed one fact it could not look up. Note that repair turns now cost tool-call tokens, and each one starts and stops the server, adding a few seconds per attempt.
 
 > **Security:** `command`/`args` here run as a real child process. Treat every test `config.js` as trusted code. See [SECURITY.md](SECURITY.md).
 

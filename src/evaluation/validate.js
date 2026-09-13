@@ -56,6 +56,10 @@ const DEV_SERVER_READY_TIMEOUT_MS = 30_000;
  *   patterns (config.js `renderFailureSignatures`); a rendered page whose
  *   body text matches one is treated as a fatal error, not a success. See
  *   `detectRenderFailureSignature`.
+ * @param {number} [opts.minStylesheetRules=0] - test-supplied floor (config.js
+ *   `minStylesheetRules`); a rendered page carrying fewer CSS rules than this
+ *   is treated as a fatal error (its stylesheet build step never ran). 0
+ *   disables the check. See `detectFatalError`.
  * @returns {Promise<{
  *   success: boolean,
  *   serverUrl: string|null,
@@ -66,7 +70,7 @@ const DEV_SERVER_READY_TIMEOUT_MS = 30_000;
  * }>}
  */
 export async function validateProject(projectDir, iterLabel, opts = {}) {
-  const { renderFailureSignatures = [] } = opts;
+  const { renderFailureSignatures = [], minStylesheetRules = 0 } = opts;
   const result = {
     success: false,
     serverUrl: null,
@@ -118,6 +122,8 @@ export async function validateProject(projectDir, iterLabel, opts = {}) {
       serverOutput.text,
       pageResult.bodyText,
       renderFailureSignatures,
+      pageResult.stylesheetRules,
+      minStylesheetRules,
     );
     if (fatalError) {
       result.fatalError = fatalError;
@@ -624,12 +630,54 @@ async function checkPageRender(serverUrl, iterLabel) {
       .evaluate(() => document.body.innerText)
       .catch(() => "");
 
-    return { consoleErrors, rendered, bodyText };
+    // Total CSS rules the page actually loaded. A build-time stylesheet step
+    // that never ran (an unregistered Tailwind/PostCSS plugin, a CSS entry
+    // nothing imports) yields valid HTML with browser-default styling —
+    // `rendered` is true, no error is thrown, nothing appears in the
+    // console. This count is the only cheap signal that separates "styled
+    // app" from "raw HTML"; see `minStylesheetRules` in detectFatalError.
+    // Cross-origin sheets throw on `.cssRules` access — skip those rather
+    // than abort the count.
+    //
+    // MUST recurse into container rules (`@layer`, `@media`, `@supports`,
+    // `@container`, `@scope`). `sheet.cssRules.length` only counts direct
+    // children, so a stylesheet that wraps its content in one `@layer`
+    // block — which is how compiled StyleX output (Astryx) and Tailwind v4
+    // both ship — reports as a single rule regardless of how much real CSS
+    // is inside it. Measured 2026-09-10 on Astryx: a broken build (StyleX
+    // Vite plugin omitted, components render with unbacked atomic class
+    // names) and a correctly styled one both showed the same top-level
+    // count (~5-6), because virtually everything either app emits lives
+    // inside the same handful of `@layer` wrappers — a shallow count cannot
+    // tell them apart at any threshold. Recursing separated them cleanly
+    // (~112 broken vs 596+ styled in the same test).
+    const stylesheetRules = await page
+      .evaluate(() => {
+        let total = 0;
+        const count = (rules) => {
+          for (const rule of Array.from(rules)) {
+            total++;
+            if (rule.cssRules) count(rule.cssRules);
+          }
+        };
+        for (const sheet of Array.from(document.styleSheets)) {
+          try {
+            count(sheet.cssRules);
+          } catch {
+            // cross-origin stylesheet — not introspectable, ignore
+          }
+        }
+        return total;
+      })
+      .catch(() => null);
+
+    return { consoleErrors, rendered, bodyText, stylesheetRules };
   } catch (err) {
     return {
       consoleErrors: [`[validation-error] ${err.message}`],
       rendered: false,
       bodyText: "",
+      stylesheetRules: null,
     };
   } finally {
     await browser.close();
@@ -664,7 +712,7 @@ const FATAL_PATTERNS = [
  * of the harness, so it can't assume any specific library's error text.
  * A test supplies its own signatures via `test.renderFailureSignatures`
  * (an array of strings or RegExps) in its config.js — see
- * `tests.internal/ui4-mcp/config.js` for a worked example.
+ * `tests.internal/ui5-mcp/config.js` for a worked example.
  */
 export function detectRenderFailureSignature(bodyText, signatures) {
   if (!bodyText || !signatures?.length) return null;
@@ -683,6 +731,8 @@ export function detectFatalError(
   serverOutput,
   bodyText = "",
   renderFailureSignatures = [],
+  stylesheetRules = null,
+  minStylesheetRules = 0,
 ) {
   const fatalErrors = consoleErrors.filter((err) => FATAL_PATTERNS.some((pat) => pat.test(err)));
 
@@ -703,6 +753,21 @@ export function detectFatalError(
   const signatureMatch = detectRenderFailureSignature(bodyText, renderFailureSignatures);
   if (signatureMatch) {
     return `Page rendered a known failure signature instead of the app: "${signatureMatch}"`;
+  }
+
+  // A page whose build-time stylesheet step never ran renders as valid HTML
+  // with browser-default styling — no error, no console output, `rendered`
+  // true. Only a test that knows its stack ships CSS can say what "too few
+  // rules" means, so this is opt-in per test via `minStylesheetRules`
+  // (default 0 = disabled). `null` means the count itself failed and is
+  // treated as unknown, never as a failure.
+  if (minStylesheetRules > 0 && stylesheetRules !== null && stylesheetRules < minStylesheetRules) {
+    return (
+      `Page rendered but almost no CSS was applied: ${stylesheetRules} stylesheet rule(s) found, ` +
+      `expected at least ${minStylesheetRules}. The project's stylesheet build step most likely never ran — ` +
+      `check that any CSS-framework plugin is both installed AND registered in the build config, and that the ` +
+      `CSS entry file is actually imported. The page is valid HTML with browser-default styling.`
+    );
   }
 
   return null;

@@ -75,16 +75,29 @@ export function hasConfigFallbackSignature(errorText) {
  * field wrong:
  *
  *   TS5023 — unknown compiler option
+ *   TS5070 — an option conflicts with the resolved `moduleResolution`
+ *            (typically `resolveJsonModule` with an unset `moduleResolution`,
+ *            which defaults to `classic`)
  *   TS6053 — a referenced project file doesn't exist
  *   TS6305 — output file wasn't built from the expected source (project
  *            references misconfigured)
  *   TS6306 — a referenced project is missing `"composite": true`
+ *   TS6310 — a referenced project may not disable emit
  *
  * Tracked separately from ordinary build fixes so a run dominated by
  * scaffold mistakes isn't indistinguishable from one full of real app-code
- * bugs (bad imports, JSX errors, logic errors).
+ * bugs (bad imports, JSX errors, logic errors). Keep in sync with
+ * `configErrorCodes` in pipeline/error-hints.js, which pairs these same
+ * codes with their fix.
  */
-const TSCONFIG_SCAFFOLD_ERROR_CODES = ["TS5023", "TS6053", "TS6305", "TS6306"];
+const TSCONFIG_SCAFFOLD_ERROR_CODES = [
+  "TS5023",
+  "TS5070",
+  "TS6053",
+  "TS6305",
+  "TS6306",
+  "TS6310",
+];
 
 /** True when the error text carries a tsconfig/project-reference scaffold error. */
 export function isTsconfigScaffoldError(errorText) {
@@ -94,8 +107,8 @@ export function isTsconfigScaffoldError(errorText) {
 
 /**
  * Extract missing-export claims from tsc output. Handles both forms:
- *   TS2305: Module '"@sanity/icons"' has no exported member 'AddIcon'.
- *   TS2724: '"@sanity/icons"' has no exported member named 'AddIcon'. Did you mean …
+ *   TS2305: Module '"@scope/pkg"' has no exported member 'SomeExport'.
+ *   TS2724: '"@scope/pkg"' has no exported member named 'SomeExport'. Did you mean …
  * Returns [{ module, member }], bare-package specifiers only (relative
  * imports are the agent's own files — never a toolchain flake).
  */

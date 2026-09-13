@@ -8,6 +8,13 @@ project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ### Changed
 
+- Repair turns now get the MCP server's tools, the same ones initial
+  generation gets. Previously every fix attempt was a stateless call with
+  only the fix-system prompt and the broken files, so the fix loop knew
+  strictly less than the build before it, and tests relying on the MCP for
+  knowledge could not recover from errors a hand-written fix prompt would
+  have covered. Set `mcp.fixLoop: false` to restore the old behaviour. Fix
+  attempts now cost tool-call tokens and start the server per attempt.
 - The harness is API-only. The `cli` runner and the `--runner` flag were
   removed; runs use the Anthropic SDK and require `ANTHROPIC_API_KEY`
   (except for an all-local-model run — see Added).
@@ -53,6 +60,14 @@ project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ### Fixed
 
+- Concurrent iterations no longer crash the whole run inside Lighthouse.
+  Lighthouse's logger records timings as process-global `performance` marks,
+  so two iterations measuring at once consumed each other's marks and the
+  loser threw from a timer callback nothing awaited — an unhandled rejection
+  that exited the process (seen with `--concurrency 5`, six iterations lost).
+  Lighthouse runs are now serialized behind a process-wide lock while the
+  rest of each iteration stays concurrent, and that marky signature is on the
+  tolerated-rejection list as a backstop.
 - Updated the default model to a current id (`claude-sonnet-4-6`). The
   previous default (`claude-sonnet-4-20250514`) had been retired, so every
   default run failed immediately with a `404 not_found_error`.

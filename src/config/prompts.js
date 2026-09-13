@@ -150,6 +150,29 @@ function validateTest(raw, dirName, testDir) {
       );
     }
   }
+  if (raw.prompts.lintAdvisory !== undefined) {
+    if (typeof raw.prompts.lintAdvisory !== "string") {
+      throw new Error(
+        `${where} ("${raw.label}"): \`prompts.lintAdvisory\`, when set, must be a path to a markdown template.`,
+      );
+    }
+    const tplPath = resolveTestPath(testDir, raw.prompts.lintAdvisory);
+    if (!existsSync(tplPath)) {
+      throw new Error(
+        `${where} ("${raw.label}"): \`prompts.lintAdvisory\` points at "${raw.prompts.lintAdvisory}" but no such file exists at ${tplPath}.`,
+      );
+    }
+  }
+
+  // `lintAdvisory: true` used to switch on an engine-owned block of Sanity
+  // UI lint rules. The text is now test-supplied via
+  // `prompts.lintAdvisory`; a bare boolean would silently inject nothing.
+  if (typeof raw.lintAdvisory === "boolean") {
+    throw new Error(
+      `${where} ("${raw.label}"): \`lintAdvisory: ${raw.lintAdvisory}\` is no longer supported — the engine no longer ships any design system's lint rules. ` +
+        `Point \`prompts.lintAdvisory\` at a markdown file containing THIS system's rules instead (omit it for no advisory).`,
+    );
+  }
 
   if (raw.packages !== undefined && typeof raw.packages !== "object") {
     throw new Error(`${where} ("${raw.label}"): \`packages\` must be an object.`);
@@ -201,6 +224,120 @@ function validateTest(raw, dirName, testDir) {
     }
     if (raw.mcp.toolPrefix !== undefined && typeof raw.mcp.toolPrefix !== "string") {
       throw new Error(`${where} ("${raw.label}"): \`mcp.toolPrefix\` must be a string.`);
+    }
+    // Repair turns get the server's tools by default. Set false to make the
+    // fix loop tool-free — see the `runRepair` doc comment for why the
+    // default flipped on 2026-09-09.
+    if (raw.mcp.fixLoop !== undefined && typeof raw.mcp.fixLoop !== "boolean") {
+      throw new Error(`${where} ("${raw.label}"): \`mcp.fixLoop\` must be a boolean.`);
+    }
+  }
+
+  // `cli` — a config-driven alternative to `mcp` for a design system that
+  // ships an agent-facing CLI instead of (or alongside) an MCP server, e.g.
+  // Astryx's `@astryxdesign/cli`. Replaces the previous hardcoded-per-test
+  // CLI integration (the "DSDS CLI", removed): any test can opt in by
+  // declaring this block, with no runner-api.js changes. See
+  // `pipeline/cli-tool.js` for the tool this becomes and the execution
+  // model (execFile, never a shell — see that file's injection-safety note).
+  if (raw.cli !== undefined) {
+    if (!raw.cli || typeof raw.cli !== "object") {
+      throw new Error(`${where} ("${raw.label}"): \`cli\`, when set, must be an object.`);
+    }
+    if (typeof raw.cli.command !== "string" || !raw.cli.command.trim()) {
+      throw new Error(
+        `${where} ("${raw.label}"): \`cli.command\` must be a non-empty string (e.g. "npx").`,
+      );
+    }
+    if (raw.cli.args !== undefined && !Array.isArray(raw.cli.args)) {
+      throw new Error(`${where} ("${raw.label}"): \`cli.args\`, when set, must be an array.`);
+    }
+    if (raw.cli.toolName !== undefined && typeof raw.cli.toolName !== "string") {
+      throw new Error(`${where} ("${raw.label}"): \`cli.toolName\` must be a string.`);
+    }
+    if (raw.cli.description !== undefined && typeof raw.cli.description !== "string") {
+      throw new Error(`${where} ("${raw.label}"): \`cli.description\` must be a string.`);
+    }
+    if (
+      raw.cli.timeoutMs !== undefined &&
+      (typeof raw.cli.timeoutMs !== "number" || raw.cli.timeoutMs <= 0)
+    ) {
+      throw new Error(
+        `${where} ("${raw.label}"): \`cli.timeoutMs\`, when set, must be a positive number.`,
+      );
+    }
+    if (
+      raw.cli.cwd !== undefined &&
+      typeof raw.cli.cwd !== "string" &&
+      typeof raw.cli.cwd !== "function"
+    ) {
+      throw new Error(
+        `${where} ("${raw.label}"): \`cli.cwd\`, when set, must be a string or \`(projectDir) => string\`.`,
+      );
+    }
+    // Mirrors `mcp.fixLoop` — repair turns get the same CLI tool by default;
+    // set false to keep the fix loop tool-free.
+    if (raw.cli.fixLoop !== undefined && typeof raw.cli.fixLoop !== "boolean") {
+      throw new Error(`${where} ("${raw.label}"): \`cli.fixLoop\` must be a boolean.`);
+    }
+    // Mirrors `mcp.env` — needed by any CLI that reads its config from the
+    // environment rather than a flag (e.g. dsds-mcp's CLI and DSDS_CONFIG).
+    if (
+      raw.cli.env !== undefined &&
+      typeof raw.cli.env !== "object" &&
+      typeof raw.cli.env !== "function"
+    ) {
+      throw new Error(
+        `${where} ("${raw.label}"): \`cli.env\`, when set, must be an object or \`(projectDir) => env\`.`,
+      );
+    }
+    // Run once per iteration and appended to the system prompt — the CLI
+    // equivalent of an MCP server's `instructions`. See `getCliInstructions`
+    // in pipeline/cli-tool.js.
+    if (raw.cli.frontloadArgs !== undefined && !Array.isArray(raw.cli.frontloadArgs)) {
+      throw new Error(
+        `${where} ("${raw.label}"): \`cli.frontloadArgs\`, when set, must be an array of strings.`,
+      );
+    }
+    // `cli.commandList` inlines the CLI's own usage strings into the tool
+    // description, so the agent doesn't discover argument conventions by
+    // trial and error. Both halves required — see `getCliCommandList`.
+    if (raw.cli.commandList !== undefined) {
+      if (!raw.cli.commandList || typeof raw.cli.commandList !== "object") {
+        throw new Error(
+          `${where} ("${raw.label}"): \`cli.commandList\`, when set, must be an object.`,
+        );
+      }
+      if (!Array.isArray(raw.cli.commandList.args)) {
+        throw new Error(
+          `${where} ("${raw.label}"): \`cli.commandList.args\` must be an array — the subcommand that prints the command list.`,
+        );
+      }
+      if (typeof raw.cli.commandList.parse !== "function") {
+        throw new Error(
+          `${where} ("${raw.label}"): \`cli.commandList.parse\` must be \`(stdout) => string\` returning the usage lines to inline.`,
+        );
+      }
+    }
+    // `cli.lint` is the CLI-transport twin of `mcp.lintTool` — it drives the
+    // harness's own post-render lint-and-autofix gate. Both halves are
+    // required because the harness knows neither how to ask an arbitrary
+    // CLI to lint-with-autofix nor how to read its output. See
+    // `runCliLintGate` in pipeline/runner-api.js.
+    if (raw.cli.lint !== undefined) {
+      if (!raw.cli.lint || typeof raw.cli.lint !== "object") {
+        throw new Error(`${where} ("${raw.label}"): \`cli.lint\`, when set, must be an object.`);
+      }
+      if (typeof raw.cli.lint.args !== "function") {
+        throw new Error(
+          `${where} ("${raw.label}"): \`cli.lint.args\` must be \`(absolutePaths) => string[]\` — the subcommand and flags that lint with autofix.`,
+        );
+      }
+      if (typeof raw.cli.lint.parse !== "function") {
+        throw new Error(
+          `${where} ("${raw.label}"): \`cli.lint.parse\` must be \`(stdout) => files[]\` returning ESLint-shaped \`{filename, messages:[{ruleId, severity, line, message}]}\` entries.`,
+        );
+      }
     }
   }
 
@@ -264,6 +401,33 @@ function validateTest(raw, dirName, testDir) {
       }
     }
   }
+
+  if (raw.componentImportPaths !== undefined) {
+    if (!Array.isArray(raw.componentImportPaths)) {
+      throw new Error(
+        `${where} ("${raw.label}"): \`componentImportPaths\`, when set, must be an array of import-specifier prefixes (e.g. ["@/components/ui/"]).`,
+      );
+    }
+    for (const p of raw.componentImportPaths) {
+      if (typeof p !== "string" || !p.trim()) {
+        throw new Error(
+          `${where} ("${raw.label}"): each \`componentImportPaths\` entry must be a non-empty string.`,
+        );
+      }
+    }
+  }
+
+  if (raw.minStylesheetRules !== undefined && raw.minStylesheetRules !== null) {
+    if (
+      typeof raw.minStylesheetRules !== "number" ||
+      !Number.isInteger(raw.minStylesheetRules) ||
+      raw.minStylesheetRules < 0
+    ) {
+      throw new Error(
+        `${where} ("${raw.label}"): \`minStylesheetRules\`, when set, must be a non-negative integer (0 disables the check).`,
+      );
+    }
+  }
 }
 
 /**
@@ -280,11 +444,21 @@ function normalise(raw, dirName, testDir) {
     // normalised shape so templates can keep using `{{#if requiresMcp}}`.
     requiresMcp: Boolean(raw.mcp),
     mcp: raw.mcp ?? null,
-    // Shift-left (P4): when true, the generation system prompt gets the
-    // design-system lint advisory so the agent authors to the rules up front.
-    // Enable on lint-enabled tests only, so the A/B measures linting's full
-    // contribution (prevention + gate).
-    lintAdvisory: Boolean(raw.lintAdvisory),
+    // See the `cli` validation block above and `pipeline/cli-tool.js`.
+    // Named `requiresCli` (not folded into `requiresMcp`) so
+    // `{{#if requiresMcp}}` in existing templates keeps meaning "has an MCP
+    // block" specifically, not "has a tool loop of any kind".
+    requiresCli: Boolean(raw.cli),
+    cli: raw.cli ?? null,
+    // Shift-left (P4): resolved path to THIS test's own lint-rule markdown,
+    // appended to the generation system prompt so the agent authors to the
+    // rules up front. Set it only on lint-enabled tests, so an A/B measures
+    // linting's full contribution (prevention + gate). Null = no advisory.
+    // The engine deliberately ships no rules of its own — see LINT_ADVISORY
+    // in boilerplate.js.
+    lintAdvisoryPath: raw.prompts.lintAdvisory
+      ? resolveTestPath(testDir, raw.prompts.lintAdvisory)
+      : null,
     // Non-core report metrics — each independently toggleable, all default
     // true. `screenshots` gates the screenshot image capture (DOM count and
     // semantic HTML still run); `performance` gates Lighthouse + the React
@@ -308,6 +482,16 @@ function normalise(raw, dirName, testDir) {
     // rendered something. See `detectRenderFailureSignature` in
     // evaluation/validate.js.
     renderFailureSignatures: raw.renderFailureSignatures ?? [],
+    // Local import-specifier prefixes whose named imports also count as
+    // design-system components — for copy-in systems (shadcn/ui) that vendor
+    // components into the project instead of shipping a package. Measurement
+    // only; empty leaves package-name matching unchanged. See
+    // `extractComponentImports`.
+    componentImportPaths: raw.componentImportPaths ?? [],
+    // Minimum CSS rules a rendered page must carry to count as a success;
+    // below it, the stylesheet build step never ran. 0 = check disabled.
+    // See `detectFatalError` in evaluation/validate.js.
+    minStylesheetRules: raw.minStylesheetRules ?? 0,
     docsPath: raw.docsPath ? resolveTestPath(testDir, raw.docsPath) : null,
     prompts: {
       system: resolveTestPath(testDir, raw.prompts.system),
@@ -422,6 +606,7 @@ function buildCtx(test, extra = {}) {
     packages: test.packages,
     reactVersion: test.reactVersion,
     requiresMcp: test.requiresMcp,
+    requiresCli: test.requiresCli,
     name: config.name,
     harnessRoot: PROJECT_ROOT,
     ...extra,
@@ -460,7 +645,9 @@ export function buildSystemPrompt(label, model = null) {
     tpl,
     buildCtx(test, { docs: loadDocs(test), isReasoningModel: isReasoningModel(model) }),
   );
-  return composeSystem(intro, { lintAdvisory: test.lintAdvisory });
+  return composeSystem(intro, {
+    lintAdvisory: test.lintAdvisoryPath ? loadTemplate(test.lintAdvisoryPath) : "",
+  });
 }
 
 /**

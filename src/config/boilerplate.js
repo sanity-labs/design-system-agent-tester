@@ -54,19 +54,18 @@ export const BASE_RULES = `Rules:
 - Make sure the project works with "npm install && npm run dev"
 - The FEEDBACK block must appear after all FILE blocks`;
 
-// Shift-left lint advisory (P4). Injected into the generation system prompt
-// ONLY for lint-enabled tests, so the agent authors to the design-system lint
-// rules the FIRST time instead of tripping them and paying for the fix loop.
-// These mirror the highest-frequency eslint-plugin-sanity-ui rules; keep in
-// sync with the plugin. Prevention is cheaper than the repair budget and does
-// not compete with it.
-export const LINT_ADVISORY = `Design-system lint rules — author to these up front to avoid rework:
-- Prefer props over \`style={{}}\`. Every layout/spacing/color value with a prop equivalent MUST use the prop: padding, margin, width, height, radius, overflow, tone, flexGrow/flexShrink/flexBasis. Inline \`style\` is only for values with NO prop path (transform, gradient, aspect-ratio, scrim/overlay color) and for raw SVG.
-- Icons: pass the component to \`icon\`/\`iconStart\` (never \`symbol\`). Wrap raw @sanity/icons glyphs in \`<Icon>\` and size with \`size\`, color with \`tone\` — never inline \`fontSize\`/\`color\` on an icon.
-- Never \`Box as="button"\`, and never put \`onClick\` on Box or Card. Use \`Button\`, or wrap a custom surface in \`PressArea\`.
-- Card silently ignores layout/flex props. Put \`flexGrow\`/\`width\`/\`overflow\` on a wrapping \`Box\`; use Card \`density\` for padding.
-- VStack/HStack accept only \`as\` and \`gap\`. Wrap in Box or Flex for anything else.
-- Responsive arrays: use \`undefined\` to skip a breakpoint, never \`null\`.`;
+// Shift-left lint advisory (P4). A test's own lint rules, injected into the
+// generation system prompt so the agent authors to them the FIRST time
+// instead of tripping them and paying for the fix loop. Prevention is
+// cheaper than the repair budget and does not compete with it.
+//
+// The TEXT is supplied per test (`prompts.lintAdvisory`, a markdown file) —
+// this engine has no idea what any given design system's lint rules are, and
+// hardcoding one system's here would inject its component names and package
+// names into every other system's prompt. It previously held Sanity UI's
+// rules verbatim (`@sanity/icons`, `Box`/`Card`/`PressArea`, `density`,
+// `Responsive` arrays), which any non-Sanity test that set
+// `lintAdvisory: true` would silently have received.
 
 export const FIX_PREAMBLE = `You are an expert frontend developer debugging a web application that fails to render.
 
@@ -91,12 +90,20 @@ export const FIX_RULES_BASE = `Rules:
 /**
  * Compose a full system prompt by appending the engine-required output,
  * feedback, and base-rules blocks to the test's intro.
+ *
+ * @param {string} testIntro
+ * @param {object} [opts]
+ * @param {string} [opts.lintAdvisory] - The test's own lint-rule text (from
+ *   `prompts.lintAdvisory`). Appended verbatim when non-empty; omitted
+ *   entirely otherwise. See the LINT_ADVISORY note above for why the engine
+ *   holds no rules of its own.
  */
-export function composeSystem(testIntro, { lintAdvisory = false } = {}) {
+export function composeSystem(testIntro, { lintAdvisory = "" } = {}) {
   const blocks = [testIntro.trim(), OUTPUT_FORMAT, FEEDBACK_FORMAT, BASE_RULES];
-  // Shift-left: only lint-enabled tests get the advisory, so the A/B keeps
+  // Shift-left: only tests that supply advisory text get it, so an A/B keeps
   // measuring linting's total contribution (prevention + gate) vs no lint.
-  if (lintAdvisory) blocks.push(LINT_ADVISORY);
+  const advisory = typeof lintAdvisory === "string" ? lintAdvisory.trim() : "";
+  if (advisory) blocks.push(advisory);
   return blocks.join("\n\n").trim();
 }
 

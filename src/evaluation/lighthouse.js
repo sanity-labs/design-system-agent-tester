@@ -25,7 +25,52 @@ const LIGHTHOUSE_RUNS = 3;
  * @param {string} opts.iterLabel - Label for logging
  * @returns {Promise<object>} Lighthouse results (never throws)
  */
-export async function measureLighthouse({ serverUrl, iterDir, iterLabel }) {
+/**
+ * Process-wide Lighthouse lock.
+ *
+ * Lighthouse's logger (lighthouse-logger → marky) records timings with
+ * `performance.mark()` under fixed names such as
+ * "lh:computed:TraceEngineResult". Those marks are global to the Node
+ * process. When two iterations run Lighthouse at the same time, one run's
+ * `timeEnd` consumes a mark the other run started, and the second `timeEnd`
+ * throws `SyntaxError: The "start lh:…" performance mark has not been set`.
+ * The throw happens inside a timer callback that nothing awaits, so it
+ * surfaces as an unhandled rejection rather than as an error from
+ * `lighthouse()` — the per-run try/catch below never sees it. Observed on
+ * 2026-09-09/13.32 with `--concurrency 5`: the harness died at 14:05 with 6
+ * frontload iterations in flight.
+ *
+ * Serializing Lighthouse removes the collision at its source. Everything
+ * else in an iteration (generation, install, type check, dev server, axe)
+ * stays concurrent; only the Lighthouse measurement itself queues. The
+ * queued runs still share CPU with other iterations' builds, so timing
+ * numbers under concurrency remain noisier than a sequential run — this
+ * lock fixes the crash, not the measurement bias.
+ */
+let lighthouseLock = Promise.resolve();
+
+/**
+ * Run `fn` after every previously queued Lighthouse job has finished.
+ * Exported for tests. A rejection in one job does not block the next.
+ *
+ * @template T
+ * @param {() => Promise<T>} fn
+ * @returns {Promise<T>}
+ */
+export function withLighthouseLock(fn) {
+  const run = lighthouseLock.then(fn, fn);
+  lighthouseLock = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
+export async function measureLighthouse(opts) {
+  return withLighthouseLock(() => measureLighthouseUnlocked(opts));
+}
+
+async function measureLighthouseUnlocked({ serverUrl, iterDir, iterLabel }) {
   // Everything that can throw lives inside the try so this function honors
   // its "never throws" contract and never leaks the browser. `browser` is
   // declared here so the `finally` can close it only when it was opened.
@@ -57,9 +102,12 @@ export async function measureLighthouse({ serverUrl, iterDir, iterLabel }) {
             output: "json",
             logLevel: "error",
             // `provided` reports raw wall-clock timing, which is
-            // sensitive to CPU contention — but the harness now
-            // defaults to `--concurrency 1`, so concurrent iterations
-            // don't compete and the numbers are stable. Switching to
+            // sensitive to CPU contention. The harness defaults to
+            // `--concurrency 1`, where the numbers are stable. Under
+            // higher concurrency, Lighthouse runs are serialized (see
+            // withLighthouseLock) so they don't crash each other, but
+            // they still share CPU with other iterations' builds, so
+            // treat performance numbers from such runs as noisy. Switching to
             // `simulated` here doesn't work with lighthouse's
             // `desktopConfig` preset (the override leaves the rest of
             // the lantern pipeline misconfigured and audits return

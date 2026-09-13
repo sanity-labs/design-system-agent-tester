@@ -217,4 +217,105 @@ describe("extractComponentImports resists algorithmic-complexity attacks", () =>
     );
     expect(s.size).toBe(0);
   });
+
+  // Copy-in design systems (shadcn/ui) vendor components into the project, so
+  // app code imports a local path, not a package. Package-name matching alone
+  // reported ~0 components for such a test (2026-09-03). `importPathPrefixes`
+  // is additive and measurement-only.
+  describe("importPathPrefixes (copy-in design systems)", () => {
+    const shadcnApp = [
+      {
+        path: "App.tsx",
+        content: [
+          'import { Button } from "@/components/ui/button"',
+          'import { Card, CardHeader } from "@/components/ui/card"',
+          'import { ChevronDown } from "lucide-react"',
+          'import { useState } from "react"',
+          'import { Header } from "@/components/layout/header"',
+        ].join("\n"),
+      },
+    ];
+
+    it("collects named imports from a declared local path prefix", () => {
+      const s = extractComponentImports(shadcnApp, [], ["@/components/ui/"]);
+      expect([...s].sort()).toEqual(["Button", "Card", "CardHeader"]);
+    });
+
+    it("only matches the declared prefix, not sibling directories", () => {
+      const s = extractComponentImports(shadcnApp, [], ["@/components/ui/"]);
+      // `@/components/layout/header` shares a parent but is not the prefix.
+      expect(s.has("Header")).toBe(false);
+    });
+
+    it("combines path prefixes with package names", () => {
+      const s = extractComponentImports(shadcnApp, ["lucide-react"], ["@/components/ui/"]);
+      expect([...s].sort()).toEqual(["Button", "Card", "CardHeader", "ChevronDown"]);
+      expect(s.has("useState")).toBe(false);
+    });
+
+    // The guarantee that matters for comparability: adding this feature must
+    // not change what any existing package-based test counts.
+    it("leaves package-name-only behaviour byte-identical", () => {
+      const content =
+        'import { Box } from "@sanity/ui"\nimport { SearchIcon } from "@sanity/icons/Search"';
+      const before = extractComponentImports([{ path: "A.tsx", content }], ["@sanity/ui"]);
+      const after = extractComponentImports([{ path: "A.tsx", content }], ["@sanity/ui"], []);
+      const undef = extractComponentImports([{ path: "A.tsx", content }], ["@sanity/ui"], undefined);
+      expect([...after].sort()).toEqual([...before].sort());
+      expect([...undef].sort()).toEqual([...before].sort());
+      // A package subpath is still NOT matched by an exact package name —
+      // unchanged from before, deliberately not "improved" here.
+      expect(before.has("SearchIcon")).toBe(false);
+    });
+
+    it("returns empty when both packages and prefixes are absent", () => {
+      expect(extractComponentImports(shadcnApp, [], []).size).toBe(0);
+      expect(extractComponentImports(shadcnApp).size).toBe(0);
+    });
+
+    // Atlassian's design system exports most components as DEFAULTS, one
+    // package per component (`import Button from "@atlaskit/button/new"`).
+    // The brace scanner only sees `import { … } from`, so before 2026-09-09
+    // the majority of an Atlaskit app's components were uncounted.
+    describe("default imports", () => {
+      const ATLAS = ["@atlaskit/"];
+      it("captures a default import from a matching specifier", () => {
+        const files = [{ path: "A.tsx", content: 'import Button from "@atlaskit/button/new";' }];
+        expect([...extractComponentImports(files, [], ATLAS)]).toEqual(["Button"]);
+      });
+
+      it("captures default and named from the same statement", () => {
+        const files = [{ path: "A.tsx", content: 'import Avatar, { AvatarItem } from "@atlaskit/avatar";' }];
+        expect([...extractComponentImports(files, [], ATLAS)].sort()).toEqual(["Avatar", "AvatarItem"]);
+      });
+
+      it("ignores default imports from non-matching specifiers", () => {
+        const files = [{ path: "A.tsx", content:
+          'import Local from "./local";\nimport React from "react";\nimport B from "@atlaskit/button";' }];
+        expect([...extractComponentImports(files, [], ATLAS)]).toEqual(["B"]);
+      });
+
+      it("captures `import type X from`", () => {
+        const files = [{ path: "A.tsx", content: 'import type Props from "@atlaskit/button";' }];
+        expect([...extractComponentImports(files, [], ATLAS)]).toEqual(["Props"]);
+      });
+
+      // The guarantee: named-import-only design systems must be unaffected.
+      // Verified empirically against 63 historical iterations (ui5-mcp,
+      // ui5-frontload, shad-cn-mcp) — 0 newly-captured imports.
+      it("does not change counts for named-import design systems", () => {
+        const files = [{ path: "A.tsx", content:
+          'import { Box, Button } from "@sanity/ui-v5";\nimport { Card } from "@/components/ui/card";' }];
+        const a = extractComponentImports(files, ["@sanity/ui-v5"], ["@/components/ui/"]);
+        expect([...a].sort()).toEqual(["Box", "Button", "Card"]);
+      });
+    });
+
+    it("escapes regex metacharacters in a prefix", () => {
+      const files = [{ path: "A.tsx", content: 'import { X } from "~ui+lib/btn"' }];
+      expect(extractComponentImports(files, [], ["~ui+lib/"]).has("X")).toBe(true);
+      // `+` must be literal, so this near-miss must not match.
+      expect(extractComponentImports(files, [], ["~uii+lib/"]).size).toBe(0);
+    });
+  });
 });

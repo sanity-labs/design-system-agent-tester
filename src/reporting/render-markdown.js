@@ -274,7 +274,7 @@ export function renderMarkdown(report, runDir = null) {
           `${tscfg.affectedIterations}/${tscfg.totalIterations}`,
         ],
       ]);
-      md += `_A tsconfig scaffold error (TS5023, TS6053, TS6305, TS6306) means the agent's own tsconfig.json/tsconfig.app.json is invalid — often a broken project-reference setup imitating Vite's split app/node config. Not a toolchain flake and not an ordinary code bug._\n\n`;
+      md += `_A tsconfig scaffold error (TS5023, TS5070, TS6053, TS6305, TS6306, TS6310) means the agent's own tsconfig.json/tsconfig.app.json is invalid — often a broken project-reference setup imitating Vite's split app/node config, or an option that conflicts with the resolved moduleResolution. Not a toolchain flake and not an ordinary code bug._\n\n`;
       const offenders = tscfg.perIteration.filter((p) => p.errors > 0);
       if (offenders.length > 0) {
         md += `**Per-iteration breakdown:**\n\n`;

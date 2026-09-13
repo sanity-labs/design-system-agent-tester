@@ -55,6 +55,60 @@ describe("prompts engine", () => {
       }
     });
 
+    it("passes through `minStylesheetRules` as a number (0 when absent, never undefined)", () => {
+      // Same normalise()-whitelist hazard as `preflight` above — a dropped
+      // field silently disables the check for every test.
+      for (const t of TESTS) {
+        expect(typeof t.minStylesheetRules).toBe("number");
+        expect(t.minStylesheetRules).toBeGreaterThanOrEqual(0);
+      }
+    });
+
+    // Same normalise()-whitelist hazard as `preflight`/`minStylesheetRules`
+    // above (2026-08-21) — a field not added to normalise()'s explicit
+    // output object is silently dropped, no error. `cli` is new (2026-09-10,
+    // config-driven CLI tool support) and easy to add without remembering to
+    // whitelist it in normalise() too.
+    it("passes through `cli` as an object or null (never undefined), with `requiresCli` derived from it", () => {
+      for (const t of TESTS) {
+        expect(t.cli === null || typeof t.cli === "object").toBe(true);
+        expect(typeof t.requiresCli).toBe("boolean");
+        expect(t.requiresCli).toBe(t.cli !== null);
+      }
+    });
+
+    it("passes through `componentImportPaths` as an array (empty when absent)", () => {
+      for (const t of TESTS) {
+        expect(Array.isArray(t.componentImportPaths)).toBe(true);
+        for (const p of t.componentImportPaths) expect(typeof p).toBe("string");
+      }
+    });
+
+    // Regression (2026-09-03): LINT_ADVISORY used to live in the engine
+    // holding Sanity UI's rules verbatim, switched on by `lintAdvisory: true`.
+    // Any non-Sanity test setting that flag would have had another design
+    // system's component and package names injected into its prompt. The text
+    // is now test-supplied via `prompts.lintAdvisory`.
+    it("no test uses the removed boolean `lintAdvisory` flag", () => {
+      for (const t of TESTS) {
+        expect(typeof t.lintAdvisory).not.toBe("boolean");
+      }
+    });
+
+    it("exposes `lintAdvisoryPath` as a resolved path or null", () => {
+      for (const t of TESTS) {
+        expect(t.lintAdvisoryPath === null || typeof t.lintAdvisoryPath === "string").toBe(true);
+      }
+    });
+
+    it("only tests that declare an advisory get one in their system prompt", () => {
+      for (const t of TESTS) {
+        const sys = buildSystemPrompt(t.label);
+        const hasAdvisory = sys.includes("lint rules — author to these up front");
+        expect(hasAdvisory).toBe(Boolean(t.lintAdvisoryPath));
+      }
+    });
+
     it("labels are unique", () => {
       const set = new Set(TEST_LABELS);
       expect(set.size).toBe(TEST_LABELS.length);

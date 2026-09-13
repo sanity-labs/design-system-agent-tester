@@ -8,6 +8,14 @@ import { killDevServer, validateProject } from "../evaluation/validate.js";
 import { error, success, tag, warn } from "../util/color.js";
 import { isLocalModel } from "../util/local-model.js";
 import { isTransientError } from "../util/retry.js";
+import {
+  buildCliTool,
+  execCliRaw,
+  getCliCommandList,
+  getCliInstructions,
+  resolveCliCwd,
+  runCliTool,
+} from "./cli-tool.js";
 import { createMcpClient } from "./mcp-client.js";
 import { createOllamaClient } from "./ollama-client.js";
 import {
@@ -23,8 +31,22 @@ import {
   writeProjectFiles,
 } from "./shared.js";
 
-// Max tool-use round-trips before we force the model to finish
-const MAX_TOOL_TURNS = 25;
+// Max tool-use round-trips before we force the model to finish.
+//
+// Raised 25 -> 30 on 2026-09-11. The CLI arm was averaging ~22 turns with a
+// long tail: two iterations across 22.22 and 23.10 reached 25 while still
+// researching, emitted no ---FILE: blocks, and were regenerated from
+// scratch — a wasted ~200-300k characters each. MCP arms sit near 13 and
+// are unaffected by the raise.
+const MAX_TOOL_TURNS = 30;
+
+// The turn at which the loop starts telling the model to stop researching
+// and emit. Deliberately NOT expressed as `MAX_TOOL_TURNS - 2`: raising the
+// ceiling is meant to give a slow iteration room to land, not to let every
+// iteration research five turns longer. Keeping the nudge where it has
+// always been means behaviour up to turn 23 is unchanged from every run
+// before the raise, and the extra turns are pure headroom past the warning.
+const TOOL_TURN_NUDGE_AT = 23;
 
 const API_CALL_MAX_RETRIES = 3;
 const API_CALL_RETRY_DELAY_MS = 15_000; // 15 seconds
@@ -115,7 +137,7 @@ function modelTuning(model, effort = null) {
 /**
  * Whether a tool-call log satisfies a test's own grounding check —
  * `mcpConfig.groundingCheck` (see the doc comment above its use in
- * `generateWithMcp`). A test that configures no `groundingCheck` is always
+ * `generateWithTools`). A test that configures no `groundingCheck` is always
  * considered grounded: this harness has no built-in idea of what "verified
  * against the real docs" means for an arbitrary MCP server, so absent
  * config means no opinion, not a default pattern.
@@ -127,6 +149,22 @@ function modelTuning(model, effort = null) {
 export function isGroundedByToolLog(groundingCheck, toolLog) {
   if (!groundingCheck) return true;
   return toolLog.some((t) => groundingCheck.pattern.test(t.tool));
+}
+
+/**
+ * Tool names to withhold from this model's tool list — `mcp.excludeTools`
+ * (always) plus `mcp.excludeToolsForNonReasoningModels` (only when `model`
+ * isn't a reasoning model). Both default to no exclusion.
+ *
+ * @param {{excludeTools?: string[], excludeToolsForNonReasoningModels?: string[]}} mcpConfig
+ * @param {string} model
+ * @returns {string[]}
+ */
+export function resolveExcludedTools(mcpConfig, model) {
+  return [
+    ...(mcpConfig.excludeTools ?? []),
+    ...(isReasoningModel(model) ? [] : (mcpConfig.excludeToolsForNonReasoningModels ?? [])),
+  ];
 }
 
 /**
@@ -163,15 +201,23 @@ async function generateSimple({ client, model, promptContent, systemPrompt, effo
 }
 
 /**
- * Multi-turn generation with MCP tool use.
+ * Multi-turn generation with tool use — MCP, a config-driven CLI, or both.
  *
- * 1. Start the local MCP server
- * 2. Register its tools with the Anthropic SDK
- * 3. Let the model call tools (list_components, get_component_guideline, etc.)
- * 4. Route each tool call to the MCP server and send results back
+ * 1. Start the local MCP server (if the test declares `mcp`) and/or build
+ *    the CLI tool (if the test declares `cli` — see `pipeline/cli-tool.js`)
+ * 2. Register whichever tools exist with the Anthropic SDK
+ * 3. Let the model call tools (list_components, get_component_guideline,
+ *    the configured CLI, etc.)
+ * 4. Route each tool call to the MCP server or the CLI executor by name,
+ *    and send results back
  * 5. Continue until the model stops calling tools and emits its final text
+ *
+ * Named `generateWithTools` (was `generateWithMcp` before CLI support
+ * existed) — both `mcpConfig` and `cliConfig` are optional and independent;
+ * a test can set either, both, or neither (neither means this function is
+ * never called — see `needsTools` at its call sites).
  */
-async function generateWithMcp({
+async function generateWithTools({
   client,
   model,
   promptContent,
@@ -179,47 +225,115 @@ async function generateWithMcp({
   iterDir,
   iterLabel,
   mcpConfig,
+  cliConfig = null,
   projectDir,
   effort = null,
+  toolLogName = "_mcp_tool_log.json",
+  // Front-load the tool's own instructions into the system prompt — an MCP
+  // server's `instructions` block, and/or the output of `cli.frontloadArgs`.
+  // TRUE for initial generation, FALSE for repair turns (see `runRepair`).
+  //
+  // Why repair turns opt out (changed 2026-09-11): those instructions are a
+  // getting-started briefing, and re-sending them to a fix turn both costs
+  // tokens and actively misdirects. dsds-mcp's block opens "START HERE:
+  // Call dsds brief first to get a full briefing before any work begins",
+  // and agents obey it on repair rounds where the app already renders.
+  // Measured in 2026-09-10/21.48 ui5-cli iteration-3: a lint repair round
+  // on a rendering app spent ALL THREE of its tool calls on `brief`
+  // (twice, fumbling the arg syntax) and a placeholder lint call — zero
+  // useful research. Across 195 ui5-frontload repair rounds, 130 (67%)
+  // opened with `dsds_context_brief` rather than looking at the error.
+  //
+  // The fix prompt already carries the error and the current files; the
+  // briefing adds ~1,700 tokens of freshly-cached prefix per round (each
+  // repair is a new conversation, so it cannot reuse the generation's
+  // cache) and, for a CLI, an extra subprocess per round.
+  frontloadInstructions = true,
 }) {
-  let mcpClient;
+  let mcpClient = null;
   try {
-    console.log(`[${iterLabel}] Starting MCP server...`);
-    // The project directory must exist before the MCP starts so it can read
-    // files the agent writes (a self-lint tool, if the server has one, needs
-    // this to resolve paths against the project instead of its own install
-    // dir).
+    // The project directory must exist before tools are callable so a
+    // file-aware tool (an MCP self-lint tool, or a CLI subcommand a test
+    // points at the project — see `resolveCliCwd`) can read files the agent
+    // has already written, instead of resolving paths against nothing.
     await mkdir(projectDir, { recursive: true });
-    const mcpConfigWithSource = {
-      ...mcpConfig,
-      env: (dir) => ({
-        ...(typeof mcpConfig.env === "function" ? mcpConfig.env(dir) : (mcpConfig.env ?? {})),
-        LINT_SOURCE_DIR: projectDir,
-      }),
-    };
-    mcpClient = await createMcpClient(mcpConfigWithSource);
 
-    // Non-reasoning models are told in system.md not to self-lint (the
-    // harness's own post-hoc gate does it for free, see runLintGate below) —
-    // but a prompt instruction is advisory, and a lint tool's own schema
-    // description (server-authored, outside this harness's control) can
-    // actively say the opposite ("lint your finished component code").
-    // Observed in practice (2026-07-22, one test's self-lint tool): Haiku
-    // called it 3 times in one iteration despite the instruction not to.
-    // Omitting the tool(s) entirely is the only way to guarantee the model
-    // can't reach for them. A test opts into this by listing the relevant
-    // tool name(s) in its `mcp.excludeToolsForNonReasoningModels` config —
-    // empty/absent means no exclusion.
-    const excludedTools = mcpConfig.excludeToolsForNonReasoningModels ?? [];
-    const mcpTools = isReasoningModel(model)
-      ? mcpClient.getToolsForAnthropic()
-      : mcpClient.getToolsForAnthropic(excludedTools);
-    const mcpInstructions = mcpClient.getInstructions() || "";
+    if (mcpConfig) {
+      console.log(`[${iterLabel}] Starting MCP server...`);
+      const mcpConfigWithSource = {
+        ...mcpConfig,
+        env: (dir) => ({
+          ...(typeof mcpConfig.env === "function" ? mcpConfig.env(dir) : (mcpConfig.env ?? {})),
+          LINT_SOURCE_DIR: projectDir,
+        }),
+      };
+      mcpClient = await createMcpClient(mcpConfigWithSource);
+    }
 
-    console.log(`[${iterLabel}] MCP ready — ${mcpTools.length} tools available`);
+    // `mcp.excludeTools` — always withheld, regardless of model. For a test
+    // that wants to measure a narrower slice of an MCP server's surface
+    // (e.g. docs lookup only, no chunk/compose tools) without needing a
+    // second server or config file.
+    //
+    // `mcp.excludeToolsForNonReasoningModels` — withheld only from
+    // non-reasoning models. Non-reasoning models are told in system.md not
+    // to self-lint (the harness's own post-hoc gate does it for free, see
+    // runLintGate below), but a prompt instruction is advisory, and a lint
+    // tool's own schema description (server-authored, outside this
+    // harness's control) can actively say the opposite ("lint your
+    // finished component code"). Observed in practice (2026-07-22, one
+    // test's self-lint tool): Haiku called it 3 times in one iteration
+    // despite the instruction not to. Omitting the tool entirely is the
+    // only way to guarantee the model can't reach for it.
+    //
+    // Both are empty/absent by default — no exclusion. See
+    // `resolveExcludedTools` above. Excluding a tool by name only makes
+    // sense for MCP's many-tools-per-server shape — the CLI tool is always
+    // exactly one tool, so there's nothing analogous to exclude there.
+    const mcpTools = mcpClient
+      ? mcpClient.getToolsForAnthropic(resolveExcludedTools(mcpConfig, model))
+      : [];
+    // Both instruction sources are gated on `frontloadInstructions` — see
+    // that parameter's doc comment for why repair turns skip them. Tools
+    // themselves are NOT gated: a fix turn still gets the full tool surface,
+    // it just isn't handed a "here's how to start building" briefing.
+    const mcpInstructions =
+      frontloadInstructions && mcpClient ? mcpClient.getInstructions() || "" : "";
+    // Fetched on BOTH phases, unlike the front-load above: the command list
+    // lives in the tool DESCRIPTION, which is re-sent with the tools array
+    // on every request, and a repair turn needs correct argument syntax just
+    // as much as generation does. One cheap subprocess beats a turn lost to
+    // a guessed flag.
+    const cliCommandList = cliConfig
+      ? await getCliCommandList(cliConfig, resolveCliCwd(cliConfig, projectDir), projectDir)
+      : "";
+    const cliTool = buildCliTool(cliConfig, cliCommandList);
+    const tools = cliTool ? [...mcpTools, cliTool] : mcpTools;
+    // The CLI equivalent of `mcpInstructions` — see `cli.frontloadArgs` in
+    // cli-tool.js. "" when the test hasn't configured it, or on a repair turn
+    // (which also spares the subprocess the frontload would otherwise spawn).
+    const cliInstructions =
+      frontloadInstructions && cliConfig
+        ? await getCliInstructions(cliConfig, resolveCliCwd(cliConfig, projectDir), projectDir)
+        : "";
 
-    // Build system prompt with MCP instructions appended.
-    const systemPrompt = baseSystemPrompt + "\n\n" + mcpInstructions;
+    if (mcpConfig) console.log(`[${iterLabel}] MCP ready — ${mcpTools.length} tools available`);
+    if (cliTool) {
+      console.log(
+        `[${iterLabel}] CLI tool ready — "${cliTool.name}"` +
+          (cliCommandList ? ` (+${cliCommandList.length} chars of command usage)` : ""),
+      );
+    }
+    if (cliInstructions) {
+      console.log(`[${iterLabel}] CLI front-loaded ${cliInstructions.length} chars of instructions`);
+    }
+    if (!frontloadInstructions) {
+      console.log(`[${iterLabel}] Repair turn — tool instructions not front-loaded`);
+    }
+
+    // Build system prompt with MCP + CLI instructions appended (empty
+    // strings, and no-op concats, when neither is configured).
+    const systemPrompt = baseSystemPrompt + "\n\n" + mcpInstructions + "\n\n" + cliInstructions;
 
     // Conversation messages — we'll append tool results as the loop
     // progresses. The initial user message is wrapped in a content
@@ -266,12 +380,14 @@ async function generateWithMcp({
     // separate from MAX_EMISSION_NUDGES (a different failure: files present
     // but unverified, not files missing).
     //
-    // A test opts into this by setting `mcp.groundingCheck` to
+    // A test opts into this by setting `mcp.groundingCheck` (or
+    // `cli.groundingCheck`, for a CLI-only test with no `mcp` block) to
     // `{ pattern: <RegExp matching its own verification tool names>, nudge:
     // <STOP message naming those tools> }` — absent means this harness has
-    // no opinion on what "verified" means for a given MCP server, so the
-    // check is skipped entirely.
-    const groundingCheck = mcpConfig.groundingCheck ?? null;
+    // no opinion on what "verified" means for a given MCP server or CLI, so
+    // the check is skipped entirely. `mcpConfig` can legitimately be `null`
+    // here (a CLI-only test), hence the optional chaining.
+    const groundingCheck = mcpConfig?.groundingCheck ?? cliConfig?.groundingCheck ?? null;
     let groundingNudges = 0;
     const MAX_GROUNDING_NUDGES = 1;
     // The block currently carrying the sliding conversation cache breakpoint.
@@ -304,7 +420,7 @@ async function generateWithMcp({
       // "stop calling tools" directive doesn't prevent it from being called.
       const feedbackTool = mcpTools.find((t) => t.name.includes("feedback"));
       const nudge =
-        turns >= MAX_TOOL_TURNS - 2 || duplicateStreak >= 3
+        turns >= TOOL_TURN_NUDGE_AT || duplicateStreak >= 3
           ? `\n\nYou have done enough research.${feedbackTool ? ` Call ${feedbackTool.name} now, then` : ""} produce ALL project files using ---FILE: path--- blocks. No other tool calls.`
           : "";
 
@@ -331,7 +447,7 @@ async function generateWithMcp({
           // the alternative is a failed attempt.
           ...(forceTextOnly ? { tool_choice: { type: "none" } } : {}),
           system: systemBlocks,
-          tools: mcpTools,
+          tools,
           messages,
         },
         iterLabel,
@@ -458,6 +574,16 @@ async function generateWithMcp({
         if (isDuplicate) {
           // Don't re-call the MCP server for duplicate requests — return a hint instead
           resultText = `You already called ${toolName} with these exact arguments. The result has not changed. Stop repeating tool calls and proceed to generate the project files.`;
+        } else if (cliTool && toolName === cliTool.name) {
+          // The CLI executor never throws (see runCliTool's doc comment) —
+          // a failed/timed-out command already comes back as descriptive
+          // text, so no try/catch needed here unlike the MCP branch below.
+          resultText = await runCliTool(
+            cliConfig,
+            toolInput,
+            resolveCliCwd(cliConfig, projectDir),
+            projectDir,
+          );
         } else {
           try {
             resultText = await mcpClient.callToolText(toolName, toolInput);
@@ -495,13 +621,10 @@ async function generateWithMcp({
       console.warn(`[${iterLabel}] Hit max tool turns (${MAX_TOOL_TURNS}) — forcing completion`);
     }
 
-    // Save tool log for debugging
+    // Save tool log for debugging. Fix-loop calls pass their own name so a
+    // repair turn's lookups don't overwrite the initial generation's log.
     if (toolLog.length > 0) {
-      await writeFile(
-        resolve(iterDir, "_mcp_tool_log.json"),
-        JSON.stringify(toolLog, null, 2),
-        "utf-8",
-      );
+      await writeFile(resolve(iterDir, toolLogName), JSON.stringify(toolLog, null, 2), "utf-8");
     }
 
     return {
@@ -540,17 +663,40 @@ function countByRule(errorFiles) {
 }
 
 /**
- * Lint the project's source files via the MCP, applying auto-fixes to disk.
+ * Reduce an ESLint-shaped `files` array into the gate's result contract.
+ * Shared by the MCP and CLI lint paths so the error/warning policy lives in
+ * exactly one place — a CLI's own top-level "problem count" must NOT be
+ * trusted for this (dsds-mcp's CLI, for one, reports errors AND warnings in
+ * its `remaining` field, which would gate on advisory findings).
  *
  * The gate counts ERRORS only (severity 2), not warnings. Fixable issues of any
- * severity are already auto-applied by `apply:true`; what remains as a warning is
+ * severity are already auto-applied by the apply pass; what remains as a warning is
  * advisory and often structurally unfixable (e.g. `no-style-prop` on a
  * `backgroundColor`). Gating on those would burn repair attempts on something the
  * model can't clear, so warnings are reported (for the report) but never trigger
  * a repair. Returns { remaining (errors), files (error messages only), warnings }.
  *
+ * @param {Array<{filename?: string, messages?: Array<{severity: number}>}>} lintFiles
+ */
+export function summarizeLintFiles(lintFiles) {
+  let warnings = 0;
+  const errorFiles = [];
+  for (const f of lintFiles ?? []) {
+    const errs = (f.messages ?? []).filter((m) => m.severity === 2);
+    warnings += (f.messages ?? []).length - errs.length;
+    if (errs.length) errorFiles.push({ ...f, messages: errs });
+  }
+  const remaining = errorFiles.reduce((n, f) => n + f.messages.length, 0);
+  return { remaining, files: errorFiles, warnings, byRule: countByRule(errorFiles) };
+}
+
+/**
+ * Lint the project's source files via the MCP, applying auto-fixes to disk.
+ *
  * `toolName` is the test's own `mcp.lintTool` config — this harness has no
  * built-in idea of what a "lint" tool is called on any given MCP server.
+ * See `runCliLintGate` for the CLI-transport equivalent, and
+ * `summarizeLintFiles` for the shared error/warning policy.
  */
 export async function runLintGate(lintClient, files, toolName) {
   const sources = files.filter((f) => SOURCE_LINTABLE.test(f.path));
@@ -566,23 +712,103 @@ export async function runLintGate(lintClient, files, toolName) {
   }
   const sc = result?.structuredContent;
   if (!sc) return { remaining: 0, files: [], warnings: 0, unavailable: true };
-
-  // Split messages by severity (2 = error, 1 = warn). Only errors gate.
-  let warnings = 0;
-  const errorFiles = [];
-  for (const f of sc.files ?? []) {
-    const errs = (f.messages ?? []).filter((m) => m.severity === 2);
-    warnings += (f.messages ?? []).length - errs.length;
-    if (errs.length) errorFiles.push({ ...f, messages: errs });
-  }
-  const remaining = errorFiles.reduce((n, f) => n + f.messages.length, 0);
-  return { remaining, files: errorFiles, warnings, byRule: countByRule(errorFiles) };
+  return summarizeLintFiles(sc.files);
 }
 
-/** Fix prompt for remaining (non-auto-fixable) lint violations. */
-function buildLintFixPrompt(lintFiles, currentFilesText) {
+/**
+ * Lint the project's source files via the test's configured CLI, applying
+ * auto-fixes to disk — the CLI-transport twin of `runLintGate`.
+ *
+ * A test opts in with `cli.lint: { args, parse }`:
+ *   - `args: (absolutePaths) => string[]` — the subcommand and flags to run,
+ *     appended to `cli.args`. The test owns its CLI's flag syntax; the
+ *     harness has no built-in idea of how to ask a given CLI to lint with
+ *     autofix (dsds-mcp's is `lint <paths…> --apply --json`).
+ *   - `parse: (stdout) => files[]` — normalise that CLI's stdout into an
+ *     ESLint-shaped array of `{filename, messages: [{ruleId, severity,
+ *     line, message}]}`. Severity/error policy is then applied centrally by
+ *     `summarizeLintFiles`, so a test only has to describe its output
+ *     format, not re-implement the gate.
+ *
+ * `LINT_SOURCE_DIR` is injected into the subprocess env exactly as the MCP
+ * path does. It is load-bearing, not cosmetic: without it, verified live
+ * 2026-09-10, dsds-mcp's CLI returns ESLint's "File ignored because outside
+ * of base path" for every file and silently finds nothing.
+ *
+ * Never throws — a broken lint CLI degrades to "no findings, gate inert"
+ * with an `error`/`unavailable` flag, matching `runLintGate`'s contract, so
+ * a misconfigured lint step can't take down an otherwise healthy iteration.
+ */
+export async function runCliLintGate(cliConfig, files, projectDir) {
+  const sources = files.filter((f) => SOURCE_LINTABLE.test(f.path));
+  if (!sources.length) return { remaining: 0, files: [], warnings: 0 };
+  const lint = cliConfig?.lint;
+  if (!lint || typeof lint.args !== "function" || typeof lint.parse !== "function") {
+    return { remaining: 0, files: [], warnings: 0, unavailable: true };
+  }
+  const paths = sources.map((f) => resolve(projectDir, f.path));
+  const result = await execCliRaw(cliConfig, lint.args(paths), {
+    cwd: resolveCliCwd(cliConfig, projectDir),
+    projectDir,
+    // Same injection the MCP lint client gets — see the doc comment above.
+    extraEnv: { LINT_SOURCE_DIR: projectDir },
+  });
+  if (result.spawnError) {
+    return { remaining: 0, files: [], warnings: 0, error: result.spawnError };
+  }
+  // A lint CLI exits non-zero BY DESIGN when it finds problems (dsds-mcp's
+  // uses 2 for "ran but found problems"), so exit status alone can't
+  // distinguish "found violations" from "failed to run". Trust the parser:
+  // if stdout parses, the run was real.
+  try {
+    return summarizeLintFiles(lint.parse(result.stdout));
+  } catch (err) {
+    return {
+      remaining: 0,
+      files: [],
+      warnings: 0,
+      error: `could not parse lint output: ${err.message}`,
+    };
+  }
+}
+
+/**
+ * Fix prompt for remaining (non-auto-fixable) lint violations.
+ *
+ * Carries the same anti-regression guardrails as `buildA11yFixPrompt`, and
+ * for the same reason: both run only AFTER the build is confirmed
+ * rendering, so a wholesale rewrite here can only lose ground. That
+ * parity was missing until 2026-09-10 — this prompt said just "Output ONLY
+ * the files you changed" while the a11y one spelled out why, and models
+ * ignored the short version.
+ *
+ * Observed in 2026-09-10/21.48 `ui5-cli` iteration-5: a render-clean app
+ * got two real `no-prop-backed-inline-style` errors, and the lint fix
+ * re-emitted SEVEN files (package.json, tsconfig.json, vite.config.ts,
+ * index.html, main.tsx included) for a two-line styling change, breaking
+ * the type check and spending the build-fix budget. 6 of 701 pre-existing
+ * MCP-gate iterations show the same lint-fix → build-fix pattern going back
+ * to 2026-08-28, so this is a long-standing shared-path weakness, not
+ * specific to either transport.
+ *
+ * Deliberately generic: it names no design system's props or rules. The
+ * specific mistake in that iteration (reaching for a v3 prop value the v5
+ * type rejects) is exactly the kind of finding the stripped-prompt arms
+ * exist to measure, so it is not pre-empted here.
+ *
+ * Exported only so the guardrails are testable without driving a whole
+ * iteration — same rationale as `toAnthropicTools` in mcp-client.js.
+ */
+export function buildLintFixPrompt(lintFiles, currentFilesText) {
   const lines = [
-    "Your code has ESLint violations that auto-fix could not resolve. Auto-fixable issues are already applied on disk; fix the remaining ones below.",
+    "The app ALREADY BUILDS AND RENDERS. It has ESLint violations that auto-fix could not resolve — auto-fixable issues are already applied on disk. Fix the remaining ones below.",
+    "",
+    "CRITICAL — the build is working; do NOT regress it. Make the SMALLEST possible change that clears each violation:",
+    "- Change ONLY what the violation names, on the line it names.",
+    "- Do NOT rewrite files wholesale, do NOT refactor, and do NOT touch imports, types, or component APIs unrelated to the violations. Re-emitting a working file with an unrelated change (a hallucinated import, a renamed prop, a prop value the types reject) is how a passing build gets broken.",
+    "- Do NOT re-emit project scaffold files — `package.json`, `tsconfig.json`, `vite.config.*`, `index.html`, entry points — unless a violation is actually reported IN one of them. They are already correct and every needless rewrite risks the build.",
+    "- Re-emit ONLY the files you actually change. Leave every other file exactly as-is.",
+    "- If a fix requires a prop, value, or API you are not certain of, verify it before writing it rather than guessing — a wrong value fails the type check and costs the whole repair budget.",
     "",
     "## Current Project Files",
     "",
@@ -598,7 +824,7 @@ function buildLintFixPrompt(lintFiles, currentFilesText) {
     lines.push("");
   }
   lines.push(
-    "Fix every violation above. Output ONLY the files you changed, each as a complete `---FILE: path---` / `---END FILE---` block.",
+    "Fix every violation above and nothing else. Output ONLY the files you changed, each as a complete `---FILE: path---` / `---END FILE---` block, and change nothing in them beyond what the violations above require.",
   );
   return lines.join("\n");
 }
@@ -645,6 +871,29 @@ function buildA11yFixPrompt(axeViolations, currentFilesText) {
  * One repair turn: prompt the agent, parse + merge fixed files to disk.
  * `logNote` adds an optional line to the prompt's agent-log header (the
  * build stage uses it to record the fatal error / console-error count).
+ *
+ * MCP in the fix loop
+ * -------------------
+ * When the test defines an `mcp` block, repair turns get the same tools the
+ * initial generation had. Before 2026-09-09 they did not: every fix attempt
+ * was a stateless `generateSimple` call carrying only the fix-system prompt
+ * and the broken files — no conversation history, no tools. That made the
+ * fix loop strictly less informed than the build that preceded it, and it
+ * punished exactly the tests whose knowledge lives in the MCP rather than in
+ * a hand-written fix prompt.
+ *
+ * It showed up clearly in 2026-09-09/11.51 (Haiku). The `ui5-frontload` arm
+ * burned all 16 of its fix rounds on `@sanity/icons` imports and passed 0 of
+ * its first 3 iterations. The package's root `index.d.ts` declares icon
+ * names its `index.js` never exports, so a root import type-checks and then
+ * throws in the browser. Recovering needs one fact — rewrite the import to
+ * the icon's own subpath. `ui5-mcp` had that fact hard-coded in a 6 KB
+ * fix-system prompt and recovered; `ui5-frontload`'s 364-byte prompt did
+ * not, and it could not look the fact up either, despite its own prompt
+ * telling it to "use the design system MCP server". Now it can.
+ *
+ * Set `mcp.fixLoop: false` (or `cli.fixLoop: false`) on a test to restore
+ * the old tool-free behaviour for that tool specifically.
  */
 async function runRepair({
   client,
@@ -654,25 +903,53 @@ async function runRepair({
   files,
   projectDir,
   iterDir,
+  iterLabel,
   agentLogPath,
   stage,
   attempt,
   maxFixes,
   logNote = "",
   effort = null,
+  mcpConfig = null,
+  cliConfig = null,
 }) {
   await appendFile(
     agentLogPath,
     `=== FIX (${stage}) ${attempt}/${maxFixes} — PROMPT [${new Date().toISOString()}] ===\n${logNote ? logNote + "\n" : ""}\n${fixPrompt}\n\n`,
     "utf-8",
   );
-  const resp = await generateSimple({
-    client,
-    model,
-    promptContent: fixPrompt,
-    systemPrompt: fixSystemPrompt,
-    effort,
-  });
+  // Each tool opts into (or out of) the fix loop independently — a test
+  // could in principle want its CLI available during repair but not its
+  // (heavier, stateful) MCP server, or vice versa.
+  const repairMcpConfig = mcpConfig && mcpConfig.fixLoop !== false ? mcpConfig : null;
+  const repairCliConfig = cliConfig && cliConfig.fixLoop !== false ? cliConfig : null;
+  const useTools = Boolean(repairMcpConfig) || Boolean(repairCliConfig);
+  const resp = useTools
+    ? await generateWithTools({
+        client,
+        model,
+        promptContent: fixPrompt,
+        baseSystemPrompt: fixSystemPrompt,
+        iterDir,
+        iterLabel,
+        mcpConfig: repairMcpConfig,
+        cliConfig: repairCliConfig,
+        projectDir,
+        effort,
+        // Repair turns keep the tools but not the getting-started briefing —
+        // see `frontloadInstructions` in generateWithTools for the measured
+        // reason (repair rounds were re-running discovery instead of
+        // reading the error).
+        frontloadInstructions: false,
+        toolLogName: `_mcp_tool_log_fix_${stage}_${attempt}.json`,
+      })
+    : await generateSimple({
+        client,
+        model,
+        promptContent: fixPrompt,
+        systemPrompt: fixSystemPrompt,
+        effort,
+      });
   const fixText = resp.fullText;
   await writeFile(resolve(iterDir, `_fix_response_${attempt}.txt`), fixText, "utf-8");
   const parsed = parseFiles(fixText);
@@ -707,6 +984,8 @@ async function runRepair({
  * @param {boolean} opts.takeScreenshots - Whether to take screenshots
  * @param {string}  opts.testLabel - Which test is being run
  * @param {object | null} opts.mcpConfig - The test's `mcp` block (null = no MCP)
+ * @param {object | null} opts.cliConfig - The test's `cli` block (null = no
+ *   agent-facing CLI tool). Independent of `mcpConfig` — see `pipeline/cli-tool.js`.
  * @returns {Promise<object>} Result metrics
  */
 export async function runAgent({
@@ -717,7 +996,9 @@ export async function runAgent({
   testLabel,
   takeScreenshots,
   maxFixes = 5,
-  maxLintFixes = 2,
+  // 0 by default — an iteration completes at a successful render. See
+  // the `--max-lint-fixes` flag in index.js for the full rationale.
+  maxLintFixes = 0,
   maxGenerationRetries = 3,
   // When false (CLI `--no-fix-accessibility`), axe still runs and violations
   // are measured/recorded, but the agent is never sent back to fix them — no
@@ -735,6 +1016,9 @@ export async function runAgent({
   // to Fable/Mythos regardless of what effort value is configured.
   effort = null,
   mcpConfig = null,
+  // Test-supplied `cli` block (config.js) — see `pipeline/cli-tool.js`.
+  // Independent of `mcpConfig`: a test can set either, both, or neither.
+  cliConfig = null,
   // Test-supplied patterns (config.js `renderFailureSignatures`) matched
   // against the rendered page's visible text. Catches a library's own
   // graceful-degradation message (e.g. a UI kit's ThemeProvider rendering
@@ -744,6 +1028,14 @@ export async function runAgent({
   // broken. Empty by default; see `detectRenderFailureSignature` in
   // evaluation/validate.js for why this lives in test config, not here.
   renderFailureSignatures = [],
+  // Test-supplied floor (config.js `minStylesheetRules`) on how many CSS
+  // rules a rendered page must carry. Catches a build-time stylesheet step
+  // that never ran (an unregistered Tailwind/PostCSS plugin, a CSS entry
+  // nothing imports): valid HTML, browser-default styling, no error
+  // anywhere. 0 disables it — only a test that knows its own stack ships
+  // CSS can set a meaningful floor. See `detectFatalError` in
+  // evaluation/validate.js.
+  minStylesheetRules = 0,
 }) {
   const systemPrompt = getSystemPrompt(testLabel, model);
   const fixSystemPrompt = getFixSystemPrompt(testLabel);
@@ -767,7 +1059,7 @@ export async function runAgent({
         maxRetries: 1,
       });
 
-  const needsMcp = Boolean(mcpConfig);
+  const needsTools = Boolean(mcpConfig) || Boolean(cliConfig);
 
   // Save the fully-resolved prompt for this iteration so it can be inspected
   // later to confirm every iteration received the same brief.
@@ -859,8 +1151,8 @@ export async function runAgent({
     const attemptPrompt = promptContent + retryNotice;
 
     let result;
-    if (needsMcp) {
-      result = await generateWithMcp({
+    if (needsTools) {
+      result = await generateWithTools({
         client,
         model,
         promptContent: attemptPrompt,
@@ -868,6 +1160,7 @@ export async function runAgent({
         iterDir,
         iterLabel,
         mcpConfig,
+        cliConfig,
         projectDir,
         effort,
       });
@@ -1030,12 +1323,13 @@ export async function runAgent({
     let firstTryLintRules = null;
     let residualLintRules = null;
 
-    // The lint gate is a harness step (not the agent's choice). It talks to
-    // a dedicated MCP client pointed at projectDir via LINT_SOURCE_DIR, and
-    // only activates when the test configures `mcp.lintTool` — the name of
-    // the MCP tool to call. No `lintTool` means this test's MCP server
-    // either has no lint tool or the test opts out; either way, the harness
-    // has no built-in idea of what to call.
+    // The lint gate is a harness step (not the agent's choice), available
+    // over either transport. It activates when the test configures
+    // `mcp.lintTool` (the MCP tool name to call) or `cli.lint` (how to
+    // invoke and parse its CLI) — absent both, the harness has no built-in
+    // idea of what to call, so the gate stays off. Both paths get
+    // `LINT_SOURCE_DIR=projectDir`; see `runCliLintGate` for why that's
+    // load-bearing rather than cosmetic.
     let lintClient = null;
     if (gateLintAndA11y && mcpConfig && mcpConfig.lintTool) {
       try {
@@ -1052,6 +1346,18 @@ export async function runAgent({
         );
       }
     }
+    // CLI-transport lint gate. No long-lived client to start — each pass is
+    // one subprocess — so this is just a capability flag.
+    const cliLintEnabled = Boolean(gateLintAndA11y && cliConfig && cliConfig.lint);
+    if (cliLintEnabled) {
+      console.log(`${tag(iterLabel)} Lint gate enabled via CLI`);
+    }
+    const lintGateActive = Boolean(lintClient) || cliLintEnabled;
+    /** Run whichever lint transport this test configured. */
+    const runConfiguredLintGate = () =>
+      lintClient
+        ? runLintGate(lintClient, files, mcpConfig.lintTool)
+        : runCliLintGate(cliConfig, files, projectDir);
 
     try {
       while (true) {
@@ -1062,8 +1368,8 @@ export async function runAgent({
         // the post-render remainder check below doesn't need a second call —
         // nothing writes files between here and validateProject(). ──
         let lastLintResult = null;
-        if (lintClient) {
-          const autofix = await runLintGate(lintClient, files, mcpConfig.lintTool);
+        if (lintGateActive) {
+          const autofix = await runConfiguredLintGate();
           if (!autofix.unavailable && !autofix.error) {
             files = await readProjectFiles(projectDir, files); // pick up applied auto-fixes
             lastLintResult = autofix;
@@ -1076,6 +1382,7 @@ export async function runAgent({
 
         const validation = await validateProject(projectDir, iterLabel, {
           renderFailureSignatures,
+          minStylesheetRules,
         });
         trackInstall(validation);
 
@@ -1097,7 +1404,7 @@ export async function runAgent({
             // why escalation is deferred this far. `lastLintResult` is this
             // iteration's auto-fix result from the top of the loop; nothing
             // has written files since, so it's still accurate here. ──
-            if (!lintSettled && lintClient) {
+            if (!lintSettled && lintGateActive) {
               if (lastLintResult) {
                 if (firstTryLint === null) {
                   firstTryLint = lastLintResult.remaining;
@@ -1146,6 +1453,9 @@ export async function runAgent({
                     attempt: lintFixAttempts,
                     maxFixes: maxLintFixes,
                     effort,
+                    iterLabel,
+                    mcpConfig,
+                    cliConfig,
                   });
                   files = fix.files;
                   addUsage(fix.usage);
@@ -1227,6 +1537,9 @@ export async function runAgent({
                   attempt: fixAttempts,
                   maxFixes,
                   effort,
+                  iterLabel,
+                  mcpConfig,
+                  cliConfig,
                 });
                 files = fix.files;
                 addUsage(fix.usage);
@@ -1396,6 +1709,9 @@ export async function runAgent({
             stage: "build",
             attempt: fixAttempts,
             maxFixes,
+            iterLabel,
+            mcpConfig,
+            cliConfig,
             logNote: `Fatal error: ${(validation.fatalError || "none").split("\n")[0]}\nConsole errors: ${validation.consoleErrors.length}`,
             effort,
           });
@@ -1454,6 +1770,7 @@ export async function runAgent({
         console.log(`[${iterLabel}] Taking screenshot of final state...`);
         const lastValidation = await validateProject(projectDir, iterLabel, {
           renderFailureSignatures,
+          minStylesheetRules,
         });
         trackInstall(lastValidation);
         try {

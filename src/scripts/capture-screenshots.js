@@ -3,7 +3,7 @@
  * capture-screenshots.js — Post-hoc screenshot capture for a completed run.
  *
  * Some tests disable live screenshot capture during generation
- * (`measure.screenshots: false`, e.g. `ui4-mcp` / `ui4-mcp-nolint`) to skip
+ * (`measure.screenshots: false`, e.g. `ui5-mcp` / `ui5-mcp-nolint`) to skip
  * the browser/Lighthouse overhead across many iterations. The generated
  * project is still on disk under each `iteration-N/project/`, so screenshots
  * can be captured later, on demand, for whichever run you actually want to
@@ -21,9 +21,9 @@
  *   node src/scripts/capture-screenshots.js <path> [options]
  *
  * Examples:
- *   node src/scripts/capture-screenshots.js output/2026-07-23/17.01/ui4-mcp
+ *   node src/scripts/capture-screenshots.js output/2026-07-23/17.01/ui5-mcp
  *   node src/scripts/capture-screenshots.js output/2026-07-23/17.01 --concurrency 4
- *   node src/scripts/capture-screenshots.js output/2026-07-23/17.01/ui4-mcp/iteration-3 --force
+ *   node src/scripts/capture-screenshots.js output/2026-07-23/17.01/ui5-mcp/iteration-3 --force
  *
  * Options:
  *   --concurrency <n>   How many iterations to process in parallel (default 3)
@@ -41,8 +41,8 @@ import { error, success, tag, warn } from "../util/color.js";
 
 /**
  * Find which known test a project path belongs to, by matching any path
- * segment against `TEST_LABELS` (e.g. `.../ui4-mcp/iteration-3/project` or
- * `.../ui4-mcp/claude-opus-4-8/iteration-3/project`). Returns null for a
+ * segment against `TEST_LABELS` (e.g. `.../ui5-mcp/iteration-3/project` or
+ * `.../ui5-mcp/claude-opus-4-8/iteration-3/project`). Returns null for a
  * path outside any known test (config lookup is skipped, not fatal —
  * `renderFailureSignatures` just defaults to none).
  */
@@ -136,7 +136,7 @@ let failed = 0;
 
 async function processOne(projectDir) {
   const iterDir = resolve(projectDir, "..");
-  const iterLabel = iterDir.split("/").slice(-2).join("/"); // e.g. "ui4-mcp/iteration-3"
+  const iterLabel = iterDir.split("/").slice(-2).join("/"); // e.g. "ui5-mcp/iteration-3"
 
   if (!existsSync(join(projectDir, "package.json"))) {
     console.log(`${tag(iterLabel)} ${warn("skip — no package.json (generation never emitted a scaffold)")}`);
@@ -151,9 +151,12 @@ async function processOne(projectDir) {
 
   const testLabel = findTestLabel(projectDir);
   let renderFailureSignatures = [];
+  let minStylesheetRules = 0;
   if (testLabel) {
     try {
-      renderFailureSignatures = getTest(testLabel).renderFailureSignatures;
+      const test = getTest(testLabel);
+      renderFailureSignatures = test.renderFailureSignatures;
+      minStylesheetRules = test.minStylesheetRules;
     } catch {
       // Unknown/misconfigured test — fall through with no signatures rather
       // than failing the whole capture over a config lookup.
@@ -161,7 +164,10 @@ async function processOne(projectDir) {
   }
 
   console.log(`${tag(iterLabel)} Validating + starting dev server...`);
-  const validation = await validateProject(projectDir, iterLabel, { renderFailureSignatures });
+  const validation = await validateProject(projectDir, iterLabel, {
+    renderFailureSignatures,
+    minStylesheetRules,
+  });
   try {
     if (!validation.serverUrl) {
       console.log(

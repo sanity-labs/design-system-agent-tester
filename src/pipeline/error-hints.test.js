@@ -41,17 +41,64 @@ describe("deriveErrorHints", () => {
     expect(hints.some((h) => h.includes("boolean prop was given a string"))).toBe(true);
   });
 
-  it("hints at tsconfig edits without touching unrelated errors", () => {
-    const text = "tsconfig.json(4,5): error TS5023: Unknown compiler option 'foo'.";
-    const hints = deriveErrorHints(text);
-    expect(hints.some((h) => h.includes("Do not modify tsconfig.json"))).toBe(true);
+  // Regression (2026-09-03): this hint used to say the OPPOSITE — "Do not
+  // modify tsconfig.json … they are pre-configured and valid. Only edit
+  // files under `src/`" — and fired on any text containing "tsconfig.json".
+  // In this harness the agent authors tsconfig.json itself, so that made
+  // every compiler-config error unwinnable: the fix requires editing the one
+  // file the hint forbade touching. These tests assert the hint now points
+  // AT the file that needs the edit, and that it never resurfaces the old
+  // wording.
+  const CONFIG_ERROR_CODES = [
+    ["TS5023", "tsconfig.json(4,5): error TS5023: Unknown compiler option 'foo'."],
+    [
+      "TS5070",
+      "tsconfig.json(10,5): error TS5070: Option '--resolveJsonModule' cannot be specified when 'moduleResolution' is set to 'classic'.",
+    ],
+    ["TS6053", "error TS6053: File 'tsconfig.node.json' not found."],
+    [
+      "TS6305",
+      "error TS6305: Output file 'src/App.d.ts' has not been built from source file 'src/App.tsx'.",
+    ],
+    ["TS6306", "tsconfig.json(5,5): error TS6306: Referenced project must have setting composite."],
+    ["TS6310", "tsconfig.json(3,3): error TS6310: Referenced project may not disable emit."],
+  ];
+
+  it.each(CONFIG_ERROR_CODES)(
+    "tells the model to fix its own tsconfig for %s",
+    (_code, text) => {
+      const hints = deriveErrorHints(text);
+      expect(hints.some((h) => h.includes("compiler-configuration error"))).toBe(true);
+      // The inverted, unwinnable instruction must never come back.
+      expect(hints.some((h) => h.includes("Do not modify tsconfig"))).toBe(false);
+    },
+  );
+
+  it("names the moduleResolution fix, since omitting it is what defaults to classic", () => {
+    const text =
+      "tsconfig.json(10,5): error TS5070: Option '--resolveJsonModule' cannot be specified when 'moduleResolution' is set to 'classic'.";
+    const hint = deriveErrorHints(text).find((h) => h.includes("compiler-configuration error"));
+    expect(hint).toContain("bundler");
   });
 
-  it("does NOT hint 'do not modify tsconfig' when tsconfig.json is missing outright", () => {
-    const text =
-      "tsconfig.json is missing — the project scaffold is broken. Emit a tsconfig.json at the project root.";
+  it("still warns against weakening type checking to silence app-code errors", () => {
+    const text = "tsconfig.json(4,5): error TS5023: Unknown compiler option 'foo'.";
+    const hint = deriveErrorHints(text).find((h) => h.includes("compiler-configuration error"));
+    expect(hint).toContain("strict: false");
+  });
+
+  it("does not fire the config hint for ordinary app-code type errors", () => {
+    const text = "src/App.tsx(10,5): error TS2322: Type 'number' is not assignable to type 'string'.";
     const hints = deriveErrorHints(text);
-    expect(hints.some((h) => h.includes("Do not modify tsconfig.json"))).toBe(false);
+    expect(hints.some((h) => h.includes("compiler-configuration error"))).toBe(false);
+  });
+
+  it("does not fire the config hint merely because a path mentions tsconfig.json", () => {
+    // The old implementation keyed off the filename appearing anywhere, so a
+    // stack trace or file list was enough to trigger it.
+    const text = "Failed to load config from /project/tsconfig.json.bak — unrelated read error";
+    const hints = deriveErrorHints(text);
+    expect(hints.some((h) => h.includes("compiler-configuration error"))).toBe(false);
   });
 
   it("hints at a missing devDependency behind a 'Cannot find module' crash", () => {
@@ -80,7 +127,7 @@ describe("deriveErrorHints", () => {
       "tsconfig.json(4,5): error TS5023: Unknown compiler option 'foo'.",
     ].join("\n");
     const hints = deriveErrorHints(text);
-    const matches = hints.filter((h) => h.includes("Do not modify tsconfig.json"));
+    const matches = hints.filter((h) => h.includes("compiler-configuration error"));
     expect(matches).toHaveLength(1);
   });
 });
