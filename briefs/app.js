@@ -1,8 +1,9 @@
 /**
- * Brief generator.
+ * App-mode brief generator (`--mode app`, the default).
  *
  * Produces the PRD-style interface brief fed to every test in a run, so
- * all tests build the same spec.
+ * all tests build the same spec. `briefs/component.js` is the same shape
+ * scoped to a single component.
  *
  *   - `staticBrief`         used when `--agent-prompt` is OFF (default).
  *   - `systemPrompt` +

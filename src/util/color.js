@@ -1,10 +1,9 @@
 /**
- * Console-text coloring via Node's built-in `util.styleText`.
+ * Colour for console output.
  *
- * Wraps the underlying formats in semantic names so the palette can be
- * tuned in one place. `styleText` itself respects TTY detection and the
- * NO_COLOR environment variable, so output piped to a file or run in CI
- * comes out as plain text without any extra handling.
+ * Named by meaning rather than by colour so the palette can be changed in
+ * one place. Node handles turning colour off when output is piped to a file
+ * or NO_COLOR is set.
  */
 
 import { styleText } from "node:util";
@@ -16,14 +15,9 @@ export const dim = (s) => styleText("dim", s);
 export const bold = (s) => styleText("bold", s);
 
 /**
- * `[iter-label]` prefix used at the start of most pipeline log lines.
- * Dimmed so the iteration label fades into the gutter and the actual
- * status message is what reads first.
+ * The `[label]` prefix on most log lines. Dimmed so the message reads first.
  */
 export const tag = (label) => styleText("dim", `[${label}]`);
 
-/**
- * Bold-cyan banner heading for the startup block and top-level section
- * dividers (e.g. `=== Agent Tester ===`).
- */
+/** Heading for the startup block and section dividers. */
 export const banner = (s) => styleText(["bold", "cyan"], s);

@@ -1,24 +1,12 @@
 /**
- * React commit-level profiling.
+ * React render timing.
  *
- * Data point: per-commit render durations from the React reconciler.
- * Captured by injecting `__REACT_DEVTOOLS_GLOBAL_HOOK__` into the page
- * before any scripts run — the same mechanism the React DevTools browser
- * extension uses. React calls `onCommitFiberRoot()` synchronously at the
- * end of every commit phase; each fiber carries an `actualDuration` field
- * (populated in development builds, which Vite's dev server always emits).
+ * Records how long each React render took, by installing the same hook the
+ * React DevTools extension uses before any of the page's scripts run. React
+ * then reports each render as it happens.
  *
- * Returns:
- *   - mountMs:      initial mount duration (first commit)
- *   - commitCount:  total commits observed
- *   - avgUpdateMs:  average duration of post-mount commits
- *   - maxUpdateMs:  slowest update commit
- *   - commits:      raw per-commit array
- *
- * Returns null if the page has no React, or if `actualDuration` is
- * unavailable (e.g. a production / minified build).
- *
- * Self-contained: opens its own Chrome instance via Puppeteer.
+ * Gives the initial mount time, how many renders followed, and how long
+ * those took.
  */
 
 import { writeFile } from "node:fs/promises";
@@ -37,12 +25,8 @@ import { launchBrowser, NAV_TIMEOUT_MS } from "./puppeteer-helpers.js";
  */
 
 /**
- * Capture React commit-level timing for a running dev server.
+ * Measure React render timing against a running dev server.
  *
- * @param {object} opts
- * @param {string} opts.serverUrl
- * @param {string} opts.iterDir
- * @param {string} opts.iterLabel
  * @returns {Promise<ReactProfile | null>}
  */
 export async function measureReactProfile({ serverUrl, iterDir, iterLabel }) {
@@ -75,10 +59,8 @@ export async function measureReactProfile({ serverUrl, iterDir, iterLabel }) {
         onCommitFiberUnmount: () => {},
         onPostCommitFiberRoot: () => {},
         onCommitFiberRoot: (_rendererID, root) => {
-          // Prefer the HostRoot fiber's actualDuration — it aggregates the
-          // whole commit (all top-level children / Fragments). Fall back to
-          // the first child fiber for renderer versions that don't populate
-          // it on the root.
+          // Use the root's own duration, which covers the whole render. Fall back
+          // to its first child for React versions that leave the root empty.
           const rootFiber = root?.current;
           if (!rootFiber) return;
           const duration =

@@ -180,3 +180,85 @@ describe("aggregate re-exports unified stats", () => {
     expect(stdDev([5])).toBeNull();
   });
 });
+
+// Regression guard. A metric has to be listed in AGGREGATABLE_KEYS as well as
+// extracted, or the summary silently prints "—" even though the report holds
+// the data. That is exactly what happened when the failure-taxonomy and
+// coverage metrics were first added: the detail sections showed real numbers
+// while the summary at the top of the report showed dashes for every test.
+describe("summary metrics survive aggregation", () => {
+  const sampleReport = {
+    totalIterations: 10,
+    builtIterations: 9,
+    linesOfCode: { average: 1200 },
+    fixAttempts: { average: 1, total: 10, byStage: {} },
+    failures: {
+      measured: 10,
+      failed: 1,
+      unrecoverableRate: 0.1,
+      byCategory: [{ id: "missing-export", label: "Missing or misnamed export", count: 3 }],
+      turnsToGreen: { median: 1, p90: 2, cleanFirstTry: 2, measured: 9 },
+    },
+    tieredCoverage: {
+      shares: { composite: 0.11, primitive: 0.72, raw: 0.17 },
+    },
+  };
+
+  const NUMERIC_SUMMARY_KEYS = [
+    "turnsToGreenMedian",
+    "turnsToGreenP90",
+    "unrecoverableRate",
+    "compositeShare",
+    "primitiveShare",
+    "rawShare",
+  ];
+
+  it("extracts every summary metric from a report", () => {
+    const m = extractMetrics(sampleReport);
+    for (const k of NUMERIC_SUMMARY_KEYS) {
+      expect(m[k], `extractMetrics dropped ${k}`).not.toBeNull();
+    }
+    expect(m.topFailureCategory).toBe("Missing or misnamed export");
+  });
+
+  it("carries them through aggregation instead of dropping them", () => {
+    const agg = aggregateMetrics([extractMetrics(sampleReport)]);
+    for (const k of NUMERIC_SUMMARY_KEYS) {
+      expect(agg[k], `aggregateMetrics dropped ${k} — add it to AGGREGATABLE_KEYS`).not.toBeNull();
+    }
+    expect(agg.unrecoverableRate).toBeCloseTo(0.1);
+    expect(agg.compositeShare).toBeCloseTo(0.11);
+  });
+
+  // A label cannot be averaged, so it needs its own path.
+  it("picks the most common top-failure category across runs", () => {
+    const other = {
+      ...sampleReport,
+      failures: {
+        ...sampleReport.failures,
+        byCategory: [{ id: "wrong-prop-type", label: "Wrong prop type", count: 1 }],
+      },
+    };
+    const agg = aggregateMetrics([sampleReport, sampleReport, other].map(extractMetrics));
+    expect(agg.topFailureCategory).toBe("Missing or misnamed export");
+    expect(agg.topFailureCount).toBe(6);
+  });
+
+  it("renders them into the summary tables with real values, not dashes", () => {
+    const agg = { arm: aggregateMetrics([extractMetrics(sampleReport)]) };
+    const md = renderMetricsTables(["arm"], agg);
+    expect(md).toContain("### Failure taxonomy");
+    expect(md).toContain("### Design system coverage");
+    expect(md).toContain("10.0%");
+    expect(md).toContain("72.0%");
+    expect(md).toContain("Missing or misnamed export");
+  });
+
+  it("still renders dashes when a report predates the metrics", () => {
+    const old = { totalIterations: 10, linesOfCode: { average: 1 }, fixAttempts: {} };
+    const agg = { arm: aggregateMetrics([extractMetrics(old)]) };
+    const md = renderMetricsTables(["arm"], agg);
+    expect(md).toContain("### Failure taxonomy");
+    expect(md).toMatch(/Failure taxonomy[\s\S]*?—/);
+  });
+});

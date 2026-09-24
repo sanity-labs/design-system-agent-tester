@@ -806,11 +806,11 @@ describe("generateReport markdown sections", () => {
       const md = await readFile(join(dir, "report.md"), "utf-8");
 
       expect(md).toContain("No inline style data available.");
-      expect(md).toContain("### DOM Elements");
-      expect(md).toContain("### Semantic HTML");
+      expect(md).toContain("#### DOM elements");
+      expect(md).toContain("#### Semantic HTML");
       // Section order: Inline Styles closes before DOM Elements begins.
-      expect(md.indexOf("### DOM Elements")).toBeGreaterThan(md.indexOf("### Inline Styles"));
-      expect(md.indexOf("### Semantic HTML")).toBeGreaterThan(md.indexOf("### DOM Elements"));
+      expect(md.indexOf("#### DOM elements")).toBeGreaterThan(md.indexOf("#### Inline styles"));
+      expect(md.indexOf("#### Semantic HTML")).toBeGreaterThan(md.indexOf("#### DOM elements"));
     } finally {
       await rm(dir, { recursive: true, force: true });
       log.mockRestore();
@@ -860,9 +860,9 @@ describe("generateReport markdown sections", () => {
       // middle of the Inline Styles section.
       expect(md).toContain("**Most common inline CSS properties:**");
       expect(md.indexOf("**Most common inline CSS properties:**")).toBeLessThan(
-        md.indexOf("### DOM Elements"),
+        md.indexOf("#### DOM elements"),
       );
-      expect(md).toContain("### Semantic HTML");
+      expect(md).toContain("#### Semantic HTML");
     } finally {
       await rm(dir, { recursive: true, force: true });
       log.mockRestore();
@@ -1382,5 +1382,72 @@ describe("generateReport neutralizes untrusted artifact text", () => {
       log.mockRestore();
       warn.mockRestore();
     }
+  });
+});
+
+// A failed iteration often ends its repair loop cut down to a stub. Compared
+// with full apps, the stub reads as a large inconsistency that is really a
+// build failure — so consistency is also reported over built iterations only.
+describe("generateReport reports consistency over built iterations only", () => {
+  const app = (extra = "") => ({
+    path: "src/App.tsx",
+    content: `import { Card, Button } from "ds"\nexport default function App() {\n  return (<Card><Button text="Save" />${extra}</Card>)\n}\n`,
+  });
+  const stub = {
+    path: "src/App.tsx",
+    content: "export default function App() {\n  return null\n}\n",
+  };
+  const iter = (n, exitStage, file) => ({
+    iteration: n,
+    elapsedSeconds: 5,
+    linesOfCode: 5,
+    files: [file],
+    componentImports: ["Card", "Button"],
+    fixAttempts: 0,
+    exitStage,
+  });
+
+  const run = async (iterations) => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const dir = await mkdtemp(join(tmpdir(), "at-report-"));
+    try {
+      await generateReport({ demo: iterations }, dir);
+      return {
+        data: JSON.parse(await readFile(join(dir, "report.json"), "utf-8")).prompts.demo,
+        md: await readFile(join(dir, "report.md"), "utf-8"),
+      };
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      log.mockRestore();
+      warn.mockRestore();
+    }
+  };
+
+  it("leaves a failed stub out of the built-only comparison", async () => {
+    const { data, md } = await run([
+      iter(1, "clean", app()),
+      iter(2, "clean", app()),
+      iter(3, "build", stub),
+    ]);
+    const all = data.codeVariance;
+    const built = data.codeVarianceBuiltOnly;
+    if (all.averageComponentChoiceSimilarity == null) return; // TypeScript unavailable in this env
+    expect(built.iterationsCompared).toBe(2);
+    expect(built.sameAsAll).toBe(false);
+    // The two built apps are identical; the stub is what pulls the full figure down.
+    expect(built.averageCompositionSimilarity).toBe(1);
+    expect(all.averageCompositionSimilarity).toBeLessThan(1);
+    expect(md).toContain("**Built iterations only** (2 of 3");
+  });
+
+  it("does not repeat the numbers when every iteration built", async () => {
+    const { data, md } = await run([
+      iter(1, "clean", app()),
+      iter(2, "accessibility", app("<Card />")),
+    ]);
+    expect(data.codeVarianceBuiltOnly.sameAsAll).toBe(true);
+    expect(data.codeVarianceBuiltOnly.iterationsCompared).toBe(2);
+    expect(md).not.toContain("**Built iterations only**");
   });
 });

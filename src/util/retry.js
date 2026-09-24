@@ -1,10 +1,9 @@
 /**
- * Shared transient-error detection for retry loops.
+ * Decides which errors are worth retrying.
  *
- * One list, used by every retry layer (iteration retries in index.js,
- * API-call retries in runner-api.js) — the lists used to be duplicated
- * inline and drifted apart. Matches the failure modes worth retrying:
- * dropped connections, timeouts, rate limits, and 5xx server errors.
+ * One list, used by every retry loop in the harness. These used to be
+ * written out separately in each place and drifted apart. Covers dropped
+ * connections, rate limits, and server-side errors.
  */
 export function isTransientError(err) {
   // Prefer structured fields when present. An HTTP status or a Node
@@ -31,10 +30,9 @@ export function isTransientError(err) {
     msg.includes("socket hang up") ||
     msg.includes("timed out") ||
     msg.includes("timeout") ||
-    // Node's generic fetch() failure message — used by the local-model
-    // (Ollama) client, which has no HTTP status/error-code envelope of its
-    // own to inspect. Broad, but every case caught here is already a
-    // connection failure by definition (fetch() only throws this for one).
+    // Node's general fetch failure message, used by the local model client,
+    // which has no error code of its own to check. Broad, but fetch only
+    // reports this for a connection that failed.
     msg.includes("fetch failed") ||
     msg.includes("rate limit") ||
     msg.includes("overloaded") ||

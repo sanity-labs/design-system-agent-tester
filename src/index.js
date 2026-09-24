@@ -3,7 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { generateAppPrompt, STATIC_PROMPT } from "./config/prompt-generator.js";
+import { DEFAULT_MODE, generateBrief, MODES, staticBriefFor } from "./config/prompt-generator.js";
 import { buildUserPrompt, TEST_LABELS, TESTS } from "./config/prompts.js";
 import { computeVisualDiff } from "./evaluation/visual-diff.js";
 import { iterationBuilt } from "./reporting/aggregators.js";
@@ -65,28 +65,17 @@ const { values } = parseArgs({
       short: "f",
       default: "5",
     },
-    // Budget for the post-render LINT remainder gate, separate from
-    // `--max-fixes` (which is the build/a11y budget). Auto-fixable lint
-    // issues are always applied mechanically regardless of this — it bounds
-    // only how many times the AGENT is sent back for violations autofix
-    // could not resolve.
-    //
-    // DEFAULT 0 — an iteration finishes once the page renders. Lint
-    // compliance is still measured and reported
-    // (`firstTryLint`/`residualLint`/`byRule`); the agent just isn't sent
-    // back for violations autofix couldn't resolve. Raise it to re-enable
-    // post-render lint repair.
-    //
-    // Was hardcoded to 2, then made a flag, then defaulted to 0 on
-    // 2026-09-11: post-render escalation was the only reason an iteration
-    // kept working after a successful render, and it regressed a working
-    // build in 6 of 701 iterations (a render-clean app re-emitted scaffold
-    // files during a lint fix and broke its own type check). The mechanical
-    // auto-fix pass is unaffected and still runs BEFORE the render check,
-    // where it helps reach a render rather than second-guessing one.
+    // Defaults to 1 (2026-09-24). It was 0 because a lint repair after a
+    // working render sometimes rewrote scaffold files and broke the type
+    // check. Two changes since remove that: `guardRepairScope` drops scaffold
+    // rewrites in post-render repairs, and repair turns no longer nudge the
+    // agent to re-emit the whole project. At 0, no lint finding that needed a
+    // person was ever sent back — the 09-22..24 runs shipped 394 layout-prop
+    // and 411 inline-style findings. The automatic fix pass still runs before
+    // every render check either way.
     "max-lint-fixes": {
       type: "string",
-      default: "0",
+      default: "1",
     },
     // When false (`--no-fix-accessibility`), axe still runs and violations are
     // still measured/reported — the agent just isn't sent back to FIX them, so
@@ -99,6 +88,14 @@ const { values } = parseArgs({
     "agent-prompt": {
       type: "boolean",
       default: false,
+    },
+    // What kind of thing the run asks for. `app` is the original
+    // behaviour — a whole interface. `component` narrows the brief to one
+    // component plus a page demonstrating its states. Same pipeline and
+    // same gates either way; only the brief pool differs.
+    mode: {
+      type: "string",
+      default: DEFAULT_MODE,
     },
     // Use a fixed brief read verbatim from a file. Overrides both the static
     // fallback and --agent-prompt, so a run is exactly reproducible — required
@@ -135,14 +132,14 @@ if (values.test === "all" && values.prompt !== undefined) {
  * @param {string}  model - The run's target model (may be a local Ollama tag)
  * @returns {Promise<string>}
  */
-async function resolvePromptBrief(useAgentPrompt, model, briefFile) {
+async function resolvePromptBrief(useAgentPrompt, model, briefFile, mode = DEFAULT_MODE) {
   if (briefFile) {
     const brief = readFileSync(resolve(briefFile), "utf-8");
     console.log(`Using fixed brief from ${briefFile} (${brief.length} chars) — reproducible run.`);
     return brief;
   }
   if (!useAgentPrompt) {
-    return STATIC_PROMPT;
+    return staticBriefFor(mode);
   }
 
   // Brief generation always calls the Anthropic API directly (it's a
@@ -151,10 +148,10 @@ async function resolvePromptBrief(useAgentPrompt, model, briefFile) {
   // default Claude model whenever the run's target model isn't one.
   const briefModel = isLocalModel(model) ? undefined : model;
   console.log(
-    `Generating interface brief with agent${briefModel ? "" : " (local run target — using default Claude model for brief generation)"}...`,
+    `Generating ${mode} brief with agent${briefModel ? "" : " (local run target — using default Claude model for brief generation)"}...`,
   );
-  const brief = await generateAppPrompt(briefModel ? { model: briefModel } : {});
-  console.log(`\n--- Generated interface brief ---\n${brief}\n---\n`);
+  const brief = await generateBrief({ mode, ...(briefModel ? { model: briefModel } : {}) });
+  console.log(`\n--- Generated ${mode} brief ---\n${brief}\n---\n`);
   return brief;
 }
 
@@ -282,6 +279,15 @@ async function main() {
     testLabels = parts;
   }
 
+  // What the run asks agents to build. Validated here rather than at the
+  // point of use so an unknown value fails before a run directory is
+  // claimed and the lock is taken.
+  const mode = String(values.mode ?? DEFAULT_MODE).trim();
+  if (!MODES.includes(mode)) {
+    console.error(`Error: --mode must be one of: ${MODES.join(", ")}. Got "${values.mode}"`);
+    process.exit(1);
+  }
+
   // Atomically claim a timestamped run directory:
   // `output/2025-03-18/14.30/` (or `…/14.30.1/` if another concurrent
   // run already owns 14.30). The directory is created by
@@ -296,7 +302,12 @@ async function main() {
 
   // Resolve the interface brief once — every test AND every model receives
   // the same text, so cross-model results stay comparable.
-  const promptBrief = await resolvePromptBrief(useAgentPrompt, models[0], values["brief-file"]);
+  const promptBrief = await resolvePromptBrief(
+    useAgentPrompt,
+    models[0],
+    values["brief-file"],
+    mode,
+  );
 
   console.log(banner("=== Agent Tester ==="));
   const field = (k) => dim(k.padEnd(13));
@@ -305,7 +316,7 @@ async function main() {
       allModelsLocal ? " (local via Ollama)" : " (Anthropic SDK — requires ANTHROPIC_API_KEY)"
     }`,
   );
-  console.log(`${field("Mode:")} build (agent writes React)`);
+  console.log(`${field("Mode:")} ${mode} (agent writes React)`);
   console.log(`${field("Iterations:")} ${iterations}`);
   console.log(`${field("Max fixes:")} ${maxFixes}`);
   console.log(`${field("Max lint fixes:")} ${maxLintFixes}`);
@@ -342,7 +353,11 @@ async function main() {
     // tests.internal/ui5-mcp/config.js for the DSDS-specific example) if it
     // has something worth checking before iterations start. The harness
     // doesn't know or care what a test's tooling is.
-    if (typeof test.preflight === "function") test.preflight();
+    // Awaited so an async check can work: verifying a tool name against a
+    // server's advertised tool list means starting the server, which is
+    // async. Without the await, a rejected preflight became an unhandled
+    // rejection and the run carried on past a check that had failed.
+    if (typeof test.preflight === "function") await test.preflight();
 
     const promptContent = buildUserPrompt(label, promptBrief);
 
@@ -398,6 +413,7 @@ async function main() {
               effort: test.effort,
               mcpConfig: test.mcp,
               cliConfig: test.cli,
+              jevConfig: test.jev,
               renderFailureSignatures: test.renderFailureSignatures,
               minStylesheetRules: test.minStylesheetRules,
             });
@@ -546,26 +562,9 @@ async function main() {
   console.log(`\n${success("Done!")} See ${runDir} for results and report.`);
 }
 
-// Tolerate a *narrow* class of orphan-promise rejections from libraries
-// that leak background promises after their main API has resolved.
-// Lighthouse's internal `checkForQuiet` polling can outlive
-// `lighthouse()`'s resolved promise: when we close the browser, the next
-// poll fires against a dead CDP session and rejects unhandled. Without
-// tolerance, Node crashes the whole harness mid-iteration.
-//
-// We do NOT swallow everything — a blanket handler hides real bugs
-// (e.g. a genuine ReferenceError surfaces as a silent "iteration
-// failed"). Only the known CDP/teardown signatures are ignored; any
-// other rejection is logged with its stack and crashes the process, the
-// same as Node's default.
-// `performance mark has not been set` is lighthouse-logger/marky failing to
-// close a timing mark. It is a logging failure inside Lighthouse, thrown from
-// a timer callback nothing awaits, and it says nothing about the iteration's
-// code — the measurement is already being retried/skipped by
-// evaluation/lighthouse.js. Lighthouse runs are serialized to prevent the
-// collision that causes it (see withLighthouseLock); this entry is the
-// backstop so a stray late timer can never take the whole run down again
-// (it did, on 2026-09-09/13.32).
+// evaluation/lighthouse.js. Lighthouse runs one at a time to prevent the
+// clash that causes this, and this list is the backstop so a stray late
+// timer can never bring down the whole run.
 const TOLERATED_REJECTION_RE =
   /Target closed|Protocol error|Session closed|checkForQuiet|WebSocket is not open|Most likely the page has been closed|performance mark has not been set/i;
 

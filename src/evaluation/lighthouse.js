@@ -1,64 +1,76 @@
 /**
  * Lighthouse performance audit.
  *
- * Data point: Core Web Vitals captured by Google Lighthouse — First
- * Contentful Paint, Largest Contentful Paint, Total Blocking Time, Time
- * to Interactive, Speed Index, and an overall performance score.
+ * Collects Core Web Vitals: First Contentful Paint, Largest Contentful
+ * Paint, Total Blocking Time, Time to Interactive, Speed Index, and an
+ * overall score.
  *
- * Runs `LIGHTHOUSE_RUNS` times and averages each metric for stability.
- *
- * Self-contained: opens its own Chrome instance via Puppeteer.
+ * Runs several times and averages, because a single run varies too much to
+ * compare against another.
  */
 
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { launchBrowser } from "./puppeteer-helpers.js";
+import { launchBrowser, withTimeout } from "./puppeteer-helpers.js";
 
 const LIGHTHOUSE_RUNS = 3;
 
 /**
- * Run Lighthouse against a running dev server.
+ * Time limit for one Lighthouse run.
  *
- * @param {object} opts
- * @param {string} opts.serverUrl - URL of the running dev server
- * @param {string} opts.iterDir   - Directory for this iteration's output
- * @param {string} opts.iterLabel - Label for logging
- * @returns {Promise<object>} Lighthouse results (never throws)
+ * A run normally takes a few seconds. This only catches a run that has stopped
+ * making progress, which happens when its connection to the browser breaks: the
+ * call then waits for a reply that never arrives.
  */
+const PER_RUN_TIMEOUT_MS = 120_000;
+
 /**
- * Process-wide Lighthouse lock.
+ * Time limit for the whole measurement, including starting and closing the
+ * browser.
  *
- * Lighthouse's logger (lighthouse-logger → marky) records timings with
- * `performance.mark()` under fixed names such as
- * "lh:computed:TraceEngineResult". Those marks are global to the Node
- * process. When two iterations run Lighthouse at the same time, one run's
- * `timeEnd` consumes a mark the other run started, and the second `timeEnd`
- * throws `SyntaxError: The "start lh:…" performance mark has not been set`.
- * The throw happens inside a timer callback that nothing awaits, so it
- * surfaces as an unhandled rejection rather than as an error from
- * `lighthouse()` — the per-run try/catch below never sees it. Observed on
- * 2026-09-09/13.32 with `--concurrency 5`: the harness died at 14:05 with 6
- * frontload iterations in flight.
+ * This is the important one. Lighthouse runs are queued one at a time, so a
+ * measurement that never finishes holds the queue and every later iteration
+ * waits behind it forever. Bounding it means the queue always moves on.
+ */
+const TOTAL_TIMEOUT_MS = 8 * 60_000;
+
+/**
+ * Lighthouse runs one at a time.
  *
- * Serializing Lighthouse removes the collision at its source. Everything
- * else in an iteration (generation, install, type check, dev server, axe)
- * stays concurrent; only the Lighthouse measurement itself queues. The
- * queued runs still share CPU with other iterations' builds, so timing
- * numbers under concurrency remain noisier than a sequential run — this
- * lock fixes the crash, not the measurement bias.
+ * Two Lighthouse runs against the same browser at once clash over a shared
+ * timing mark, and one of them fails with an error about a missing mark. The
+ * failure happens inside a timer that nothing waits on, so it surfaces as an
+ * unhandled rejection and the try/catch around each run never sees it. This
+ * took down a whole run once, with six iterations in flight.
+ *
+ * Queueing them removes the clash. Everything else in an iteration still runs
+ * concurrently; only this measurement waits. Those queued runs still share the
+ * machine with other builds, so timings taken during a concurrent run are
+ * noisier than a sequential one. This fixes the crash, not that noise.
  */
 let lighthouseLock = Promise.resolve();
 
 /**
- * Run `fn` after every previously queued Lighthouse job has finished.
- * Exported for tests. A rejection in one job does not block the next.
+ * Run `fn` once every previously queued Lighthouse job has finished.
+ *
+ * Neither a job that fails nor one that never finishes blocks the next: a job
+ * that outlives `timeoutMs` is abandoned and the queue moves on. Exported for
+ * tests.
+ *
+ * Abandoning a job does not stop it, so a caller that holds resources should
+ * clean them up when this rejects.
  *
  * @template T
  * @param {() => Promise<T>} fn
+ * @param {number} [timeoutMs]
  * @returns {Promise<T>}
  */
-export function withLighthouseLock(fn) {
-  const run = lighthouseLock.then(fn, fn);
+export function withLighthouseLock(fn, timeoutMs = TOTAL_TIMEOUT_MS) {
+  // The time limit is applied here, not in the caller, because it is the queue
+  // that needs protecting. A job that never settles would otherwise hold the
+  // queue and every job behind it would wait forever.
+  const guarded = () => withTimeout(fn(), timeoutMs, "Lighthouse measurement");
+  const run = lighthouseLock.then(guarded, guarded);
   lighthouseLock = run.then(
     () => undefined,
     () => undefined,
@@ -67,10 +79,52 @@ export function withLighthouseLock(fn) {
 }
 
 export async function measureLighthouse(opts) {
-  return withLighthouseLock(() => measureLighthouseUnlocked(opts));
+  return measureLighthouseGuarded(opts);
 }
 
-async function measureLighthouseUnlocked({ serverUrl, iterDir, iterLabel }) {
+/**
+ * Close a browser we have given up waiting for.
+ *
+ * A measurement that timed out is still holding its browser, and its own
+ * cleanup will never run because it is stuck waiting. Ask it to close, and if
+ * that does not work either, kill the process. Without this the browser
+ * outlives the run.
+ */
+async function forceCloseBrowser(browser, iterLabel) {
+  if (!browser) return;
+  try {
+    await withTimeout(browser.close(), 10_000, "browser close");
+  } catch {
+    try {
+      browser.process()?.kill("SIGKILL");
+    } catch {
+      console.warn(`[${iterLabel}] Could not close the Lighthouse browser; it may be left behind.`);
+    }
+  }
+}
+
+/**
+ * Start the measurement and clean up after it if the queue abandons it.
+ *
+ * `measureLighthouseUnlocked` promises never to throw, but that is not the same
+ * as promising to finish: if its connection to the browser breaks it can wait
+ * forever. The queue puts a stop to that, and this turns the resulting failure
+ * back into ordinary empty results.
+ */
+async function measureLighthouseGuarded(opts) {
+  const handle = {};
+  try {
+    return await withLighthouseLock(() => measureLighthouseUnlocked(opts, handle));
+  } catch (err) {
+    console.warn(`[${opts.iterLabel}] ${err.message} — giving up on this measurement.`);
+    await forceCloseBrowser(handle.browser, opts.iterLabel);
+    const results = emptyResults(opts.iterLabel, err.message);
+    await writeResults(opts.iterDir, results);
+    return results;
+  }
+}
+
+async function measureLighthouseUnlocked({ serverUrl, iterDir, iterLabel }, handle = {}) {
   // Everything that can throw lives inside the try so this function honors
   // its "never throws" contract and never leaks the browser. `browser` is
   // declared here so the `finally` can close it only when it was opened.
@@ -78,6 +132,9 @@ async function measureLighthouseUnlocked({ serverUrl, iterDir, iterLabel }) {
   try {
     const { default: lighthouse, desktopConfig } = await import("lighthouse");
     browser = await launchBrowser();
+    // Share it with the guard above, so a measurement that times out can still
+    // have its browser closed.
+    handle.browser = browser;
 
     console.log(`[${iterLabel}] Lighthouse (${LIGHTHOUSE_RUNS} runs)...`);
 
@@ -91,30 +148,24 @@ async function measureLighthouseUnlocked({ serverUrl, iterDir, iterLabel }) {
     const lhRuns = [];
     for (let i = 0; i < LIGHTHOUSE_RUNS; i++) {
       try {
-        const { lhr } = await lighthouse(
-          serverUrl,
-          {
-            // `port` reuses the Puppeteer-launched Chrome instance —
-            // without it, lighthouse tries to spawn its own Chrome at
-            // the default port 9222 and fails on a busy host (the
-            // "Failed to fetch browser webSocket URL ... 9222" error).
-            port,
-            output: "json",
-            logLevel: "error",
-            // `provided` reports raw wall-clock timing, which is
-            // sensitive to CPU contention. The harness defaults to
-            // `--concurrency 1`, where the numbers are stable. Under
-            // higher concurrency, Lighthouse runs are serialized (see
-            // withLighthouseLock) so they don't crash each other, but
-            // they still share CPU with other iterations' builds, so
-            // treat performance numbers from such runs as noisy. Switching to
-            // `simulated` here doesn't work with lighthouse's
-            // `desktopConfig` preset (the override leaves the rest of
-            // the lantern pipeline misconfigured and audits return
-            // null numeric values).
-            throttlingMethod: "provided",
-          },
-          desktopConfig,
+        const { lhr } = await withTimeout(
+          lighthouse(
+            serverUrl,
+            {
+              // Reuse the Chrome we already started. Without this, Lighthouse tries to
+              // start its own on a fixed port and fails when that port is in use.
+              port,
+              output: "json",
+              logLevel: "error",
+              // Report real timings rather than simulated ones. These are sensitive to
+              // a busy machine, so the harness runs one iteration at a time by default
+              // and serialises Lighthouse runs when it does not.
+              throttlingMethod: "provided",
+            },
+            desktopConfig,
+          ),
+          PER_RUN_TIMEOUT_MS,
+          `Lighthouse run ${i + 1}/${LIGHTHOUSE_RUNS} (${iterLabel})`,
         );
         lhRuns.push(lhr);
       } catch (lhErr) {
@@ -159,10 +210,9 @@ async function measureLighthouseUnlocked({ serverUrl, iterDir, iterLabel }) {
     const tbtVals = pick("total-blocking-time");
     const ttiVals = pick("interactive");
     const siVals = pick("speed-index");
-    // Exclude runs with no performance score rather than coercing them to
-    // 0 — a single failed/null score would otherwise drag the median and
-    // mean toward zero, the same way `pick()` filters nulls for the other
-    // metrics above.
+    // Drop runs with no score instead of counting them as zero, which would
+    // pull the average down. Same as how the other metrics skip missing
+    // values.
     const scoreVals = lhRuns
       .map((lhr) => lhr.categories.performance?.score)
       .filter((s) => s != null)
@@ -182,10 +232,9 @@ async function measureLighthouseUnlocked({ serverUrl, iterDir, iterLabel }) {
       timestamp: new Date().toISOString(),
       runs: LIGHTHOUSE_RUNS,
       throttlingMethod: "provided",
-      // Top-level scalar fields preserve backward-compat with older
-      // consumers. They report the **median** across the lighthouse
-      // runs (robust to outliers). The `metrics` block exposes the
-      // mean / median / per-run values for each metric explicitly.
+      // The top-level fields report the median across runs, which is less
+      // affected by one bad run. The `metrics` block has the mean, median and
+      // each individual run.
       fcpMs: metrics.fcp.median,
       lcpMs: metrics.lcp.median,
       tbtMs: metrics.tbt.median,
@@ -216,14 +265,9 @@ async function measureLighthouseUnlocked({ serverUrl, iterDir, iterLabel }) {
     await writeResults(iterDir, results);
     return results;
   } finally {
-    // Let any pending Lighthouse microtasks settle before tearing
-    // down the CDP session. Lighthouse's internal `checkForQuiet`
-    // polling can re-fire one more time after `lighthouse()` resolves,
-    // and if we close the browser too eagerly its evaluate call hits
-    // a dead session and rejects unhandled. A short flush gives those
-    // tasks a chance to finish on a live session. The global
-    // unhandledRejection handler in src/index.js catches anything
-    // that still slips through.
+    // Give Lighthouse a moment to finish before closing the browser. Its own
+    // polling can fire once more after it reports being done, and closing too
+    // early makes that fail.
     if (browser) {
       await new Promise((r) => setTimeout(r, 100));
       await browser.close();

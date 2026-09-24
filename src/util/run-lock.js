@@ -1,18 +1,16 @@
 /**
  * Machine-level run lock.
  *
- * Two harness runs sharing one machine invalidate each other's numbers:
- * parallel npm installs, two dev servers, and doubled CPU load widen the
- * install/typecheck race window and skew Lighthouse. (Runs 2026-07-03/16.33
- * and 16.36 ran concurrently; 16.33's build failures were dominated by
- * toolchain flakes.) This lock makes that collision impossible: the second
- * run refuses to start, naming the run that owns the machine.
+ * Two runs on one machine spoil each other's numbers: parallel installs,
+ * two dev servers and double the CPU load widen the timing gaps that cause
+ * flaky failures and skew the performance results. This makes that
+ * impossible. The second run refuses to start and names the run that
+ * already holds the machine.
  *
- * Mechanics: `mkdir` without `recursive` is the atomic primitive (EEXIST on
- * contention — same pattern as buildTimestampedRunPath). The lock directory
- * holds an owner.json with the owner's PID; a lock whose PID is no longer
- * alive is stale and gets stolen. Release happens on normal exit and on
- * SIGINT/SIGTERM via handlers registered at acquire time.
+ * How it works: creating a directory either succeeds or fails, and cannot
+ * half-happen, which makes it a safe way to claim the lock. The directory
+ * holds the owning process ID. A lock whose process is gone is treated as
+ * stale and taken over.
  */
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";

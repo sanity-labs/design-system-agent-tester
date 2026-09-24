@@ -31,7 +31,8 @@
  * (or prefix the directory with `_`).
  */
 
-import briefGenerator from "./briefs/default.js";
+import appBriefGenerator from "./briefs/app.js";
+import componentBriefGenerator from "./briefs/component.js";
 
 export default {
   /** Human-readable name shown in report headings and log messages. */
@@ -40,8 +41,18 @@ export default {
   /** CSS selectors Puppeteer uses to detect whether the app has rendered. */
   appRootSelectors: ["#root", "#app", "#__next", "[data-reactroot]"],
 
-  /** Brief generator config — see `briefs/default.js` for the shape. */
-  briefGenerator,
+  /**
+   * Brief generators, one per `--mode`. `app` produces a whole-interface
+   * brief; `component` produces a single-component brief plus a demo page.
+   * See `briefs/app.js` and `briefs/component.js` for the shape.
+   *
+   * The older single `briefGenerator: …` key still works and is treated as
+   * `app`, so an existing config needs no change.
+   */
+  briefGenerators: {
+    app: appBriefGenerator,
+    component: componentBriefGenerator,
+  },
 
   /**
    * Optional. Override where tests are discovered (default: `tests/` at

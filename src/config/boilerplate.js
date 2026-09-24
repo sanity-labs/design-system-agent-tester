@@ -1,19 +1,14 @@
 /**
- * Prompt boilerplate that is *required* by the engine, not the user.
+ * Prompt text the harness itself needs, as opposed to anything a test
+ * author wants to say.
  *
- * The harness parses the agent's output for `---FILE: …---` blocks and a
- * `---FEEDBACK---` section. If those instructions aren't present in the
- * system prompt, the harness can't process the result. Same with the fix
- * cycle: the agent has to know what format to use when re-emitting files.
+ * The harness reads the agent's output for `---FILE: …---` blocks and a
+ * `---FEEDBACK---` section. Without instructions describing that format in
+ * the system prompt, there is nothing for it to read.
  *
- * Rather than make every user paste these into their test prompts, the
- * engine appends them automatically:
- *
- *   final system prompt   = <test-specific intro> + OUTPUT + FEEDBACK + BASE
- *   final fix prompt      = FIX_PREAMBLE + FIX_RULES_BASE + <optional extras>
- *
- * Users only write the test-specific bits (import rules, package versions,
- * MCP guidance, etc.). The boilerplate stays out of their view.
+ * Keeping this here means a test author writes only what is specific to
+ * their design system, and cannot accidentally leave out the parts that
+ * make the run work at all.
  */
 
 export const OUTPUT_FORMAT = `Your task is to produce ALL the files needed for a complete, working project. Output each file using the following format:
@@ -54,18 +49,9 @@ export const BASE_RULES = `Rules:
 - Make sure the project works with "npm install && npm run dev"
 - The FEEDBACK block must appear after all FILE blocks`;
 
-// Shift-left lint advisory (P4). A test's own lint rules, injected into the
-// generation system prompt so the agent authors to them the FIRST time
-// instead of tripping them and paying for the fix loop. Prevention is
-// cheaper than the repair budget and does not compete with it.
-//
-// The TEXT is supplied per test (`prompts.lintAdvisory`, a markdown file) —
-// this engine has no idea what any given design system's lint rules are, and
-// hardcoding one system's here would inject its component names and package
-// names into every other system's prompt. It previously held Sanity UI's
-// rules verbatim (`@sanity/icons`, `Box`/`Card`/`PressArea`, `density`,
-// `Responsive` arrays), which any non-Sanity test that set
-// `lintAdvisory: true` would silently have received.
+// A test's own lint rules, added to the generation prompt so the agent
+// writes code that follows them the first time instead of tripping them and
+// spending fix attempts. Preventing a problem is cheaper than repairing it.
 
 export const FIX_PREAMBLE = `You are an expert frontend developer debugging a web application that fails to render.
 
@@ -88,29 +74,22 @@ export const FIX_RULES_BASE = `Rules:
 - Make sure the project works with "npm install && npm run dev"`;
 
 /**
- * Compose a full system prompt by appending the engine-required output,
- * feedback, and base-rules blocks to the test's intro.
- *
- * @param {string} testIntro
- * @param {object} [opts]
- * @param {string} [opts.lintAdvisory] - The test's own lint-rule text (from
- *   `prompts.lintAdvisory`). Appended verbatim when non-empty; omitted
- *   entirely otherwise. See the LINT_ADVISORY note above for why the engine
- *   holds no rules of its own.
+ * Build the full system prompt: the test's own intro, then the blocks the
+ * harness needs.
  */
 export function composeSystem(testIntro, { lintAdvisory = "" } = {}) {
   const blocks = [testIntro.trim(), OUTPUT_FORMAT, FEEDBACK_FORMAT, BASE_RULES];
-  // Shift-left: only tests that supply advisory text get it, so an A/B keeps
-  // measuring linting's total contribution (prevention + gate) vs no lint.
+  // Only tests that supply this text get it, so comparing a lint-enabled
+  // test against a lint-free one measures everything linting contributes,
+  // both the advice up front and the gate afterwards.
   const advisory = typeof lintAdvisory === "string" ? lintAdvisory.trim() : "";
   if (advisory) blocks.push(advisory);
   return blocks.join("\n\n").trim();
 }
 
 /**
- * Compose a full fix-system prompt. The test can optionally provide
- * extra rules (e.g. "do not remove package X") that are appended after
- * the base rules.
+ * Build the full fix prompt. A test can add its own rules, which go after
+ * the standard ones.
  */
 export function composeFix(extraRules = "") {
   const trimmed = extraRules.trim();

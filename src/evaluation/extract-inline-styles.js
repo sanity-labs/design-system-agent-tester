@@ -52,11 +52,11 @@ const SVG_TAGS = new Set([
 const STYLE_PROP_RE = /(?:^|[,\n])\s*(?:'([^']+)'|"([^"]+)"|([a-zA-Z_$][a-zA-Z0-9_$]*))\s*:/g;
 
 /**
- * Single forward pass over one file's source. Tracks the current open JSX
- * tag so each `style={{` is attributed to its component without slicing
- * the whole prefix per match (the previous implementation did
- * `content.slice(0, m.index)` plus a backward-scanning lookahead on every
- * match — O(n²) on files full of `style={{`). Total work here is O(n).
+ * Read a file once from start to finish, keeping track of which JSX tag is
+ * currently open so each inline style can be credited to its component.
+ *
+ * Doing it in one pass matters: re-reading the text from the beginning at
+ * every match made this very slow on files with a lot of inline styles.
  */
 function scanFileContent(rawContent) {
   const content =

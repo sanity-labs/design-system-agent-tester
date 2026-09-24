@@ -6,14 +6,9 @@ import { EventEmitter } from "node:events";
 const MAX_STDERR_TAIL = 8 * 1024;
 
 /**
- * Pure conversion of MCP tool definitions to Anthropic SDK tool format,
- * dropping any name in `exclude`. Extracted from `getToolsForAnthropic` so
- * it's testable without spawning an MCP server. See that method's doc
- * comment for why exclusion exists.
- *
- * @param {Array<{name: string, description?: string, inputSchema?: object}>} tools
- * @param {string[]} [exclude]
- * @returns {Array<{name: string, description: string, input_schema: object}>}
+ * Convert MCP tool definitions to the shape the Anthropic SDK expects,
+ * dropping any name in `exclude`. Kept separate from the class method so it
+ * can be tested without starting a server.
  */
 export function toAnthropicTools(tools, exclude = []) {
   const excludeSet = new Set(exclude);
@@ -27,19 +22,15 @@ export function toAnthropicTools(tools, exclude = []) {
 }
 
 /**
- * Hard cap on the stdout reassembly buffer. A misbehaving server that
- * never emits a newline (or floods binary) would otherwise grow this
- * unbounded. 16 MB is far above any real JSON-RPC line.
+ * Cap on the buffer used to reassemble server output. A server that never
+ * sends a newline would otherwise grow it without limit. Far larger than
+ * any real message.
  */
 const MAX_BUFFER_BYTES = 16 * 1024 * 1024;
 
-// Module-level registry of every spawned MCP child process. The
-// per-client `stop()` runs from `finally` blocks and handles the
-// happy path, but Ctrl-C (SIGINT) and unhandled crashes skip
-// `finally` in Node, leaving children orphaned. Each run before this
-// fix accumulated several orphaned MCP server processes per run; over
-// weeks of usage that reached 45+ on the test machine. The handlers
-// below SIGTERM every tracked child on any abnormal exit signal.
+// Every MCP process started here. Each client's own `stop()` handles the
+// normal path, but Ctrl-C and crashes skip that and leave processes behind,
+// so they are tracked here and cleaned up on exit.
 const _liveProcs = new Set();
 let _exitHandlersInstalled = false;
 function _ensureExitHandlers() {
@@ -74,15 +65,14 @@ function _ensureExitHandlers() {
 }
 
 /**
- * Lightweight MCP stdio client.
+ * Small MCP client.
  *
- * Speaks JSON-RPC 2.0 over stdin/stdout to a local MCP server process.
- * Designed for the agent-tester harness — keeps things minimal:
+ * Talks JSON-RPC over stdin and stdout to a local MCP server process:
  *
  *   const client = new McpClient({ command: "uv", args: [...] });
  *   await client.start();
- *   const tools = await client.listTools();          // MCP tool defs
- *   const result = await client.callTool("list_components", { category: "layout" });
+ *   const tools = await client.listTools();
+ *   const text = await client.callToolText("name", { ... });
  *   await client.stop();
  */
 class McpClient extends EventEmitter {
@@ -245,18 +235,14 @@ class McpClient extends EventEmitter {
     return this._tools || [];
   }
 
-  /**
-   * Convert MCP tool definitions to Anthropic SDK tool format.
-   *
-   * @param {string[]} [exclude] - Tool names to drop entirely. A prompt
-   *   instruction telling the model not to call a tool is advisory — the
-   *   model can still see and invoke it, and its own schema `description`
-   *   (server-authored, outside this harness's control) may actively
-   *   encourage calling it regardless of what the system prompt says.
-   *   Omitting a tool from this list is the only way to *guarantee* the
-   *   model can't reach for it.
-   * @returns {Array<{name: string, description: string, input_schema: object}>}
-   */
+    /**
+     * Convert MCP tool definitions to the Anthropic SDK format.
+     *
+     * @param {string[]} [exclude] - Tool names to leave out. Telling a model
+     *   in the prompt not to use a tool is only advice: it can still see and
+     *   call it, and the tool's own description may encourage that. Removing
+     *   it from the list settles the matter.
+     */
   getToolsForAnthropic(exclude = []) {
     return toAnthropicTools(this.getTools(), exclude);
   }
@@ -385,18 +371,7 @@ class McpClient extends EventEmitter {
 }
 
 /**
- * Convenience factory: create, start, and return a connected McpClient
- * configured from a test's `mcp` block.
- *
- * @param {object} mcpConfig
- * @param {string} mcpConfig.command - Executable to spawn (e.g. "node", "uv")
- * @param {string[] | (directory: string) => string[]} mcpConfig.args
- * @param {string} [mcpConfig.defaultDirectory] - Where the server lives on disk
- * @param {object | (directory: string) => object} [mcpConfig.env] - Extra env vars
- * @param {object} [opts]
- * @param {string} [opts.directory] - Override mcpConfig.defaultDirectory
- * @param {number} [opts.requestTimeoutMs] - Per-request timeout
- * @returns {Promise<McpClient>}
+ * Create, start and return a connected client from a test's `mcp` block.
  */
 export async function createMcpClient(mcpConfig, opts = {}) {
   if (!mcpConfig || typeof mcpConfig !== "object") {

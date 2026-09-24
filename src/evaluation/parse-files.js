@@ -1,16 +1,14 @@
 import { extname, isAbsolute, normalize, sep } from "node:path";
 
 /**
- * Strip a markdown code fence wrapping the entire file content, if present.
+ * Remove a markdown code fence wrapped around a whole file, if there is one.
  *
- * Some agents emit file contents inside `---FILE: …---` blocks with a
- * markdown ```lang … ``` fence wrapped around the body. Written verbatim
- * to disk that produces, e.g., a `package.json` that literally starts
- * with `` ```json ``, which npm rejects with EJSONPARSE.
+ * Some agents put file contents inside a ```lang fence. Written to disk as
+ * is, that gives you a package.json starting with ```json, which npm
+ * refuses to read.
  *
- * This strips a *full-content* fence — opening on the first non-empty
- * line and closing on the last non-empty line. Inner code fences (e.g. a
- * README that intentionally documents fenced examples) are left alone.
+ * Only a fence around the entire content is removed, so a file that
+ * legitimately contains one is left alone.
  */
 function stripWrappingFence(content) {
   const trimmed = content.trimEnd();
@@ -35,10 +33,9 @@ function stripWrappingFence(content) {
 }
 
 /**
- * Agent-emitted file paths are untrusted input — a model steered by MCP
- * or doc content could emit `../../x` or an absolute path and read or
- * write outside the sandbox project directory. Accept only paths that
- * stay inside the project dir once normalized.
+ * File paths from the agent cannot be trusted. A model could emit `../../x`
+ * or an absolute path and read or write outside the project. Only accept
+ * paths that stay inside it.
  */
 export function isSafeRelativePath(filePath) {
   if (typeof filePath !== "string" || filePath.trim().length === 0) {
@@ -52,12 +49,10 @@ export function isSafeRelativePath(filePath) {
   if (normalized === ".." || normalized.startsWith(`..${sep}`) || normalized.startsWith("../")) {
     return false;
   }
-  // Refuse any `node_modules` segment. The harness preserves node_modules
-  // across fix-loop turns and `npm install` can materialize a `file:`/`link:`
-  // dependency there as a symlink pointing outside the sandbox; an agent
-  // path like `node_modules/<dep>/x` is lexically contained but would follow
-  // that symlink on write/read. The agent never legitimately writes into
-  // node_modules, so blocking the segment closes the vector at parse time.
+  // Reject anything under node_modules. Installed packages can include
+  // symlinks pointing outside the project, so a path that looks contained
+  // could still escape when followed. The agent never has a good reason to
+  // write there.
   const segments = normalized.split(/[\\/]/);
   if (segments.includes("node_modules")) {
     return false;
@@ -74,20 +69,14 @@ function rejectUnsafePaths(files) {
   });
 }
 
-// Agent output is untrusted and, in MCP mode, parseFiles runs on the
-// cumulative conversation buffer every turn. Cap the text before any
-// scanning so a crafted response (e.g. tens of thousands of unterminated
-// `---FILE:` anchors, or a code fence followed by a long whitespace run)
-// can't drive quadratic work and stall the single-threaded orchestrator.
-// Legitimate output is bounded by max_tokens (~128KB); this cap is far
-// above that.
+// Agent output is untrusted, and this runs over the whole conversation on
+// every turn. Cap the text first so a very large or deliberately awkward
+// response cannot slow the run to a crawl. Real output is well under this.
 export const MAX_PARSE_BYTES = 2_000_000;
 
 /**
- * Split `---FILE: path--- … ---END FILE---` blocks with linear-time
- * indexOf scanning instead of a lazy `[\s\S]*?`-to-far-terminator regex
- * (which backtracks to end-of-input at every anchor when terminators are
- * missing — O(n²) on adversarial input).
+ * Split the text into `---FILE: path--- … ---END FILE---` blocks by scanning
+ * for the markers directly, which stays fast even when markers are missing.
  */
 function parseFileBlocks(text) {
   const files = [];
@@ -97,15 +86,10 @@ function parseFileBlocks(text) {
   while (true) {
     const open = text.indexOf(OPEN, cursor);
     if (open === -1) break;
-    // The header line runs to its own terminating newline. A well-formed
-    // header ends the line in "---" (---FILE: path---) — tolerate one that
-    // omits it (---FILE: path) too: a model that emits real, well-formed
-    // file content but drops these three characters on the header line
-    // shouldn't have the whole block silently discarded. This also fixes a
-    // latent bug in the stricter version: searching forward for the next
-    // literal "---\n" (instead of stopping at the header's own newline)
-    // could walk past a missing trailing "---" into the file's own content
-    // and match one deep inside a later, unrelated block.
+    // The header runs to the end of its line. A well-formed one ends in
+    // "---", but a header missing those three characters is still accepted:
+    // the file content after it is usually fine, and dropping the whole block
+    // over the header would lose real work.
     const lineEnd = text.indexOf("\n", open + OPEN.length);
     if (lineEnd === -1) break;
     let headerLine = text.slice(open + OPEN.length, lineEnd);
@@ -115,16 +99,10 @@ function parseFileBlocks(text) {
 
     const close = text.indexOf(CLOSE, contentStart);
     if (close === -1) {
-      // The model forgot the closing marker — this happens occasionally in
-      // fix-loop replies (the system prompt shows the format, but a reply
-      // can still end without it). If no further `---FILE:` header follows,
-      // this is unambiguously the last block: treat the rest of the text as
-      // its content instead of silently discarding the whole reply, which
-      // otherwise wastes a full fix attempt re-submitting the unchanged,
-      // still-broken file. If another header DOES follow, the boundary
-      // between the two files is ambiguous — bail out rather than guess
-      // (also what keeps a flood of unterminated headers, as in the
-      // algorithmic-complexity test below, from being treated as one file).
+      // The closing marker is missing, which happens now and then in fix
+      // replies. If no further file header follows, this is clearly the last
+      // block, so treat the rest of the text as its content rather than
+      // throwing the whole reply away.
       const nextOpen = text.indexOf(OPEN, contentStart);
       if (nextOpen !== -1) break;
       const content = stripWrappingFence(text.slice(contentStart));
@@ -149,9 +127,9 @@ export function parseFiles(text) {
   const files = parseFileBlocks(text);
   let match;
 
-  // Fallback: try to parse fenced code blocks with filenames if no ---FILE--- blocks found.
-  // The `[ \t]*` (not `\s*`) around the marker avoids the ambiguous whitespace
-  // partitioning that made the old `\s*\n?\s*` group backtrack quadratically.
+  // If no `---FILE---` blocks were found, fall back to fenced code blocks
+  // with a filename comment on the first line. Matching spaces and tabs
+  // rather than any whitespace keeps the pattern from being slow.
   if (files.length === 0) {
     const fencedRegex =
       /```(?:[a-z]*)[ \t]*\n[ \t]*(?:\/\/|#|<!--)[ \t]*(?:file:[ \t]*)?(\S+?)(?:[ \t]*-->)?[ \t]*\n([\s\S]*?)```/g;

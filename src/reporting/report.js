@@ -1,5 +1,8 @@
 import { writeFile } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
+import { analyzeFailures } from "../evaluation/failure-taxonomy.js";
+import { analyzeJsxPropDensity } from "../evaluation/jsx-prop-density.js";
+import { analyzeTieredCoverage } from "../evaluation/tiered-coverage.js";
 import {
   analyzeAccessibility,
   analyzeComponents,
@@ -34,7 +37,18 @@ export {
 // report.js (notably report.test.js) keep working against one surface.
 export { jaccardSimilarity, mean, ngramSet, round, stdDev, sum } from "./stats.js";
 
-export async function generateReport(allResults, outputDir, promptText = null) {
+/**
+ * Build the report and write it next to the run's output.
+ *
+ * `reportName` sets the output filename, so a rebuilt report can be written
+ * alongside an existing one instead of replacing it.
+ */
+export async function generateReport(
+  allResults,
+  outputDir,
+  promptText = null,
+  { reportName = "report" } = {},
+) {
   const report = {
     generatedAt: new Date().toISOString(),
     promptText: promptText ?? null,
@@ -57,6 +71,9 @@ export async function generateReport(allResults, outputDir, promptText = null) {
 
     // Extract model name from the first valid iteration (all iterations use the same model)
     const model = validIterations.find((r) => r.model)?.model || null;
+    // Git state of the MCP/CLI checkout the arm ran against, so a later
+    // "did the tooling change?" question is answerable from the report.
+    const toolingCheckout = validIterations.find((r) => r.toolingCheckout)?.toolingCheckout || null;
     // Non-default request settings the runner applied for this model (e.g.
     // Fable's effort cap) — surfaced so tuned results aren't compared
     // against other models' default-settings results without knowing it.
@@ -74,6 +91,21 @@ export async function generateReport(allResults, outputDir, promptText = null) {
 
     // 3. Variance across implementations (pairwise similarity)
     const varianceAnalysis = computeCodeVariance(validIterations);
+    // The same comparison over built iterations only. A failed iteration often
+    // ends its repair loop cut down to a stub, and comparing a stub with a full
+    // app scores as a large inconsistency that is really a build failure,
+    // already counted elsewhere. Measured 2026-09-24 on shadcn: three stubs
+    // took Haiku's composition similarity from 0.44 (built only) to 0.23. The
+    // all-iterations figure stays as-is so trends against past reports hold.
+    const builtIterationsForVariance = validIterations.filter(iterationBuilt);
+    const varianceBuiltOnly =
+      builtIterationsForVariance.length === validIterations.length
+        ? { ...varianceAnalysis, iterationsCompared: validIterations.length, sameAsAll: true }
+        : {
+            ...computeCodeVariance(builtIterationsForVariance),
+            iterationsCompared: builtIterationsForVariance.length,
+            sameAsAll: false,
+          };
 
     // 4. Unique design system components
     const componentAnalysis = analyzeComponents(validIterations);
@@ -218,6 +250,7 @@ export async function generateReport(allResults, outputDir, promptText = null) {
 
     report.prompts[promptKey] = {
       model,
+      toolingCheckout,
       modelTuning,
       totalIterations: iterations.length,
       successfulIterations: validIterations.length,
@@ -245,6 +278,7 @@ export async function generateReport(allResults, outputDir, promptText = null) {
         all: locs,
       },
       codeVariance: varianceAnalysis,
+      codeVarianceBuiltOnly: varianceBuiltOnly,
       componentImports: componentAnalysis,
       screenshots,
       fixAttempts: {
@@ -283,6 +317,9 @@ export async function generateReport(allResults, outputDir, promptText = null) {
       tscFlakes: tscFlakeAnalysis,
       tsconfigErrors: tsconfigErrorAnalysis,
       repairLoop: analyzeRepairLoop(validIterations),
+      failures: analyzeFailures(validIterations),
+      tieredCoverage: analyzeTieredCoverage(validIterations),
+      jsxPropDensity: analyzeJsxPropDensity(validIterations),
       visualDiff: visualDiff || {
         pairwiseDiffs: [],
         averageDiffPercent: null,
@@ -342,7 +379,7 @@ export async function generateReport(allResults, outputDir, promptText = null) {
   }
 
   // Write JSON report
-  const jsonPath = resolve(outputDir, "report.json");
+  const jsonPath = resolve(outputDir, `${reportName}.json`);
   await writeFile(jsonPath, JSON.stringify(report, null, 2), "utf-8");
   console.log(`JSON report written to: ${jsonPath}`);
 
@@ -350,21 +387,15 @@ export async function generateReport(allResults, outputDir, promptText = null) {
   // the markdown report. Scoped to a single run so the tables can't pull
   // in labels (e.g. retired test names) from past runs sitting in
   // `output/`.
-  const runName = `${basename(dirname(outputDir))}/${basename(outputDir)}`;
-  const promptKeys = Object.keys(report.prompts);
-  let summarySection = "";
-  if (promptKeys.length > 0) {
-    try {
-      const summaryMd = renderSummary([{ name: runName, report }], promptKeys, outputDir);
-      summarySection = summaryMd + "\n---\n\n";
-    } catch (err) {
-      console.warn(`Failed to render run summary: ${err.message}`);
-    }
-  }
-
+  // The cross-test comparison tables are rendered once, by renderMarkdown.
+  // This used to also prepend `renderSummary`, which emits the same tables
+  // again under an "Aggregate Averages" heading — 115 duplicated lines and a
+  // second H1 in one document. That helper is for comparing SEVERAL runs
+  // (`npm run summarize`), where its spread columns mean something; averaging
+  // a single run against itself does not.
   // Write human-readable markdown report
-  const mdPath = resolve(outputDir, "report.md");
-  const markdown = summarySection + renderMarkdown(report, outputDir);
+  const mdPath = resolve(outputDir, `${reportName}.md`);
+  const markdown = renderMarkdown(report, outputDir);
   await writeFile(mdPath, markdown, "utf-8");
   console.log(`Markdown report written to: ${mdPath}`);
 

@@ -4,7 +4,6 @@
  * aggregation logic here — that lives in aggregators.js.
  */
 import { relative } from "node:path";
-import dsConfig from "../config/load.js";
 import { extractMetrics, formatBytes, renderMetricsTables } from "./aggregate.js";
 import { round } from "./stats.js";
 
@@ -114,13 +113,23 @@ export function renderMarkdown(report, runDir = null) {
 
   for (const [promptKey, data] of Object.entries(report.prompts)) {
     md += `---\n\n`;
-    md += `## Prompt: \`${promptKey}\`\n\n`;
+    md += `## Test: \`${promptKey}\`\n\n`;
     md += metricTable([
       data.model && ["Model", `\`${data.model}\``],
       // Non-default request settings the runner applied for this model —
       // results in this section were produced under these overrides, not
       // provider defaults.
       data.modelTuning && ["Model tuning", `\`${JSON.stringify(data.modelTuning)}\``],
+      // Which tooling checkout produced these numbers. `dirty` matters as
+      // much as the SHA: two runs can share a SHA and still have run
+      // different code, which is what made the 2026-09-22 output-token jump
+      // hard to attribute.
+      data.toolingCheckout && [
+        "Tooling checkout",
+        `\`${data.toolingCheckout.sha}\`${data.toolingCheckout.dirty ? " **+ uncommitted changes**" : ""}${
+          data.toolingCheckout.subject ? ` — ${sanitizeCell(data.toolingCheckout.subject)}` : ""
+        }`,
+      ],
       ["Total iterations", data.totalIterations],
       ["Successful", data.successfulIterations],
       ["Failed", data.failedIterations],
@@ -130,8 +139,9 @@ export function renderMarkdown(report, runDir = null) {
       data.unbuiltIterations ? ["Build failed", data.unbuiltIterations] : null,
     ]);
 
+    md += `### Outcome\n\n`;
     // Timing
-    md += `### Timing\n\n`;
+    md += `#### Timing\n\n`;
     md += metricTable([
       ["Average", cell(data.timing.averageSeconds, "s")],
       ["Std Dev", cell(data.timing.stdDevSeconds, "s")],
@@ -141,7 +151,7 @@ export function renderMarkdown(report, runDir = null) {
     ]);
 
     // LOC
-    md += `### Lines of Code\n\n`;
+    md += `#### Lines of code\n\n`;
     md += metricTable([
       ["Average", cell(data.linesOfCode.average)],
       ["Std Dev", cell(data.linesOfCode.stdDev)],
@@ -150,30 +160,10 @@ export function renderMarkdown(report, runDir = null) {
       ["All", data.linesOfCode.all.join(", ")],
     ]);
 
-    // Variance
-    md += `### Code Variance\n\n`;
-    const v = data.codeVariance;
-    if (v.averageContentSimilarity !== null) {
-      md += `**Average content similarity:** ${v.averageContentSimilarity} (0 = completely different, 1 = identical)\n\n`;
-      md += `**Average structural similarity:** ${v.averageStructuralSimilarity}\n\n`;
-
-      if (v.pairwiseContentSimilarity.length > 0) {
-        md += `| Pair | Content Similarity | Structural Similarity |\n|------|-------------------|----------------------|\n`;
-        for (let i = 0; i < v.pairwiseContentSimilarity.length; i++) {
-          const cp = v.pairwiseContentSimilarity[i];
-          const sp = v.pairwiseStructuralSimilarity[i];
-          md += `| Iter ${cp.iterA} vs ${cp.iterB} | ${cp.similarity} | ${sp.similarity} |\n`;
-        }
-        md += `\n`;
-      }
-    } else {
-      md += `${v.description}\n\n`;
-    }
-
     // Fix Attempts — per stage. A build fix means the app failed to
     // compile/render; an accessibility fix means it rendered but axe
     // flagged violations. One combined number would conflate the two.
-    md += `### Fix Attempts\n\n`;
+    md += `#### Fix attempts\n\n`;
     const f = data.fixAttempts;
     const bs = f.byStage;
     md += metricTable([
@@ -233,7 +223,7 @@ export function renderMarkdown(report, runDir = null) {
     // are NOT agent errors and were excluded from the fix loop.
     const flakes = data.tscFlakes;
     if (flakes && flakes.total > 0) {
-      md += `### Toolchain flakes (tsc)\n\n`;
+      md += `#### Toolchain flakes (tsc)\n\n`;
       md += metricTable([
         ["Transient tsc failures healed by retry", flakes.total],
         ["Iterations affected", `${flakes.affectedIterations}/${flakes.totalIterations}`],
@@ -243,7 +233,7 @@ export function renderMarkdown(report, runDir = null) {
 
     const npm = data.npmInstall;
     if (npm) {
-      md += `### npm install failures\n\n`;
+      md += `#### npm install failures\n\n`;
       md += metricTable([
         ["Total failures", npm.total],
         [
@@ -266,7 +256,7 @@ export function renderMarkdown(report, runDir = null) {
     // reference), not a flake and not an ordinary app-code bug.
     const tscfg = data.tsconfigErrors;
     if (tscfg && tscfg.total > 0) {
-      md += `### tsconfig / project-reference errors\n\n`;
+      md += `#### tsconfig / project-reference errors\n\n`;
       md += metricTable([
         ["Total errors", tscfg.total],
         [
@@ -285,10 +275,34 @@ export function renderMarkdown(report, runDir = null) {
       }
     }
 
+    // Failure taxonomy — why builds failed, and what recovery cost.
+    const fl = data.failures;
+    if (fl && fl.measured > 0) {
+      md += `#### Failure taxonomy\n\n`;
+      md += `Why iterations failed to build, and how many repair rounds the ones that succeeded needed.\n\n`;
+      const pct = (n) => (n == null ? "—" : `${(n * 100).toFixed(1)}%`);
+      md += metricTable([
+        ["Reached the build gate", fl.measured],
+        ["Never built", `${fl.failed} (${pct(fl.unrecoverableRate)})`],
+        ["Built on the first try", `${fl.turnsToGreen.cleanFirstTry}/${fl.turnsToGreen.measured}`],
+        ["Repair rounds (median)", cell(fl.turnsToGreen.median)],
+        ["Repair rounds (p90)", cell(fl.turnsToGreen.p90)],
+      ]);
+
+      if (fl.byCategory.length) {
+        md += `**Why they failed:**\n\n`;
+        md += `| Category | Count | Share of failures |\n|----------|-------|-------------------|\n`;
+        for (const c of fl.byCategory) {
+          md += `| ${c.label} | ${c.count} | ${pct(c.share)} |\n`;
+        }
+        md += `\n`;
+      }
+    }
+
     // Repair Loop — where iterations exited and residual lint/axe state.
     const rl = data.repairLoop;
     if (rl && rl.measured > 0) {
-      md += `### Repair Loop\n\n`;
+      md += `#### Repair loop\n\n`;
       md += `Where each iteration exited the ordered build → lint → accessibility loop, and how many violations remained.\n\n`;
       md += `| Exit stage | Iterations |\n|------------|------------|\n`;
       md += `| ✓ clean (all gates passed) | ${rl.stageCounts.clean} |\n`;
@@ -301,9 +315,25 @@ export function renderMarkdown(report, runDir = null) {
       md += `| Lint | ${cell(rl.lint.firstTryAvg)} | ${cell(rl.lint.residualAvg)} | ${cell(rl.lint.iterationsCleanFirstTry)}/${rl.measured} | ${rl.lint.iterationsWithResidual} |\n`;
       md += `| Accessibility (axe) | ${cell(rl.axe.firstTryAvg)} | ${cell(rl.axe.residualAvg)} | ${cell(rl.axe.iterationsCleanFirstTry)}/${rl.measured} | ${rl.axe.iterationsWithResidual} |\n\n`;
 
-      // Rule-level lint telemetry: which eslint rules agents trip most (first
-      // try = shift-left/autofix candidates) and which survive the sub-loop
-      // (residual = leaks to prioritise).
+      // Where lint findings went. First-try counts only what needed a person;
+      // the automatic fix pass removes the rest before that count is taken.
+      md += `**Lint breakdown** (per iteration):\n\n`;
+      md += metricTable([
+        ["Fixed automatically by the harness (avg)", cell(rl.lint.autofixedAvg)],
+        ["Needed a change, first try (avg)", cell(rl.lint.firstTryAvg)],
+        ["Fixed by the agent in a lint repair (avg)", cell(rl.lint.fixedByAgentAvg)],
+        ["Left in the final code (avg)", cell(rl.lint.residualAvg)],
+        [
+          "Iterations where the agent self-linted",
+          `${rl.lint.iterationsSelfLinted ?? 0}/${rl.measured}`,
+        ],
+        ["Agent lint calls (avg)", cell(rl.lint.selfLintCallsAvg)],
+        ["Iterations where the lint gate did not run", rl.lint.iterationsGateNotRun ?? 0],
+      ]);
+
+      // Which lint rules agents trip first time, and which survive the fix
+      // loop. The first group is worth preventing up front, the second is
+      // worth fixing.
       const ruleRows = (list) =>
         (list ?? [])
           .slice(0, 8)
@@ -318,19 +348,39 @@ export function renderMarkdown(report, runDir = null) {
         md += `\n`;
       }
 
+      // Jev only appears when the gate actually ran — it is off by default
+      // and paid, so a row of zeroes would wrongly read as "judged, nothing
+      // found" on the overwhelming majority of runs that never called it.
+      if (rl.jev?.measured) {
+        md += `**Jev gate** (design-system guidelines a linter cannot decide):\n\n`;
+        md += metricTable([
+          ["Iterations judged", rl.jev.measured],
+          ["Files judged", rl.jev.filesJudged],
+          ["Files not judged (API errors after retries)", rl.jev.filesUnjudged ?? 0],
+          ["Surfaceable departures, first try (avg)", rl.jev.firstTryAvg],
+          ["Surfaceable departures, residual (avg)", rl.jev.residualAvg],
+          ["Iterations clean first try", rl.jev.iterationsCleanFirstTry],
+          ["Iterations with residual departures", rl.jev.iterationsWithResidual],
+          ["Input tokens spent", rl.jev.inputTokens?.toLocaleString?.() ?? rl.jev.inputTokens],
+        ]);
+      }
+
       md += `**Per iteration:**\n\n`;
       for (const p of rl.perIteration) {
         const lintStr =
           p.firstTryLint != null ? `lint ${p.firstTryLint}→${p.residualLint ?? "?"}` : "lint n/a";
         const axeStr =
           p.firstTryAxe != null ? `axe ${p.firstTryAxe}→${p.residualAxe ?? "?"}` : "axe n/a";
-        md += `- **Iteration ${p.iteration}:** exit \`${p.exitStage}\`, ${p.fixAttempts} fix(es) — ${lintStr}, ${axeStr}\n`;
+        const jevStr =
+          p.firstTryJev != null ? `, jev ${p.firstTryJev}→${p.residualJev ?? "?"}` : "";
+        md += `- **Iteration ${p.iteration}:** exit \`${p.exitStage}\`, ${p.fixAttempts} fix(es) — ${lintStr}, ${axeStr}${jevStr}\n`;
       }
       md += `\n`;
     }
 
+    md += `### Design system use\n\n`;
     // Components
-    md += `### ${dsConfig.name} Components\n\n`;
+    md += `#### Design system components\n\n`;
     const c = data.componentImports;
     md += metricTable([
       ["Unique UI components", c.uniqueUIComponents],
@@ -357,141 +407,63 @@ export function renderMarkdown(report, runDir = null) {
       md += `\n`;
     }
 
-    // Feedback
-    md += `### ${dsConfig.name} Feedback\n\n`;
-    const fb = data.feedback;
-    if (fb.totalItems > 0) {
+    // Tiered coverage — composites vs primitives vs everything else.
+    const tc = data.tieredCoverage;
+    if (tc && tc.iterationsWithData > 0) {
+      md += `#### Design system coverage\n\n`;
+      md += `Share of rendered elements by tier, averaged per iteration. A rising primitive share with no matching composite share is the sign that agents are rebuilding components out of layout parts.\n\n`;
+      const pct = (n) => (n == null ? "—" : `${(n * 100).toFixed(1)}%`);
       md += metricTable([
-        ["Total feedback items", fb.totalItems],
-        ["Unique feedback items", fb.uniqueItems],
-        ["Avg per iteration", fb.averagePerIteration],
-        ["Iterations with feedback", `${fb.iterationsWithFeedback}/${data.successfulIterations}`],
+        ["Composite", pct(tc.shares.composite)],
+        ["Primitive", pct(tc.shares.primitive)],
+        ["Raw HTML / local", pct(tc.shares.raw)],
+        ["Elements per iteration", cell(Math.round(tc.averageElements))],
+        ["Iterations measured", tc.iterationsWithData],
       ]);
-
-      // Category breakdown
-      if (fb.categoriesSorted.length > 0) {
-        md += `**By category:**\n\n`;
-        md += `| Category | Count |\n|----------|-------|\n`;
-        for (const cat of fb.categoriesSorted) {
-          md += `| ${sanitizeCell(cat.category)} | ${cat.count} |\n`;
-        }
-        md += `\n`;
-      }
-
-      // Full line-item list per iteration
-      md += `**Full feedback by iteration:**\n\n`;
-      for (const p of fb.perIteration) {
-        if (p.items.length === 0) {
-          md += `**Iteration ${p.iteration}:** No feedback provided\n\n`;
-        } else {
-          md += `**Iteration ${p.iteration}** (${p.items.length} items):\n\n`;
-          for (const item of p.items) {
-            md += `- \`${sanitizeCode(item.category)}\` ${sanitizeText(item.text)}\n`;
-          }
-          md += `\n`;
-        }
-      }
-    } else {
-      md += `No feedback was provided by the agent across any iteration.\n\n`;
     }
 
-    // Accessibility
-    md += `### Accessibility\n\n`;
-    const a11y = data.accessibility;
-    if (a11y && a11y.iterationsWithResults > 0) {
-      md += metricTable([
-        ["Iterations tested", `${a11y.iterationsWithResults}/${a11y.totalIterations}`],
-        ["Total violations", a11y.totalViolations],
-        ["Avg violations/iteration", a11y.averageViolations],
-        ["Pass rate", a11y.passRate !== null ? round(a11y.passRate * 100, 1) + "%" : "—"],
-      ]);
+    // Prop density — how hard each component was leaned on. Reads against the
+    // coverage tiers above: same elements, different question.
+    const pd = data.jsxPropDensity;
+    if (pd && pd.iterationsWithData > 0) {
+      md += `#### Props per JSX tag\n\n`;
+      md += `Average number of props on each JSX tag, averaged per iteration. Coverage says which components agents reached for; this says how hard they leaned on each one. A high composite figure is the signal that a component is being pushed past what its defaults cover — an escape hatch improvised out of legitimate props, which no coverage share can show.\n\n`;
+      const rows = [["Overall", cell(round(pd.average, 2))]];
+      if (pd.byTier) {
+        rows.push(
+          ["Composite", cell(round(pd.byTier.composite.average, 2))],
+          ["Primitive", cell(round(pd.byTier.primitive.average, 2))],
+          ["Raw HTML / local", cell(round(pd.byTier.raw.average, 2))],
+          ["Allowlisted raw", cell(round(pd.byTier.allowlistedRaw.average, 2))],
+        );
+      }
+      rows.push(
+        ["Tags per iteration", cell(round(pd.averageTags, 0))],
+        ["Props per iteration", cell(round(pd.averageProps, 0))],
+        // A spread is one attribute carrying an unknown number of props, so a
+        // spread-heavy app deflates the average. Surfaced so that's visible.
+        ["Spread attributes (total)", pd.spreadTotal],
+        ["Iterations measured", pd.iterationsWithData],
+      );
+      md += metricTable(rows);
 
-      // Top violations
-      if (a11y.topViolations.length > 0) {
-        md += `**Most common violations (axe-core):**\n\n`;
-        md += `| Rule | Impact | Modes | Occurrences | Description |\n|------|--------|-------|-------------|-------------|\n`;
-        for (const v of a11y.topViolations.slice(0, 15)) {
-          const modes = sanitizeCell((v.modes || []).join(", ")) || "—";
-          md += `| \`${sanitizeCode(v.id)}\` | ${sanitizeCell(v.impact) || "—"} | ${modes} | ${v.count}/${a11y.iterationsWithResults} | ${sanitizeCell(v.description, 80)} |\n`;
+      // Per-component, pooled across iterations. Thresholded because an
+      // average over one or two instances says nothing.
+      const ranked = Object.entries(pd.byComponent)
+        .filter(([, v]) => v.tags >= 5)
+        .sort((a, b) => b[1].average - a[1].average);
+      if (ranked.length > 0) {
+        md += `**By component** (pooled across iterations, 5+ instances):\n\n`;
+        md += `| Component | Props / tag | Instances |\n|-----------|-------------|-----------|\n`;
+        for (const [name, v] of ranked) {
+          md += `| \`${sanitizeCode(name)}\` | ${cell(round(v.average, 2))} | ${v.tags} |\n`;
         }
         md += `\n`;
       }
-
-      // Per-iteration summary
-      md += `**Per iteration:**\n\n`;
-      md += `| Iteration | Violations | Light | Dark-only | Status |\n|-----------|-----------|-------|-----------|--------|\n`;
-      for (const p of a11y.perIteration) {
-        const status = p.passed ? "pass" : "fail";
-        md += `| ${p.iteration} | ${p.violations} | ${p.lightViolations} | ${p.darkOnlyViolations} | ${status} |\n`;
-      }
-      md += `\n`;
-    } else {
-      md += `No accessibility results collected for this prompt.\n\n`;
-    }
-
-    // Lighthouse
-    md += `### Lighthouse\n\n`;
-    const lh = data.lighthouse;
-    if (lh && lh.iterationsWithResults > 0) {
-      md += `| Metric | Median | Mean |\n|--------|--------|------|\n`;
-      const row = (label, med, mn, unit = "") => {
-        const m = med != null ? `${med}${unit}` : "—";
-        const a = mn != null ? `${mn}${unit}` : "—";
-        return `| ${label} | ${m} | ${a} |\n`;
-      };
-      md += row("FCP", lh.medianFcpMs, lh.meanFcpMs, "ms");
-      md += row("LCP", lh.medianLcpMs, lh.meanLcpMs, "ms");
-      md += row("TBT (Total Blocking Time)", lh.medianTbtMs, lh.meanTbtMs, "ms");
-      md += row("TTI (Time to Interactive)", lh.medianTtiMs, lh.meanTtiMs, "ms");
-      md += row("Speed Index", lh.medianSpeedIndex, lh.meanSpeedIndex, "ms");
-      md += row("Lighthouse score", lh.medianPerformanceScore, lh.meanPerformanceScore);
-      md += `\n`;
-      md += `_Median and mean both aggregate across ${lh.iterationsWithResults} iteration(s). Each iteration's number is itself the median (Median column) or mean (Mean column) of ${lh.runsPerIteration} intra-iteration Lighthouse runs. Large median↔mean gaps indicate a slow outlier in the lighthouse runs — usually CPU contention or a cold dev-server start._\n\n`;
-
-      if (lh.perIteration.length > 0) {
-        md += `**Per iteration** (median values):\n\n`;
-        md += `| Iteration | FCP (ms) | LCP (ms) | TBT (ms) | TTI (ms) | Score |\n`;
-        md += `|-----------|----------|----------|----------|----------|-------|\n`;
-        for (const p of lh.perIteration) {
-          const fcp = p.fcpMs ?? "N/A";
-          const lcp = p.lcpMs ?? "N/A";
-          const tbt = p.tbtMs ?? "N/A";
-          const tti = p.ttiMs ?? "N/A";
-          const score = p.performanceScore ?? "N/A";
-          md += `| ${p.iteration} | ${fcp} | ${lcp} | ${tbt} | ${tti} | ${score} |\n`;
-        }
-        md += `\n`;
-      }
-    } else {
-      md += `No Lighthouse data collected for this prompt.\n\n`;
-    }
-
-    // React Profiler
-    md += `### React Profiler\n\n`;
-    const rp = data.reactProfile;
-    if (rp && rp.iterationsWithResults > 0) {
-      md += metricTable([
-        ["Iterations measured", `${rp.iterationsWithResults}/${data.successfulIterations}`],
-        rp.avgMountMs !== null && ["Avg initial mount", `${rp.avgMountMs}ms`],
-        rp.avgCommitCount !== null && ["Avg commit count", rp.avgCommitCount],
-        rp.avgUpdateMs !== null && ["Avg update commit", `${rp.avgUpdateMs}ms`],
-        rp.avgMaxUpdateMs !== null && ["Avg slowest update", `${rp.avgMaxUpdateMs}ms`],
-      ]);
-
-      if (rp.perIteration.length > 0) {
-        md += `| Iteration | Mount (ms) | Commits | Avg update (ms) | Max update (ms) |\n`;
-        md += `|-----------|-----------|---------|-----------------|-----------------|\n`;
-        for (const p of rp.perIteration) {
-          md += `| ${p.iteration} | ${p.mountMs ?? "N/A"} | ${p.commitCount ?? "N/A"} | ${p.avgUpdateMs ?? "N/A"} | ${p.maxUpdateMs ?? "N/A"} |\n`;
-        }
-        md += `\n`;
-      }
-    } else {
-      md += `No React Profiler data collected for this prompt.\n\n`;
     }
 
     // Component Usage Counts
-    md += `### Component Usage Counts\n\n`;
+    md += `#### Component usage counts\n\n`;
     const cu = data.componentUsageCounts;
     if (cu && cu.totalAcrossIterations > 0) {
       md += metricTable([
@@ -523,7 +495,7 @@ export function renderMarkdown(report, runDir = null) {
     }
 
     // Inline Styles
-    md += `### Inline Styles\n\n`;
+    md += `#### Inline styles\n\n`;
     const is = data.inlineStyles;
     if (is && is.totalAcrossIterations > 0) {
       md += metricTable([
@@ -567,10 +539,127 @@ export function renderMarkdown(report, runDir = null) {
       md += `No inline style data available.\n\n`;
     }
 
+    md += `### Consistency\n\n`;
+    // Variance
+    md += `#### Structural variance\n\n`;
+    const v = data.codeVariance;
+    if (v.averageContentSimilarity !== null) {
+      // Element and composition lead: they compare parsed component trees, so
+      // they do not move with formatting or naming. Content is the older text
+      // measure, kept so the trend across past runs stays readable.
+      if (v.averageComponentChoiceSimilarity != null) {
+        md += `**Component choice:** ${v.averageComponentChoiceSimilarity} — did the runs reach for the same components? (0 = completely different, 1 = identical)\n\n`;
+        md += `**Composition:** ${v.averageCompositionSimilarity} — did they assemble them the same way?\n\n`;
+        md += `**Element detail:** ${v.averageElementSimilarity} — did they configure them the same way? Most sensitive of the three; every distinct combination of layout props counts separately.\n\n`;
+        // Failed iterations often end as stubs, which read as inconsistency.
+        // Shown only when at least one iteration failed, since otherwise the
+        // numbers are identical.
+        const vb = data.codeVarianceBuiltOnly;
+        if (vb && !vb.sameAsAll && vb.averageComponentChoiceSimilarity != null) {
+          md += `**Built iterations only** (${vb.iterationsCompared} of ${data.totalIterations}; failed builds excluded, since a failure that ended as a stub reads as inconsistency): component choice ${vb.averageComponentChoiceSimilarity} · composition ${vb.averageCompositionSimilarity} · element detail ${vb.averageElementSimilarity}\n\n`;
+        }
+      }
+      md += `**Average content similarity:** ${v.averageContentSimilarity} (raw text 3-grams — moves with formatting and naming)\n\n`;
+      md += `**Average file similarity:** ${v.averageStructuralSimilarity} (file paths present)\n\n`;
+
+      if (v.pairwiseContentSimilarity.length > 0) {
+        const hasNorm = v.pairwiseComponentChoiceSimilarity?.length > 0;
+        md += hasNorm
+          ? `| Pair | Component choice | Composition | Element detail | Content | Files |\n|------|------------------|-------------|----------------|---------|-------|\n`
+          : `| Pair | Content Similarity | File Similarity |\n|------|-------------------|----------------|\n`;
+        for (let i = 0; i < v.pairwiseContentSimilarity.length; i++) {
+          const cp = v.pairwiseContentSimilarity[i];
+          const sp = v.pairwiseStructuralSimilarity[i];
+          if (hasNorm) {
+            const np = v.pairwiseComponentChoiceSimilarity[i];
+            const xp = v.pairwiseCompositionSimilarity[i];
+            const ep = v.pairwiseElementSimilarity[i];
+            md += `| Iter ${cp.iterA} vs ${cp.iterB} | ${np.similarity} | ${xp.similarity} | ${ep.similarity} | ${cp.similarity} | ${sp.similarity} |\n`;
+          } else {
+            md += `| Iter ${cp.iterA} vs ${cp.iterB} | ${cp.similarity} | ${sp.similarity} |\n`;
+          }
+        }
+        md += `\n`;
+      }
+      if (v.normalizationAvailable === false) md += `${v.description}\n\n`;
+    } else {
+      md += `${v.description}\n\n`;
+    }
+
+    // Visual Diff
+    md += `#### Visual diff\n\n`;
+    const vd = data.visualDiff;
+    if (vd && vd.averageDiffPercent !== null) {
+      md += metricTable([
+        ["Average difference", `${vd.averageDiffPercent}%`],
+        ["Min difference", `${vd.minDiffPercent}%`],
+        ["Max difference", `${vd.maxDiffPercent}%`],
+        ["Iterations compared", vd.iterationsCompared],
+      ]);
+
+      md += `_${vd.description}_\n\n`;
+
+      if (vd.pairwiseDiffs.length > 0) {
+        md += `| Pair | Diff % | Changed Pixels | Total Pixels |\n|------|--------|----------------|---------------|\n`;
+        for (const d of vd.pairwiseDiffs) {
+          md += `| Iter ${d.iterA} vs ${d.iterB} | ${d.diffPercent}% | ${d.diffPixels.toLocaleString()} | ${d.totalPixels.toLocaleString()} |\n`;
+        }
+        md += `\n`;
+
+        // Link diff images if they exist
+        const withImages = vd.pairwiseDiffs.filter((d) => d.diffImagePath);
+        if (withImages.length > 0) {
+          md += `**Diff images:**\n\n`;
+          for (const d of withImages) {
+            const relPath = linkPath(d.diffImagePath, runDir);
+            md += `- Iter ${d.iterA} vs ${d.iterB}: ![diff](${relPath})\n`;
+          }
+          md += `\n`;
+        }
+      }
+    } else {
+      md += `${vd?.description || "No visual diff data available."}\n\n`;
+    }
+
+    md += `### Accessibility\n\n`;
+    // Accessibility
+    md += `#### Accessibility\n\n`;
+    const a11y = data.accessibility;
+    if (a11y && a11y.iterationsWithResults > 0) {
+      md += metricTable([
+        ["Iterations tested", `${a11y.iterationsWithResults}/${a11y.totalIterations}`],
+        ["Total violations", a11y.totalViolations],
+        ["Avg violations/iteration", a11y.averageViolations],
+        ["Pass rate", a11y.passRate !== null ? round(a11y.passRate * 100, 1) + "%" : "—"],
+      ]);
+
+      // Top violations
+      if (a11y.topViolations.length > 0) {
+        md += `**Most common violations (axe-core):**\n\n`;
+        md += `| Rule | Impact | Modes | Occurrences | Description |\n|------|--------|-------|-------------|-------------|\n`;
+        for (const v of a11y.topViolations.slice(0, 15)) {
+          const modes = sanitizeCell((v.modes || []).join(", ")) || "—";
+          md += `| \`${sanitizeCode(v.id)}\` | ${sanitizeCell(v.impact) || "—"} | ${modes} | ${v.count}/${a11y.iterationsWithResults} | ${sanitizeCell(v.description, 80)} |\n`;
+        }
+        md += `\n`;
+      }
+
+      // Per-iteration summary
+      md += `**Per iteration:**\n\n`;
+      md += `| Iteration | Violations | Light | Dark-only | Status |\n|-----------|-----------|-------|-----------|--------|\n`;
+      for (const p of a11y.perIteration) {
+        const status = p.passed ? "pass" : "fail";
+        md += `| ${p.iteration} | ${p.violations} | ${p.lightViolations} | ${p.darkOnlyViolations} | ${status} |\n`;
+      }
+      md += `\n`;
+    } else {
+      md += `No accessibility results collected for this prompt.\n\n`;
+    }
+
     // DOM Elements
     const dom = data.domElements;
     if (dom && dom.iterationsWithData > 0) {
-      md += `### DOM Elements\n\n`;
+      md += `#### DOM elements\n\n`;
       const domHasBytes = dom.htmlBytesAverage != null;
       md += metricTable([
         ["Average elements", dom.average],
@@ -606,7 +695,7 @@ export function renderMarkdown(report, runDir = null) {
     // Semantic HTML
     const sem = data.semanticHtml;
     if (sem && sem.iterationsWithData > 0) {
-      md += `### Semantic HTML\n\n`;
+      md += `#### Semantic HTML\n\n`;
       md += metricTable([
         ["Avg semantic elements", sem.avgSemanticCount],
         ["Avg generic elements (div/span)", sem.avgGenericCount],
@@ -659,54 +748,73 @@ export function renderMarkdown(report, runDir = null) {
       }
     }
 
-    // Visual Diff
-    md += `### Visual Diff\n\n`;
-    const vd = data.visualDiff;
-    if (vd && vd.averageDiffPercent !== null) {
-      md += metricTable([
-        ["Average difference", `${vd.averageDiffPercent}%`],
-        ["Min difference", `${vd.minDiffPercent}%`],
-        ["Max difference", `${vd.maxDiffPercent}%`],
-        ["Iterations compared", vd.iterationsCompared],
-      ]);
+    md += `### Performance\n\n`;
+    // Lighthouse
+    md += `#### Lighthouse\n\n`;
+    const lh = data.lighthouse;
+    if (lh && lh.iterationsWithResults > 0) {
+      md += `| Metric | Median | Mean |\n|--------|--------|------|\n`;
+      const row = (label, med, mn, unit = "") => {
+        const m = med != null ? `${med}${unit}` : "—";
+        const a = mn != null ? `${mn}${unit}` : "—";
+        return `| ${label} | ${m} | ${a} |\n`;
+      };
+      md += row("FCP", lh.medianFcpMs, lh.meanFcpMs, "ms");
+      md += row("LCP", lh.medianLcpMs, lh.meanLcpMs, "ms");
+      md += row("TBT (Total Blocking Time)", lh.medianTbtMs, lh.meanTbtMs, "ms");
+      md += row("TTI (Time to Interactive)", lh.medianTtiMs, lh.meanTtiMs, "ms");
+      md += row("Speed Index", lh.medianSpeedIndex, lh.meanSpeedIndex, "ms");
+      md += row("Lighthouse score", lh.medianPerformanceScore, lh.meanPerformanceScore);
+      md += `\n`;
+      md += `_Median and mean both aggregate across ${lh.iterationsWithResults} iteration(s). Each iteration's number is itself the median (Median column) or mean (Mean column) of ${lh.runsPerIteration} intra-iteration Lighthouse runs. Large median↔mean gaps indicate a slow outlier in the lighthouse runs — usually CPU contention or a cold dev-server start._\n\n`;
 
-      md += `_${vd.description}_\n\n`;
-
-      if (vd.pairwiseDiffs.length > 0) {
-        md += `| Pair | Diff % | Changed Pixels | Total Pixels |\n|------|--------|----------------|---------------|\n`;
-        for (const d of vd.pairwiseDiffs) {
-          md += `| Iter ${d.iterA} vs ${d.iterB} | ${d.diffPercent}% | ${d.diffPixels.toLocaleString()} | ${d.totalPixels.toLocaleString()} |\n`;
+      if (lh.perIteration.length > 0) {
+        md += `**Per iteration** (median values):\n\n`;
+        md += `| Iteration | FCP (ms) | LCP (ms) | TBT (ms) | TTI (ms) | Score |\n`;
+        md += `|-----------|----------|----------|----------|----------|-------|\n`;
+        for (const p of lh.perIteration) {
+          const fcp = p.fcpMs ?? "N/A";
+          const lcp = p.lcpMs ?? "N/A";
+          const tbt = p.tbtMs ?? "N/A";
+          const tti = p.ttiMs ?? "N/A";
+          const score = p.performanceScore ?? "N/A";
+          md += `| ${p.iteration} | ${fcp} | ${lcp} | ${tbt} | ${tti} | ${score} |\n`;
         }
         md += `\n`;
-
-        // Link diff images if they exist
-        const withImages = vd.pairwiseDiffs.filter((d) => d.diffImagePath);
-        if (withImages.length > 0) {
-          md += `**Diff images:**\n\n`;
-          for (const d of withImages) {
-            const relPath = linkPath(d.diffImagePath, runDir);
-            md += `- Iter ${d.iterA} vs ${d.iterB}: ![diff](${relPath})\n`;
-          }
-          md += `\n`;
-        }
       }
     } else {
-      md += `${vd?.description || "No visual diff data available."}\n\n`;
+      md += `No Lighthouse data collected for this prompt.\n\n`;
     }
 
-    // Screenshots
-    if (data.screenshots.length > 0) {
-      md += `### Screenshots\n\n`;
-      for (const ss of data.screenshots) {
-        const relPath = linkPath(ss, runDir);
-        md += `![${relPath}](${relPath})\n\n`;
+    // React Profiler
+    md += `#### React profiler\n\n`;
+    const rp = data.reactProfile;
+    if (rp && rp.iterationsWithResults > 0) {
+      md += metricTable([
+        ["Iterations measured", `${rp.iterationsWithResults}/${data.successfulIterations}`],
+        rp.avgMountMs !== null && ["Avg initial mount", `${rp.avgMountMs}ms`],
+        rp.avgCommitCount !== null && ["Avg commit count", rp.avgCommitCount],
+        rp.avgUpdateMs !== null && ["Avg update commit", `${rp.avgUpdateMs}ms`],
+        rp.avgMaxUpdateMs !== null && ["Avg slowest update", `${rp.avgMaxUpdateMs}ms`],
+      ]);
+
+      if (rp.perIteration.length > 0) {
+        md += `| Iteration | Mount (ms) | Commits | Avg update (ms) | Max update (ms) |\n`;
+        md += `|-----------|-----------|---------|-----------------|-----------------|\n`;
+        for (const p of rp.perIteration) {
+          md += `| ${p.iteration} | ${p.mountMs ?? "N/A"} | ${p.commitCount ?? "N/A"} | ${p.avgUpdateMs ?? "N/A"} | ${p.maxUpdateMs ?? "N/A"} |\n`;
+        }
+        md += `\n`;
       }
+    } else {
+      md += `No React Profiler data collected for this prompt.\n\n`;
     }
 
+    md += `### Cost\n\n`;
     // Token usage
     if (data.tokenUsage.avgInputTokens !== null) {
       const tu = data.tokenUsage;
-      md += `### Token Usage\n\n`;
+      md += `#### Token usage\n\n`;
       md += `Input breakdown (per iteration averages):\n\n`;
       md += `| Bucket | Avg / iter | Total | Billing weight |\n|---|---|---|---|\n`;
       md += `| Uncached input | ${tu.avgUncachedInputTokens ?? 0} | ${tu.totalUncachedInputTokens ?? 0} | 1.0× |\n`;
@@ -722,6 +830,54 @@ export function renderMarkdown(report, runDir = null) {
         const pct = round(tu.cacheHitRate * 100, 1);
         md += `_Cache hit rate: ${pct}% of input tokens served from cache (billed at ~10% of full input rate)._\n\n`;
       }
+    }
+    md += `### Artifacts\n\n`;
+    // Screenshots
+    if (data.screenshots.length > 0) {
+      md += `#### Screenshots\n\n`;
+      for (const ss of data.screenshots) {
+        const relPath = linkPath(ss, runDir);
+        md += `![${relPath}](${relPath})\n\n`;
+      }
+    }
+
+    md += `### Agent feedback\n\n`;
+    // Feedback
+    md += `#### Reported friction\n\n`;
+    const fb = data.feedback;
+    if (fb.totalItems > 0) {
+      md += metricTable([
+        ["Total feedback items", fb.totalItems],
+        ["Unique feedback items", fb.uniqueItems],
+        ["Avg per iteration", fb.averagePerIteration],
+        ["Iterations with feedback", `${fb.iterationsWithFeedback}/${data.successfulIterations}`],
+      ]);
+
+      // Category breakdown
+      if (fb.categoriesSorted.length > 0) {
+        md += `**By category:**\n\n`;
+        md += `| Category | Count |\n|----------|-------|\n`;
+        for (const cat of fb.categoriesSorted) {
+          md += `| ${sanitizeCell(cat.category)} | ${cat.count} |\n`;
+        }
+        md += `\n`;
+      }
+
+      // Full line-item list per iteration
+      md += `**Full feedback by iteration:**\n\n`;
+      for (const p of fb.perIteration) {
+        if (p.items.length === 0) {
+          md += `**Iteration ${p.iteration}:** No feedback provided\n\n`;
+        } else {
+          md += `**Iteration ${p.iteration}** (${p.items.length} items):\n\n`;
+          for (const item of p.items) {
+            md += `- \`${sanitizeCode(item.category)}\` ${sanitizeText(item.text)}\n`;
+          }
+          md += `\n`;
+        }
+      }
+    } else {
+      md += `No feedback was provided by the agent across any iteration.\n\n`;
     }
   }
 

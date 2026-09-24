@@ -1,40 +1,23 @@
 /**
- * Pure helpers for detecting *suspicious* tsc failures — failures whose
- * signature contradicts the on-disk project state, indicating a transient
- * toolchain condition (a config read that failed mid-flight, a node_modules
- * tree still settling) rather than real type errors in the agent's code.
+ * Spot tsc failures that are caused by the toolchain, not by the agent's code.
  *
- * The two signatures, and why they mean "tsc ran without the real config":
+ * Two error patterns mean tsc ran without the project's config, usually
+ * because the config or node_modules was still being written:
  *
- *   1. TS17004 "Cannot use JSX unless the '--jsx' flag is provided" (and its
- *      sibling TS6142) while tsconfig.json on disk parses and sets
- *      `compilerOptions.jsx`. tsc only reports this when it compiled WITHOUT
- *      the project's config — i.e. the config was unreadable at launch and
- *      tsc fell back to defaults.
+ *   1. It complains the `--jsx` flag is missing, but tsconfig.json on disk
+ *      does set `jsx`.
+ *   2. It says a module has no such export, but the export is right there in
+ *      the installed package.
  *
- *   2. TS2305/TS2724 "Module 'x' has no exported member 'Y'" where Y provably
- *      exists in the installed package's type declarations. Default (node10)
- *      resolution ignores modern `exports` maps, so a configless tsc run also
- *      produces this — as does a node_modules tree mid-install.
- *
- * Observed in runs 2026-07-01/08.23 (first tsc pass OK, identical pass 48s
- * later failed on every icon import) and at scale in 2026-07-03/16.33 (344×
- * TS17004 with valid tsconfig, 227× TS2305 on real exports) when two harness
- * runs shared one machine.
- *
- * validate.js uses these to decide whether a failed check earns ONE retry.
+ * validate.js uses these to allow one retry before calling the run a failure.
  */
 
 /**
- * Parse a tsconfig.json string leniently (JSONC comments and trailing commas
- * are legal in tsconfig). Returns the parsed object, or null when unreadable.
+ * Parse tsconfig.json, allowing the comments and trailing commas that are
+ * legal there. Returns null if it cannot be read.
  */
-// A real tsconfig.json is tiny (well under 100KB). The lenient comment-strip
-// path below uses a lazy `/\*[\s\S]*?\*\//` regex that backtracks quadratically
-// on a `/*`-flood with no closing `*/`; agent content is only bounded to ~2MB
-// at write time, so cap the lenient path here. Anything larger is not a real
-// config — treat it as unreadable rather than risk a stall in the type-check
-// preflight.
+// Real config files are tiny. Anything this large is not one, and stripping
+// comments from it is slow, so treat it as unreadable instead.
 const MAX_TSCONFIG_STRIP_BYTES = 256_000;
 
 export function parseTsconfig(raw) {
@@ -48,11 +31,9 @@ export function parseTsconfig(raw) {
   };
   const direct = tryParse(raw);
   if (direct) return direct;
-  // Only the lenient strip path is vulnerable to the `/*`-flood; direct
-  // JSON.parse above is linear. Bail rather than scan an oversized blob.
   if (raw.length > MAX_TSCONFIG_STRIP_BYTES) return null;
-  // Strip /* */ and // comments (not inside strings — good enough for
-  // tsconfig files, which rarely embed "//" in values), then trailing commas.
+  // Remove comments, then trailing commas. This also strips "//" inside
+  // string values, which tsconfig files almost never have.
   const stripped = raw
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/(^|[^:])\/\/.*$/gm, "$1")
@@ -60,35 +41,21 @@ export function parseTsconfig(raw) {
   return tryParse(stripped);
 }
 
-/** True when the error text carries the configless-fallback signature. */
+/** True when tsc reported the missing-jsx-flag error. */
 export function hasConfigFallbackSignature(errorText) {
   return /error TS17004:|error TS6142:/.test(errorText ?? "");
 }
 
 /**
- * TypeScript codes that mean "the project's tsconfig/project-reference
- * setup is broken" rather than "the app code has a bug". Distinct from the
- * flake signatures above: these are NOT transient — retrying tsc changes
- * nothing, because the tsconfig.json / tsconfig.app.json the agent wrote is
- * itself invalid. Observed in practice when a model imitates Vite's split
- * app/node tsconfig template (a `references` array) but gets a required
- * field wrong:
+ * Error codes that mean the agent wrote a broken tsconfig, rather than broken
+ * app code. Retrying will not help, because the config itself is wrong.
  *
- *   TS5023 — unknown compiler option
- *   TS5070 — an option conflicts with the resolved `moduleResolution`
- *            (typically `resolveJsonModule` with an unset `moduleResolution`,
- *            which defaults to `classic`)
- *   TS6053 — a referenced project file doesn't exist
- *   TS6305 — output file wasn't built from the expected source (project
- *            references misconfigured)
- *   TS6306 — a referenced project is missing `"composite": true`
- *   TS6310 — a referenced project may not disable emit
+ * These usually show up when a model copies Vite's split app/node config
+ * template and gets one of the required fields wrong.
  *
- * Tracked separately from ordinary build fixes so a run dominated by
- * scaffold mistakes isn't indistinguishable from one full of real app-code
- * bugs (bad imports, JSX errors, logic errors). Keep in sync with
- * `configErrorCodes` in pipeline/error-hints.js, which pairs these same
- * codes with their fix.
+ * Counted separately so a run full of scaffolding mistakes does not look the
+ * same as one full of real code bugs. Keep in step with `configErrorCodes` in
+ * pipeline/error-hints.js, which pairs each code with its fix.
  */
 const TSCONFIG_SCAFFOLD_ERROR_CODES = [
   "TS5023",
@@ -99,18 +66,18 @@ const TSCONFIG_SCAFFOLD_ERROR_CODES = [
   "TS6310",
 ];
 
-/** True when the error text carries a tsconfig/project-reference scaffold error. */
+/** True when the error text contains one of the broken-config codes above. */
 export function isTsconfigScaffoldError(errorText) {
   const text = errorText ?? "";
   return TSCONFIG_SCAFFOLD_ERROR_CODES.some((code) => text.includes(`error ${code}:`));
 }
 
 /**
- * Extract missing-export claims from tsc output. Handles both forms:
- *   TS2305: Module '"@scope/pkg"' has no exported member 'SomeExport'.
- *   TS2724: '"@scope/pkg"' has no exported member named 'SomeExport'. Did you mean …
- * Returns [{ module, member }], bare-package specifiers only (relative
- * imports are the agent's own files — never a toolchain flake).
+ * Pull the "module has no exported member" complaints out of tsc output.
+ * Returns [{ module, member }].
+ *
+ * Only package imports are returned. A relative import points at the agent's
+ * own files, which is a real mistake rather than a toolchain problem.
  */
 export function extractMissingExports(errorText) {
   const out = [];

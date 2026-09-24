@@ -12,7 +12,7 @@
  */
 
 import { delta, fmt, fmtInt, formatBytes, mdTable } from "./format.js";
-import { maxVal, mean, minVal, stdDev } from "./stats.js";
+import { maxVal, mean, minVal, stdDev, sum } from "./stats.js";
 
 export { delta, fmt, fmtInt, formatBytes, mdTable } from "./format.js";
 // Re-export the shared stats/format helpers so existing importers of
@@ -55,6 +55,37 @@ export function extractMetrics(data) {
     inlineTotal: data.inlineStyles?.totalAcrossIterations ?? null,
     inlineAvg: data.inlineStyles?.averagePerIteration ?? null,
     boxInline: data.inlineStyles?.byComponent?.Box ?? 0,
+    // Failure taxonomy (§3) — why builds failed and what recovery cost.
+    // Null on reports predating the metric, which renders as "—".
+    turnsToGreenMedian: data.failures?.turnsToGreen?.median ?? null,
+    turnsToGreenP90: data.failures?.turnsToGreen?.p90 ?? null,
+    unrecoverableRate: data.failures?.unrecoverableRate ?? null,
+    topFailureCategory: data.failures?.byCategory?.[0]?.label ?? null,
+    topFailureCount: data.failures?.byCategory?.[0]?.count ?? null,
+    // Tiered coverage (§5) — composite vs primitive is the rebuild signal.
+    compositeShare: data.tieredCoverage?.shares?.composite ?? null,
+    primitiveShare: data.tieredCoverage?.shares?.primitive ?? null,
+    rawShare: data.tieredCoverage?.shares?.raw ?? null,
+    coverageElements: data.tieredCoverage?.averageElements ?? null,
+    // Props per JSX tag (§5b) — the intensity behind the coverage shares. A
+    // rising composite figure with a flat composite share means the same
+    // components are being pushed harder, which is the escape-hatch signal.
+    // Null on reports predating the metric, which renders as "—".
+    propsPerTag: data.jsxPropDensity?.average ?? null,
+    propsPerTagComposite: data.jsxPropDensity?.byTier?.composite?.average ?? null,
+    propsPerTagPrimitive: data.jsxPropDensity?.byTier?.primitive?.average ?? null,
+    propsPerTagRaw: data.jsxPropDensity?.byTier?.raw?.average ?? null,
+    // Structural variance (repaired Jaccard). Element/composition compare
+    // parsed component trees; contentSimilarity is the older text measure.
+    componentChoiceSimilarity: data.codeVariance?.averageComponentChoiceSimilarity ?? null,
+    elementSimilarity: data.codeVariance?.averageElementSimilarity ?? null,
+    compositionSimilarity: data.codeVariance?.averageCompositionSimilarity ?? null,
+    contentSimilarity: data.codeVariance?.averageContentSimilarity ?? null,
+    // Built-only versions (null on reports predating them → "—").
+    componentChoiceSimilarityBuilt:
+      data.codeVarianceBuiltOnly?.averageComponentChoiceSimilarity ?? null,
+    compositionSimilarityBuilt: data.codeVarianceBuiltOnly?.averageCompositionSimilarity ?? null,
+    elementSimilarityBuilt: data.codeVarianceBuiltOnly?.averageElementSimilarity ?? null,
     axeTotal: data.accessibility?.totalViolations ?? null,
     axeAvg: data.accessibility?.averageViolations ?? null,
     // Median-based (robust to outliers in lighthouse runs)
@@ -117,6 +148,25 @@ const AGGREGATABLE_KEYS = [
   "boxInline",
   "axeTotal",
   "axeAvg",
+  // Failure taxonomy and tiered coverage. `topFailureCategory` is a string
+  // and cannot be averaged, so it is carried separately in aggregateMetrics.
+  "turnsToGreenMedian",
+  "turnsToGreenP90",
+  "unrecoverableRate",
+  "compositeShare",
+  "primitiveShare",
+  "rawShare",
+  "propsPerTag",
+  "propsPerTagComposite",
+  "propsPerTagPrimitive",
+  "propsPerTagRaw",
+  "componentChoiceSimilarity",
+  "elementSimilarity",
+  "compositionSimilarity",
+  "contentSimilarity",
+  "componentChoiceSimilarityBuilt",
+  "compositionSimilarityBuilt",
+  "elementSimilarityBuilt",
   "fcpMs",
   "fcpMsMean",
   "tbtMs",
@@ -163,7 +213,34 @@ export function aggregateMetrics(metricSets) {
     result[`${k}_max`] = maxVal(vals);
   }
   result.totalIterations = metricSets[0]?.totalIterations ?? null;
+  // The most common top-failure category across runs. A mean is meaningless
+  // for a label, and taking the first run's would hide a consistent pattern
+  // in all the others.
+  result.topFailureCategory = modeOf(metricSets.map((m) => m?.topFailureCategory));
+  result.topFailureCount = sum(
+    metricSets
+      .filter((m) => m?.topFailureCategory === result.topFailureCategory)
+      .map((m) => m?.topFailureCount ?? 0),
+  );
   return result;
+}
+
+/** The most frequent non-null value, or null when there are none. */
+function modeOf(values) {
+  const counts = new Map();
+  for (const v of values) {
+    if (v == null) continue;
+    counts.set(v, (counts.get(v) ?? 0) + 1);
+  }
+  let best = null;
+  let bestN = 0;
+  for (const [v, n] of counts) {
+    if (n > bestN) {
+      best = v;
+      bestN = n;
+    }
+  }
+  return best;
 }
 
 // ─── Headline metrics tables ────────────────────────────────────────
@@ -197,6 +274,97 @@ const METRIC_GROUPS = [
       // from buildsSucceeded / buildCleanOnFirstTry + totalIterations;
       // they have bespoke formatting and are appended automatically into
       // this group when iteration count is known.
+    ],
+  },
+  {
+    // Why builds failed, and what recovery cost. The category column names
+    // the single most common failure so the table points at a fix rather
+    // than only reporting a rate.
+    heading: "Failure taxonomy",
+    rows: [
+      [
+        "Never built",
+        "unrecoverableRate",
+        true,
+        null,
+        (agg) =>
+          agg?.unrecoverableRate == null ? "—" : `${(agg.unrecoverableRate * 100).toFixed(1)}%`,
+      ],
+      ["Repair rounds (median)", "turnsToGreenMedian", true, 1],
+      ["Repair rounds (p90)", "turnsToGreenP90", true, 1],
+      [
+        "Top failure",
+        "topFailureCategory",
+        undefined,
+        null,
+        (agg) =>
+          agg?.topFailureCategory ? `${agg.topFailureCategory} (${agg.topFailureCount})` : "—",
+      ],
+    ],
+  },
+  {
+    // Composite vs primitive is the point of this table. A high primitive
+    // share with a low composite share means agents are rebuilding
+    // components out of layout parts instead of using the real ones.
+    heading: "Design system coverage",
+    rows: [
+      [
+        "Composite",
+        "compositeShare",
+        false,
+        null,
+        (agg) => (agg?.compositeShare == null ? "—" : `${(agg.compositeShare * 100).toFixed(1)}%`),
+      ],
+      [
+        "Primitive",
+        "primitiveShare",
+        true,
+        null,
+        (agg) => (agg?.primitiveShare == null ? "—" : `${(agg.primitiveShare * 100).toFixed(1)}%`),
+      ],
+      [
+        "Raw HTML / local",
+        "rawShare",
+        true,
+        null,
+        (agg) => (agg?.rawShare == null ? "—" : `${(agg.rawShare * 100).toFixed(1)}%`),
+      ],
+      // The shares are proportions, so they say nothing about how much was
+      // built. This is the denominator behind them.
+      ["Elements / iter", "coverageElements", false, 0],
+    ],
+  },
+  {
+    // The shares above say which components were used. These say how hard
+    // each was leaned on. `lowerIsBetter` on all of them: in a token-driven
+    // system, needing fewer props to get the intended result means the
+    // defaults fit the job. It is a weak signal on its own — a richer app
+    // legitimately passes more props — so read it against the coverage
+    // shares and the element count, not alone.
+    heading: "Props per JSX tag",
+    rows: [
+      ["Overall", "propsPerTag", true, 2],
+      ["Composite", "propsPerTagComposite", true, 2],
+      ["Primitive", "propsPerTagPrimitive", true, 2],
+      ["Raw HTML / local", "propsPerTagRaw", true, 2],
+    ],
+  },
+  {
+    // How much the same prompt varies run to run. Element and composition
+    // compare parsed component trees, so they measure real differences in
+    // what was built. Content is the older text measure and is kept only so
+    // the trend against past runs stays readable.
+    heading: "Structural variance",
+    rows: [
+      ["Component choice", "componentChoiceSimilarity", false, 3],
+      ["Composition", "compositionSimilarity", false, 3],
+      ["Element detail", "elementSimilarity", false, 3],
+      ["Content (legacy text)", "contentSimilarity", false, 3],
+      // Same measures with failed iterations left out — a failure that ended
+      // as a stub otherwise reads as inconsistency.
+      ["Component choice (built only)", "componentChoiceSimilarityBuilt", false, 3],
+      ["Composition (built only)", "compositionSimilarityBuilt", false, 3],
+      ["Element detail (built only)", "elementSimilarityBuilt", false, 3],
     ],
   },
   {

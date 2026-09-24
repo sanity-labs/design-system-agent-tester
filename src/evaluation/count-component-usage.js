@@ -1,17 +1,12 @@
 import { isJsxFile } from "./parse-files.js";
 
 /**
- * Count actual JSX usage instances of each component across source files.
- * Unlike `extractComponentImports` (which tracks unique imported names),
- * this counts every <ComponentName occurrence in JSX — giving a total
- * usage count per component type.
+ * Count how many times each component is used across the source files.
  *
- * Returns an object:
- * {
- *   total: number,                       // total JSX component opens
- *   byComponent: { ComponentName: n },   // count per component name
- *   perFile: [{ path, total, byComponent }]
- * }
+ * `extractComponentImports` lists which components were imported;
+ * this counts every place one is actually written in JSX.
+ *
+ * Returns { total, byComponent, perFile }.
  */
 export function extractComponentUsageCounts(files) {
   const globalByComponent = {};
@@ -24,15 +19,14 @@ export function extractComponentUsageCounts(files) {
     const fileByComponent = {};
     let fileTotal = 0;
 
-    // Match every JSX opening tag: <ComponentName or <ComponentName.Sub
-    // Only capture PascalCase names (components) and lowercase HTML tags
-    // we care about (skip plain div/span/etc unless explicitly wanted).
+    // Match every JSX opening tag, including compound names like
+    // `<Menu.Item`. Only capitalised names count as components.
     //
     // Two guards keep TypeScript generics out of the count:
-    //  - the `<` must not be preceded by an identifier character, which
-    //    excludes `useState<FilterState>`, `Promise<Response>`, etc.
-    //  - the name must be followed by whitespace, `/`, or `>`, which
-    //    excludes generic parameter lists like `<T,>(x) => ...`.
+    //  - the `<` must not follow an identifier character, which rules out
+    //    `useState<Filter>` and `Promise<Response>`
+    //  - the name must be followed by whitespace, `/` or `>`, which rules out
+    //    parameter lists like `<T,>(x) => ...`
     const tagRegex = /(?<![A-Za-z0-9_$])<([A-Z][A-Za-z0-9.]*)(?=[\s/>])/g;
     let m;
 

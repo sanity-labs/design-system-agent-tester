@@ -1,18 +1,10 @@
 /**
- * Shared statistics primitives for the reporting layer.
+ * Shared maths for the reporting layer.
  *
- * This is the single source of truth for mean / stdDev / sum / min / max /
- * round and the n-gram Jaccard helpers. Before this module, `report.js` and
- * `aggregate.js` each defined their own `mean`/`stdDev` with conflicting
- * empty-input semantics (0 vs null) and one variant that did NOT filter
- * non-finite values — so a single missing metric poisoned the whole average
- * with NaN, which then rendered literally as "NaN" in the report.
- *
- * The rules here:
- *   - All reducers IGNORE non-finite entries (null / undefined / NaN).
- *   - An average / spread with no usable data is `null` (renders as "—"),
- *     never 0 (which reads as a real measurement of zero).
- *   - `sum` of nothing is 0 (a count, not an average).
+ * The one place mean, stdDev, sum, min, max, round and the Jaccard helpers
+ * are defined. They used to be duplicated across report.js and aggregate.js
+ * with slightly different rules for empty input, so the same run could be
+ * summarised two different ways.
  */
 
 /** Keep only finite numbers from an array. */
@@ -33,8 +25,8 @@ export function sum(arr) {
 }
 
 /**
- * Population standard deviation of the finite values. Needs at least two
- * data points to be meaningful — fewer returns null.
+ * Standard deviation. Needs at least two values to mean anything, so fewer
+ * returns null.
  */
 export function stdDev(arr) {
   const valid = finite(arr);
@@ -57,10 +49,8 @@ export function maxVal(arr) {
 }
 
 /**
- * Round to `decimals` places. Non-finite input (null / undefined / NaN)
- * returns null so it renders as "—" and never leaks the literal "NaN"
- * into a report (and `JSON.stringify` keeps it as null, not silently
- * dropping a NaN to null only in JSON).
+ * Round to `decimals` places. Anything that is not a number becomes null,
+ * so a report shows a dash rather than the word NaN.
  */
 export function round(n, decimals = 3) {
   if (typeof n !== "number" || !Number.isFinite(n)) return null;
@@ -68,17 +58,16 @@ export function round(n, decimals = 3) {
 }
 
 /**
- * Mean of the finite values, rounded. Empty/all-non-finite → null (because
- * `mean` returns null and `round` passes null through). Saves callers the
- * `arr.length ? round(mean(arr)) : null` dance.
+ * Mean of the numbers, rounded. Returns null for empty input, so callers do
+ * not have to check first.
  */
 export function roundedMean(arr, decimals = 3) {
   return round(mean(arr), decimals);
 }
 
 /**
- * Build a set of character n-grams from a string (whitespace collapsed).
- * Used by the code-variance metric.
+ * Break a string into overlapping character runs, for the code-variance
+ * metric.
  */
 export function ngramSet(text, n) {
   const set = new Set();

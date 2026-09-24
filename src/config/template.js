@@ -1,20 +1,13 @@
 /**
- * Minimal mustache-style template renderer.
+ * Small template renderer.
  *
- * Supports the three constructs every test prompt actually needs and
- * nothing more:
+ * Supports only what the test prompts need:
  *
- *   {{path.to.value}}                — substitute a value (dot paths OK)
- *   {{#if path}}…{{/if}}             — render only if value is truthy
- *   {{#unless path}}…{{/unless}}     — render only if value is falsy
+ *   {{path.to.value}}         insert a value, dot paths allowed
+ *   {{#if path}}…{{/if}}      include only when the value is set
+ *   {{#unless path}}…{{/unless}}  include only when it is not
  *
- * Conditionals are processed before variable substitution so that
- * `{{undefined.thing}}` inside a falsy branch doesn't trigger an error.
- *
- * No nested conditionals, no loops, no helpers — by design. If a test
- * needs derived values (lists joined as comma-separated strings, markdown
- * tables, etc.), it provides a `derive(ctx)` function in its test file
- * that returns extra fields to merge into the render context.
+ * Conditionals cannot be nested.
  */
 
 const IF_RE = /\{\{\s*#if\s+([^}]+?)\s*\}\}([\s\S]*?)\{\{\s*\/if\s*\}\}/g;
@@ -32,15 +25,10 @@ function resolve(ctx, path) {
 }
 
 /**
- * Render a template string against a context object.
+ * Fill in a template from a context object.
  *
- * Throws if a `{{path}}` references a value that is `undefined` or
- * `null` (typos surface immediately instead of producing the literal
- * string "undefined" in the prompt).
- *
- * @param {string} template
- * @param {object} ctx
- * @returns {string}
+ * Throws if a `{{path}}` has no value, so a typo shows up straight away
+ * instead of putting the word "undefined" in the prompt.
  */
 export function render(template, ctx) {
   if (typeof template !== "string") {
@@ -53,11 +41,9 @@ export function render(template, ctx) {
 
   out = out.replace(IF_RE, (_, path, body) => (resolve(ctx, path) ? body : ""));
 
-  // The conditional regexes are flat and non-nested by design. If any
-  // `{{#if}}` / `{{/if}}` / `{{#unless}}` / `{{/unless}}` token survives the
-  // two passes above, the template nested or unbalanced its conditionals —
-  // which would otherwise render as corrupted output (a stray `{{/if}}`) or a
-  // misleading "unknown value" error. Fail loudly instead.
+  // Conditionals cannot nest. If any `{{#if}}` or `{{#unless}}` tag is still
+  // here after the passes above, the template nested or failed to close one,
+  // which would otherwise end up in the prompt as stray text.
   const stray = out.match(/\{\{\s*[#/](?:if|unless)\b[^}]*\}\}/);
   if (stray) {
     throw new Error(

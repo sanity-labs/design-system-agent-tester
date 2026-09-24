@@ -6,6 +6,7 @@
  * Pure data → data; no markdown rendering and no file I/O. Rendering lives
  * in render-markdown.js; the stats primitives live in stats.js.
  */
+import { normalizeIteration } from "../evaluation/normalize-structure.js";
 import { jaccardSimilarity, mean, ngramSet, round, roundedMean } from "./stats.js";
 
 /** Add the counts in `source` into `target` (mutates target). */
@@ -93,12 +94,49 @@ export function computeCodeVariance(iterations) {
   }
   const avgStructural = mean(structuralPairs.map((p) => p.similarity));
 
+  // Normalized comparison: parse each iteration down to its component tree
+  // and compare that instead of the source text. Renaming a variable,
+  // reordering attributes, reflowing a line or adding a comment all leave
+  // these numbers unchanged, which the text-based number above cannot claim.
+  const normalized = iterations.map((iter) =>
+    normalizeIteration(iter.files, { dsComponents: iter.componentImports ?? [] }),
+  );
+  const canNormalize = normalized.every((n) => n !== null);
+
+  const namePairs = [];
+  const elementPairs = [];
+  const compositionPairs = [];
+  if (canNormalize) {
+    for (let i = 0; i < normalized.length; i++) {
+      for (let j = i + 1; j < normalized.length; j++) {
+        const ids = { iterA: iterations[i].iteration, iterB: iterations[j].iteration };
+        const sim = (key) => round(jaccardSimilarity(normalized[i][key], normalized[j][key]));
+        namePairs.push({ ...ids, similarity: sim("names") });
+        compositionPairs.push({ ...ids, similarity: sim("composition") });
+        elementPairs.push({ ...ids, similarity: sim("elements") });
+      }
+    }
+  }
+  const avgOf = (list) => (canNormalize ? round(mean(list.map((p) => p.similarity))) : null);
+
   return {
     pairwiseContentSimilarity: pairs,
     averageContentSimilarity: round(avgSim),
     pairwiseStructuralSimilarity: structuralPairs,
     averageStructuralSimilarity: round(avgStructural),
-    description: `Content similarity based on 3-gram Jaccard index (0 = completely different, 1 = identical). Structural similarity based on file paths.`,
+    // The repaired metric, at three granularities. Null when TypeScript is
+    // unavailable, so the report shows "—" rather than quietly falling back
+    // to the text number.
+    pairwiseComponentChoiceSimilarity: namePairs,
+    averageComponentChoiceSimilarity: avgOf(namePairs),
+    pairwiseCompositionSimilarity: compositionPairs,
+    averageCompositionSimilarity: avgOf(compositionPairs),
+    pairwiseElementSimilarity: elementPairs,
+    averageElementSimilarity: avgOf(elementPairs),
+    normalizationAvailable: canNormalize,
+    description: canNormalize
+      ? "Component choice, composition and element detail all compare parsed component trees, so formatting, naming and how the app is split into local components do not affect them. Element detail is the most sensitive — every distinct combination of layout props is its own token — so read it as a drill-down. Content similarity is the older 3-gram text measure, kept for trend continuity; it moves with formatting. File similarity compares file paths."
+      : "Normalized comparison unavailable (TypeScript could not be loaded). Content similarity is a 3-gram text measure and moves with formatting and naming.",
   };
 }
 
@@ -218,7 +256,7 @@ export function analyzeComponents(iterations) {
  */
 export function analyzeRepairLoop(iterations) {
   const withStage = iterations.filter((r) => r.exitStage != null);
-  const stageCounts = { clean: 0, lint: 0, build: 0, accessibility: 0 };
+  const stageCounts = { clean: 0, lint: 0, build: 0, accessibility: 0, jev: 0 };
   for (const r of withStage) {
     if (stageCounts[r.exitStage] != null) stageCounts[r.exitStage] += 1;
   }
@@ -228,10 +266,9 @@ export function analyzeRepairLoop(iterations) {
   const firstTryAxe = num("firstTryAxe");
   const residualAxe = num("residualAxe");
   const cleanFirstTry = (ft) => iterations.filter((r) => r[ft] === 0).length;
-  // Rule-level telemetry: sum eslint ruleId → count across iterations, so the
-  // report shows WHICH rules the agents actually trip (first-try) and which
-  // survive the lint sub-loop (residual). Drives rule-triage: high first-try
-  // rules are shift-left/autofix candidates; high residual rules are leaks.
+  // Count lint errors by rule, so the report shows which rules agents trip
+  // first time and which ones survive the fix loop. Rules tripped often are
+  // worth preventing up front; rules that survive are worth fixing.
   const sumRules = (key) => {
     const totals = {};
     for (const r of iterations) {
@@ -245,6 +282,18 @@ export function analyzeRepairLoop(iterations) {
   };
   const topFirstTryRules = sumRules("firstTryLintRules");
   const topResidualRules = sumRules("residualLintRules");
+  // Jev is `null` on every iteration unless the gate ran — it calls a paid
+  // API and is off by default. `measured` therefore doubles as "did this run
+  // pay for judgments at all", which is why it is reported rather than
+  // inferred from a zero count.
+  const firstTryJev = num("firstTryJev");
+  const residualJev = num("residualJev");
+  const jevJudged = num("jevJudged");
+  const lintAutofixed = num("lintAutofixed");
+  const selfLintCalls = num("selfLintCalls");
+  const lintGateNotRun = iterations.filter((r) => r.lintGateStatus === "error" || r.lintGateStatus === "unavailable").length;
+  const jevUnjudged = num("jevUnjudged");
+  const jevInputTokens = num("jevInputTokens");
   return {
     measured: withStage.length,
     totalIterations: iterations.length,
@@ -257,6 +306,8 @@ export function analyzeRepairLoop(iterations) {
       residualLint: r.residualLint ?? null,
       firstTryAxe: r.firstTryAxe ?? null,
       residualAxe: r.residualAxe ?? null,
+      firstTryJev: r.firstTryJev ?? null,
+      residualJev: r.residualJev ?? null,
     })),
     lint: {
       firstTryAvg: roundedMean(firstTryLint),
@@ -265,12 +316,31 @@ export function analyzeRepairLoop(iterations) {
       iterationsWithResidual: residualLint.filter((n) => n > 0).length,
       topFirstTryRules,
       topResidualRules,
+      // What the first-try count is made of, and what happened to it.
+      autofixedAvg: roundedMean(lintAutofixed),
+      fixedByAgentAvg:
+        firstTryLint.length && residualLint.length
+          ? roundedMean(iterations.filter((r) => r.firstTryLint != null && r.residualLint != null).map((r) => r.firstTryLint - r.residualLint))
+          : null,
+      iterationsSelfLinted: selfLintCalls.filter((n) => n > 0).length,
+      selfLintCallsAvg: roundedMean(selfLintCalls),
+      iterationsGateNotRun: lintGateNotRun,
     },
     axe: {
       firstTryAvg: roundedMean(firstTryAxe),
       residualAvg: roundedMean(residualAxe),
       iterationsCleanFirstTry: firstTryAxe.length ? cleanFirstTry("firstTryAxe") : null,
       iterationsWithResidual: residualAxe.filter((n) => n > 0).length,
+    },
+    jev: {
+      measured: firstTryJev.length,
+      firstTryAvg: roundedMean(firstTryJev),
+      residualAvg: roundedMean(residualJev),
+      iterationsCleanFirstTry: firstTryJev.length ? cleanFirstTry("firstTryJev") : null,
+      iterationsWithResidual: residualJev.filter((n) => n > 0).length,
+      filesJudged: jevJudged.reduce((a, b) => a + b, 0),
+      filesUnjudged: jevUnjudged.reduce((a, b) => a + b, 0),
+      inputTokens: jevInputTokens.reduce((a, b) => a + b, 0),
     },
   };
 }

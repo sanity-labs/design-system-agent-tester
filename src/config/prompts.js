@@ -226,8 +226,7 @@ function validateTest(raw, dirName, testDir) {
       throw new Error(`${where} ("${raw.label}"): \`mcp.toolPrefix\` must be a string.`);
     }
     // Repair turns get the server's tools by default. Set false to make the
-    // fix loop tool-free — see the `runRepair` doc comment for why the
-    // default flipped on 2026-09-09.
+    // fix loop tool-free.
     if (raw.mcp.fixLoop !== undefined && typeof raw.mcp.fixLoop !== "boolean") {
       throw new Error(`${where} ("${raw.label}"): \`mcp.fixLoop\` must be a boolean.`);
     }
@@ -417,6 +416,45 @@ function validateTest(raw, dirName, testDir) {
     }
   }
 
+  if (raw.coverage !== undefined && raw.coverage !== null) {
+    if (typeof raw.coverage !== "object" || Array.isArray(raw.coverage)) {
+      throw new Error(
+        `${where} ("${raw.label}"): \`coverage\`, when set, must be an object with \`primitives\` and/or \`rawAllowlist\` arrays.`,
+      );
+    }
+    for (const key of ["primitives", "rawAllowlist"]) {
+      const value = raw.coverage[key];
+      if (value === undefined) continue;
+      if (!Array.isArray(value) || value.some((n) => typeof n !== "string" || !n.trim())) {
+        throw new Error(
+          `${where} ("${raw.label}"): \`coverage.${key}\`, when set, must be an array of non-empty strings.`,
+        );
+      }
+    }
+  }
+
+  if (raw.jev !== undefined && raw.jev !== null) {
+    if (typeof raw.jev !== "object" || Array.isArray(raw.jev)) {
+      throw new Error(`${where} ("${raw.label}"): \`jev\`, when set, must be an object.`);
+    }
+    // `toolDir` is required when enabled: the gate imports the judge from
+    // there, and a missing path would otherwise fail silently mid-run as an
+    // "unavailable" gate rather than at config load.
+    if (raw.jev.enabled && !raw.jev.toolDir) {
+      throw new Error(
+        `${where} ("${raw.label}"): \`jev.enabled\` requires \`jev.toolDir\` — the path to the jev judge.`,
+      );
+    }
+    if (
+      raw.jev.maxFixes !== undefined &&
+      (!Number.isInteger(raw.jev.maxFixes) || raw.jev.maxFixes < 0)
+    ) {
+      throw new Error(
+        `${where} ("${raw.label}"): \`jev.maxFixes\`, when set, must be a non-negative integer.`,
+      );
+    }
+  }
+
   if (raw.minStylesheetRules !== undefined && raw.minStylesheetRules !== null) {
     if (
       typeof raw.minStylesheetRules !== "number" ||
@@ -450,12 +488,10 @@ function normalise(raw, dirName, testDir) {
     // block" specifically, not "has a tool loop of any kind".
     requiresCli: Boolean(raw.cli),
     cli: raw.cli ?? null,
-    // Shift-left (P4): resolved path to THIS test's own lint-rule markdown,
-    // appended to the generation system prompt so the agent authors to the
-    // rules up front. Set it only on lint-enabled tests, so an A/B measures
-    // linting's full contribution (prevention + gate). Null = no advisory.
-    // The engine deliberately ships no rules of its own — see LINT_ADVISORY
-    // in boilerplate.js.
+    // Path to this test's own lint-rule notes, added to the generation prompt
+    // so the agent follows them from the start. Set it only on lint-enabled
+    // tests, so a comparison measures everything linting contributes. Null
+    // means no notes. The harness ships no rules of its own.
     lintAdvisoryPath: raw.prompts.lintAdvisory
       ? resolveTestPath(testDir, raw.prompts.lintAdvisory)
       : null,
@@ -488,10 +524,21 @@ function normalise(raw, dirName, testDir) {
     // only; empty leaves package-name matching unchanged. See
     // `extractComponentImports`.
     componentImportPaths: raw.componentImportPaths ?? [],
+    // Which design-system names are layout primitives (Box, Stack, Flex,
+    // Text), and which raw HTML elements are fine to use directly. Drives the
+    // tiered coverage split. Without `primitives`, every design-system
+    // component counts as a composite. See `computeTieredCoverage`.
+    coverage: raw.coverage ?? null,
     // Minimum CSS rules a rendered page must carry to count as a success;
     // below it, the stylesheet build step never ran. 0 = check disabled.
     // See `detectFatalError` in evaluation/validate.js.
     minStylesheetRules: raw.minStylesheetRules ?? 0,
+    // Jev gate config, or null. Off unless a test sets `enabled: true` —
+    // this is the only gate that calls a paid external API, so it must
+    // never turn on by default. `toolDir` points at the jev judge, which
+    // owns the questions and the calibrated thresholds; nothing about
+    // either is duplicated here.
+    jev: raw.jev ?? null,
     docsPath: raw.docsPath ? resolveTestPath(testDir, raw.docsPath) : null,
     prompts: {
       system: resolveTestPath(testDir, raw.prompts.system),

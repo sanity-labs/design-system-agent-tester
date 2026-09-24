@@ -51,19 +51,12 @@ async function requestOllama(params) {
         model: params.model,
         stream: false,
         ...(tools.length && params.tool_choice?.type !== "none" ? { tools } : {}),
-        // num_ctx: the fix loop resends the full current file set plus the
-        // error text every round, so the conversation grows fast across
-        // several fix attempts. 16384 (the previous value) truncated older
-        // turns mid-loop — observed 2026-08-19: a model that was 2 tsc
-        // errors from a clean build by fix attempt 3 hallucinated a
-        // completely different, generic package.json (wrong React version,
-        // missing packages, invalid version strings) by attempt 5, having
-        // apparently lost the actual file contents and package.json
-        // instructions from context. Bumped to 32768 — the model's own
-        // advertised max (see `ollama show <model>` / `ollama list`
-        // context_length) — rather than a guessed value, since going
-        // higher than the model supports has no effect and this is the
-        // ceiling for both qwen2.5-coder:14b and :7b.
+        // The fix loop resends every file plus the error text each round, so the
+        // conversation grows quickly. Too small a context window drops the older
+        // turns, and a model that was two errors from a clean build has been seen
+        // to invent a completely different package.json once it lost sight of the
+        // real one. Set to the largest window these models advertise, since going
+        // beyond that has no effect.
         options: { temperature: 0, num_ctx: 32768, num_predict: 8192 },
         messages,
       }),

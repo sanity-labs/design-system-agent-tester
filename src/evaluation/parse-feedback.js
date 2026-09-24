@@ -11,18 +11,16 @@ const VALID_CATEGORIES = ["documentation", "api", "components", "theming", "icon
  */
 export function parseFeedback(text) {
   if (typeof text !== "string") return [];
-  // Untrusted, and run on the cumulative multi-turn buffer every iteration.
-  // Cap before scanning so a crafted flood (e.g. many `---FEEDBACK---` markers
-  // with no `---END FEEDBACK---`) can't drive quadratic work — the same
-  // reasoning and bound as parse-files.js.
+  // Untrusted, and run over the whole conversation each time. Cap the text
+  // first so a very large or deliberately awkward response cannot slow the
+  // run down. Same limit and reasoning as parse-files.js.
   if (text.length > MAX_PARSE_BYTES) text = text.slice(0, MAX_PARSE_BYTES);
 
   const items = [];
 
-  // Primary: parse structured ---FEEDBACK--- … ---END FEEDBACK--- blocks with
-  // linear indexOf scanning (the previous lazy `[\s\S]*?`-to-far-terminator
-  // regex backtracked to end-of-input at every opening marker when the
-  // closing marker was missing — O(n²) on adversarial input).
+  // Find the `---FEEDBACK--- … ---END FEEDBACK---` blocks by scanning for
+  // the markers directly, which stays fast even when a closing marker is
+  // missing.
   const OPEN = "---FEEDBACK---\n";
   const CLOSE = "---END FEEDBACK---";
   const lineRegex = /^-\s*\[(\w+)\]\s*(.+)$/gm;

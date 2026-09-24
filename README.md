@@ -33,6 +33,7 @@ Output lands in `output/<date>/<time>/`. Only one run at a time per machine — 
 
 | Flag | Default | What it does |
 |---|---|---|
+| `--mode` | `app` | What agents are asked to build: `app` (a whole interface) or `component` (one component plus a demo page). |
 | `--test`, `-t` | `all` | Which test(s) to run. A label, `all`, or a comma list. |
 | `--iterations`, `-n` | `3` | How many times to run each test. |
 | `--model`, `-m` | `claude-sonnet-4-6` | Claude model ID. |
@@ -43,6 +44,31 @@ Output lands in `output/<date>/<time>/`. Only one run at a time per machine — 
 | `--no-screenshot` | — | Skip browser validation and browser-based metrics. |
 | `--agent-prompt` | off | Generate a fresh brief from Claude instead of the static default. |
 | `--yes`, `-y` | off | Skip the cost-warning startup delay. |
+
+### Modes
+
+`--mode` selects what a run asks for. Both modes share one pipeline and one
+set of gates — build, axe, Lighthouse, DOM counts, visual diff — so results
+are directly comparable in kind, though not in scale.
+
+| Mode | Brief asks for | Idea pool |
+|---|---|---|
+| `app` (default) | A whole interface built around an archetype: dashboard, kanban, calendar, wizard, feed… | `briefs/app.js` — 18 domain + archetype pairs |
+| `component` | One reusable component, its states and variants, plus a page that demonstrates each | `briefs/component.js` — 26 components |
+
+Component briefs name the props, the states, the variants, and the keyboard
+and screen-reader behaviour, and they require a demo page that mounts the
+component in every state. The demo page is part of the brief rather than
+harness scaffolding: every gate measures a running page, so a component with
+no mount point would measure nothing.
+
+Both pools work the same way as before — `--agent-prompt` generates a fresh
+brief from a randomly chosen idea, and without it the mode's `staticBrief` is
+used. `--brief-file` overrides both, in either mode.
+
+Adding ideas means editing the pool for that mode. Adding a mode means a new
+entry in `briefGenerators` plus its name in `MODES`
+(`src/config/prompt-generator.js`).
 
 Model IDs are retired over time — see [Anthropic's docs](https://docs.anthropic.com/en/docs/about-claude/models) for current ones. A few models get hardcoded request-parameter overrides (e.g. Fable's effort level) — see `modelTuning()` in `src/pipeline/runner-api.js`. Any override is recorded in the report so tuned and default runs are never silently compared.
 

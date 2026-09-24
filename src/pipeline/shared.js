@@ -7,7 +7,7 @@
 
 import { createHash } from "node:crypto";
 import { existsSync, realpathSync } from "node:fs";
-import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
 import { buildFixSystemPrompt, buildSystemPrompt, getTest } from "../config/prompts.js";
 import { runAccessibilityTests } from "../evaluation/accessibility.js";
@@ -15,12 +15,15 @@ import { extractComponentUsageCounts } from "../evaluation/count-component-usage
 import { measureDom } from "../evaluation/dom-count.js";
 import { extractComponentImports } from "../evaluation/extract-component-imports.js";
 import { extractInlineStyles } from "../evaluation/extract-inline-styles.js";
+import { computeJsxPropDensity } from "../evaluation/jsx-prop-density.js";
 import { measureLighthouse } from "../evaluation/lighthouse.js";
 import { isSourceFile } from "../evaluation/parse-files.js";
 import { measureReactProfile } from "../evaluation/react-profile.js";
 import { captureScreenshots } from "../evaluation/screenshot.js";
 import { analyzeSemanticHtml } from "../evaluation/semantic-html.js";
+import { computeTieredCoverage } from "../evaluation/tiered-coverage.js";
 import { tag, warn } from "../util/color.js";
+import { describeCheckout } from "../util/git-rev.js";
 import { deriveErrorHints } from "./error-hints.js";
 
 // ─── Prompt accessors ────────────────────────────────────────────────
@@ -101,8 +104,12 @@ export function resolveWithinProject(projectDir, filePath) {
  * needed different sub-dep versions. Deleting the lockfile forces npm to
  * re-resolve against the current `package.json` while still reusing any
  * cached tarballs already on disk inside `node_modules`.
+ *
+ * `clear: false` writes the given files over the existing project instead of
+ * starting from a clean slate. A repair turn emits only the files it changed,
+ * so clearing first deleted the rest of the project mid-turn.
  */
-export async function writeProjectFiles(projectDir, files) {
+export async function writeProjectFiles(projectDir, files, { clear = true } = {}) {
   // When an agent revises a file mid-output it can appear twice in the array.
   // Keep the last occurrence so the most recent version wins.
   const seen = new Set();
@@ -111,7 +118,7 @@ export async function writeProjectFiles(projectDir, files) {
     .filter((f) => (seen.has(f.path) ? false : seen.add(f.path)))
     .reverse();
 
-  if (existsSync(projectDir)) {
+  if (clear && existsSync(projectDir)) {
     const entries = await readdir(projectDir);
     for (const entry of entries) {
       if (entry !== "node_modules") {
@@ -126,6 +133,13 @@ export async function writeProjectFiles(projectDir, files) {
 
   for (const file of files) {
     const filePath = resolveWithinProject(projectDir, file.path);
+    // A block whose path names a directory (`---FILE: src---`) can't be
+    // written as a file. It used to throw EISDIR and fail the whole iteration
+    // (2026-09-23 16.01, iteration 1); skip it and say so instead.
+    if (/[\\/]$/.test(file.path) || (existsSync(filePath) && (await stat(filePath)).isDirectory())) {
+      console.warn(`⚠ Skipped a file block whose path is a directory: ${file.path}`);
+      continue;
+    }
     const dir = resolve(filePath, "..");
     await mkdir(dir, { recursive: true });
     await writeFile(filePath, file.content, "utf-8");
@@ -185,18 +199,12 @@ export async function buildCurrentFilesText(projectDir, files, opts = {}) {
 
     const wasUnchanged = previousHashes && previousHashes.get(file.path) === hash;
     const errorReferenced = errorRefs.has(file.path);
-    // package.json is never elided, referenced or not. A "Cannot find
-    // module 'X'" error names the FILE THAT IMPORTS X (e.g. vite.config.ts)
-    // in its stack, never package.json itself — so the one file that
-    // actually needs the fix (add X as a dependency) was exactly the file
-    // getting elided under the referenced-paths heuristic. Observed
-    // 2026-08-19: with package.json elided to a manifest line, a model
-    // asked to fix a missing-devDependency error had no visibility into
-    // its current dependencies/versions and fabricated an entirely
-    // different, wrong package.json from scratch (dropped real packages,
-    // wrong React version, an invalid alias version string) instead of
-    // adding one line. It's also small — eliding it saves negligible
-    // tokens next to that failure mode.
+    // A missing-dependency error names the file that imports the package,
+    // never package.json itself, so the one file that actually needs editing
+    // was the one being summarised away. A model asked to add a dependency
+    // without being shown the current ones has been seen to invent a whole
+    // new package.json instead of adding a line. It is a small file, so
+    // including it in full costs very little.
     const isPackageJson = file.path === "package.json";
 
     // Show full content if: this is the first call (no previousHashes),
@@ -373,6 +381,24 @@ export async function buildResult({
   residualLint = null,
   residualLintRules = null,
   residualAxe = null,
+  // Jev gate. `null` when the gate did not run (the default — it calls a
+  // paid API). `firstTryJev` is surfaceable departures before any jev
+  // repair; `residualJev` is what survived the budget. `jevJudged` and
+  // `jevInputTokens` carry the cost so a run can be priced. `jevUnjudged`
+  // counts files the API refused after retries — a gap, not a pass.
+  firstTryJev = null,
+  residualJev = null,
+  jevJudged = null,
+  jevUnjudged = null,
+  // Lint split. `lintAutofixed`: findings the harness fixed automatically.
+  // `lintGateStatus`: "ran", "error" or "unavailable" (null: no lint gate) —
+  // so a gate that never ran is not reported as clean. `selfLintCalls` and
+  // `selfLintFindings`: the agent's own lint calls and what the first found.
+  lintAutofixed = null,
+  lintGateStatus = null,
+  selfLintCalls = null,
+  selfLintFindings = null,
+  jevInputTokens = null,
   // Per-iteration count of `npm install` failures across all validation
   // cycles. 0 when every install resolved cleanly. Aggregated at the
   // report layer to surface dependency-install issues separately from
@@ -418,6 +444,32 @@ export async function buildResult({
   const componentImports = extractComponentImports(files, packageNames, componentImportPaths);
   const inlineStyles = extractInlineStyles(files);
   const componentUsage = extractComponentUsageCounts(files);
+  // Splits the same usage into design-system composites, design-system
+  // primitives, and everything else. Needs to know which names are
+  // primitives, which only the test can say; without `coverage.primitives`
+  // every design system component counts as a composite.
+  const tieredCoverage = computeTieredCoverage(files, {
+    dsComponents: componentImports,
+    primitives: test?.coverage?.primitives,
+    rawAllowlist: test?.coverage?.rawAllowlist,
+  });
+  // How many props each of those tags carries. Coverage says which
+  // components were reached for; this says how hard each one was leaned on —
+  // a component used with eight props is an escape hatch being improvised out
+  // of legitimate props, which no coverage share can show.
+  // Git state of the tooling checkout this arm ran against. An MCP arm runs
+  // the server from a working directory, so its behaviour is whatever was on
+  // disk — a SHA plus a dirty flag is the only way to tell two runs apart
+  // after the fact. See `describeCheckout`.
+  const toolingCheckout = describeCheckout(
+    test?.mcp?.defaultDirectory ?? (typeof test?.cli?.cwd === "string" ? test.cli.cwd : null),
+  );
+
+  const jsxPropDensity = computeJsxPropDensity(files, {
+    dsComponents: componentImports,
+    primitives: test?.coverage?.primitives,
+    rawAllowlist: test?.coverage?.rawAllowlist,
+  });
 
   const sourceContents = files
     .filter((f) => isSourceFile(f.path))
@@ -438,6 +490,9 @@ export async function buildResult({
     inlineStyles,
     semanticHtml,
     componentUsage,
+    tieredCoverage,
+    jsxPropDensity,
+    toolingCheckout,
     screenshotPath,
     inputTokens: rawInputSum || null,
     uncachedInputTokens: uncachedIn || null,
@@ -460,6 +515,15 @@ export async function buildResult({
     residualLint,
     residualLintRules,
     residualAxe,
+    firstTryJev,
+    residualJev,
+    jevJudged,
+    jevUnjudged,
+    lintAutofixed,
+    lintGateStatus,
+    selfLintCalls,
+    selfLintFindings,
+    jevInputTokens,
     npmInstallFailures,
     tscFlakes,
     tsconfigErrors,
@@ -477,6 +541,9 @@ export async function buildResult({
     inlineStyles,
     semanticHtml,
     componentUsage,
+    tieredCoverage,
+    jsxPropDensity,
+    toolingCheckout,
     screenshotPath,
     inputTokens: rawInputSum || null,
     uncachedInputTokens: uncachedIn || null,
@@ -499,6 +566,15 @@ export async function buildResult({
     residualLint,
     residualLintRules,
     residualAxe,
+    firstTryJev,
+    residualJev,
+    jevJudged,
+    jevUnjudged,
+    lintAutofixed,
+    lintGateStatus,
+    selfLintCalls,
+    selfLintFindings,
+    jevInputTokens,
     npmInstallFailures,
     tscFlakes,
     tsconfigErrors,

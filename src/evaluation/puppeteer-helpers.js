@@ -1,10 +1,8 @@
 /**
- * Shared Puppeteer helpers used by the dynamic evaluations
- * (dom-count, semantic-html, screenshot, validate).
+ * Shared browser helpers for the checks that need a real page.
  *
- * These are NOT data points. They're just plumbing that every
- * browser-based evaluation needs: launching Chrome, navigating to the
- * page, and waiting for the app to render.
+ * These are not measurements. They are the plumbing every browser-based
+ * check needs: start Chrome, open the page, wait for it to render.
  */
 import config from "../config/load.js";
 
@@ -12,36 +10,24 @@ import config from "../config/load.js";
 export const NAV_TIMEOUT_MS = 30_000;
 
 /**
- * Ceiling on a single low-level CDP command (ms) — e.g. `Page.captureScreenshot`.
- * Puppeteer's own default is 180_000 (3 minutes), which isn't caught by
- * `setDefaultTimeout`/`setDefaultNavigationTimeout` (those only cover
- * navigation/waiting APIs, not raw protocol commands). A single wedged
- * screenshot call — observed against a genuinely broken generated page —
- * then silently eats 3 minutes even though every caller already tolerates
- * and logs individual-shot failures. Cap it well under that so a hung
- * command fails fast instead of stalling the whole fix loop.
+ * Time limit for one low-level browser command, such as taking a
+ * screenshot. Puppeteer's own default is three minutes and is not covered
+ * by the usual timeout settings, so one stuck call against a broken page
+ * would otherwise hold up the run for that long.
  */
 export const PROTOCOL_TIMEOUT_MS = 45_000;
 
 /**
- * Overall ceiling on a single measurement callback (ms). We run untrusted,
- * agent-generated code in the page — an infinite loop or a pathological DOM
- * can make `page.evaluate` hang forever (it has no built-in timeout). Racing
- * against this lets the caller's `finally` close the browser, which tears
- * down the wedged page.
+ * Time limit for one measurement. The page runs code the agent wrote, and
+ * an infinite loop or a huge DOM can make it hang forever. Timing out lets
+ * the caller close the browser, which clears the stuck page.
  */
 export const MEASURE_TIMEOUT_MS = 60_000;
 
 /**
- * Race a promise against a timeout. Does NOT cancel the underlying work
- * (you can't cancel a `page.evaluate`), but unblocks the caller so it can
- * close the browser. The timer is `unref`'d so it never keeps Node alive.
- *
- * @template T
- * @param {Promise<T>} promise
- * @param {number} ms
- * @param {string} [label]
- * @returns {Promise<T>}
+ * Give up on a promise after `ms`. This does not stop the underlying work,
+ * which cannot be cancelled, but it frees the caller to close the browser.
+ * The timer will not keep Node alive on its own.
  */
 export function withTimeout(promise, ms, label = "operation") {
   let timer;
@@ -53,11 +39,8 @@ export function withTimeout(promise, ms, label = "operation") {
 }
 
 /**
- * Launch a fresh headless Chrome instance. Single source of truth for the
- * launch flags — lighthouse and react-profile also call this so the sandbox
- * args never drift between evaluators.
- *
- * @returns {Promise<import("puppeteer").Browser>}
+ * Start a fresh headless Chrome. The one place the launch flags are set, so
+ * they cannot drift between the checks that use them.
  */
 export async function launchBrowser() {
   const puppeteer = await import("puppeteer");
@@ -69,16 +52,13 @@ export async function launchBrowser() {
 }
 
 /**
- * Poll the page until something has actually rendered, or give up after
- * a timeout. Uses the `appRootSelectors` from the config to detect a
- * mounted React/app root; falls back to counting visible elements.
+ * Wait until the page has rendered something, or give up. Looks for the app
+ * root from the config, and otherwise counts visible elements.
  *
  * @param {import("puppeteer").Page} page
  * @param {object} [opts]
- * @param {string} [opts.iterLabel]    — used for log output
- * @param {number} [opts.maxWaitMs]    — total timeout (default 15s)
- * @param {number} [opts.pollIntervalMs] — poll interval (default 500ms)
- * @returns {Promise<boolean>} — true if content was detected
+ * @param {string} [opts.iterLabel] - label for log output
+ * @param {number} [opts.maxWaitMs] - how long to wait in total
  */
 export async function waitForRenderedContent(page, opts = {}) {
   const { iterLabel, maxWaitMs = 15_000, pollIntervalMs = 500 } = opts;
@@ -87,12 +67,9 @@ export async function waitForRenderedContent(page, opts = {}) {
   const rootSelector = config.appRootSelectors.join(", ");
 
   while (Date.now() - start < maxWaitMs) {
-    // `page.evaluate` has no built-in timeout (see MEASURE_TIMEOUT_MS above) —
-    // agent-generated code can hang the page's JS thread (infinite loop, runaway
-    // effect), which would otherwise block this poll (and the outer maxWaitMs
-    // check that depends on it) forever. Race each poll independently so one
-    // wedged evaluation just counts as "not yet rendered" instead of hanging
-    // the whole harness process.
+    // Code the agent wrote can hang the page, and checking the page has no
+    // timeout of its own, so each check gets its own. A stuck one counts as
+    // "not rendered yet" rather than blocking forever.
     const hasContent = await withTimeout(
       page.evaluate((selector) => {
         const roots = document.querySelectorAll(selector);
@@ -141,19 +118,10 @@ export async function waitForRenderedContent(page, opts = {}) {
 }
 
 /**
- * Open a page at `serverUrl` in a fresh browser, wait for it to render,
- * call `fn(page)` to take the measurement, then close the browser.
+ * Open the page in a fresh browser, wait for it to render, take one
+ * measurement with `fn`, then close the browser.
  *
- * This is the standard pattern for browser-based evaluations that just
- * need one measurement at a single viewport.
- *
- * @param {string} serverUrl
- * @param {(page: import("puppeteer").Page) => Promise<T>} fn
- * @param {object} [opts]
- * @param {string} [opts.iterLabel]
- * @param {{width:number,height:number}} [opts.viewport]
- * @template T
- * @returns {Promise<T>}
+ * The usual shape for a check that needs a single measurement at one size.
  */
 export async function withPage(serverUrl, fn, opts = {}) {
   const {

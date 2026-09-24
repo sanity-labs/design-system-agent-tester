@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import config, { CONFIG_PATH } from "./load.js";
+import { MODES } from "./prompt-generator.js";
 
 describe("agent-tester.config.js (loaded via ./load.js)", () => {
   it("resolves a config path inside the project", () => {
@@ -25,29 +26,53 @@ describe("agent-tester.config.js (loaded via ./load.js)", () => {
     });
   });
 
-  describe("briefGenerator", () => {
+  // One generator per `--mode`. The same four keys drive both, so the shape
+  // is asserted per mode rather than once — a component pool with an app
+  // system prompt would satisfy a single combined check.
+  describe("briefGenerators", () => {
     it("is an object", () => {
-      expect(typeof config.briefGenerator).toBe("object");
-      expect(config.briefGenerator).not.toBeNull();
+      expect(typeof config.briefGenerators).toBe("object");
+      expect(config.briefGenerators).not.toBeNull();
     });
 
-    it("has a non-empty staticBrief string", () => {
-      expect(typeof config.briefGenerator.staticBrief).toBe("string");
-      expect(config.briefGenerator.staticBrief.length).toBeGreaterThan(0);
+    it("covers every mode the CLI accepts", () => {
+      for (const mode of MODES) {
+        expect(config.briefGenerators[mode], `missing generator for --mode ${mode}`).toBeTruthy();
+      }
     });
 
-    it("has a non-empty systemPrompt string", () => {
-      expect(typeof config.briefGenerator.systemPrompt).toBe("string");
-      expect(config.briefGenerator.systemPrompt.length).toBeGreaterThan(0);
-    });
+    for (const mode of MODES) {
+      describe(mode, () => {
+        const gen = () => config.briefGenerators[mode];
 
-    it("has a non-empty domains array", () => {
-      expect(Array.isArray(config.briefGenerator.domains)).toBe(true);
-      expect(config.briefGenerator.domains.length).toBeGreaterThan(0);
-    });
+        it("has a non-empty staticBrief string", () => {
+          expect(typeof gen().staticBrief).toBe("string");
+          expect(gen().staticBrief.length).toBeGreaterThan(0);
+        });
 
-    it("has a buildUserMessage function", () => {
-      expect(typeof config.briefGenerator.buildUserMessage).toBe("function");
+        it("has a non-empty systemPrompt string", () => {
+          expect(typeof gen().systemPrompt).toBe("string");
+          expect(gen().systemPrompt.length).toBeGreaterThan(0);
+        });
+
+        it("has a non-empty domains array", () => {
+          expect(Array.isArray(gen().domains)).toBe(true);
+          expect(gen().domains.length).toBeGreaterThan(0);
+        });
+
+        it("has a buildUserMessage function that uses the idea it is given", () => {
+          expect(typeof gen().buildUserMessage).toBe("function");
+          const msg = gen().buildUserMessage({ domain: "A-UNIQUE-IDEA", mode });
+          expect(msg).toContain("A-UNIQUE-IDEA");
+        });
+      });
+    }
+
+    // The two pools must not be the same list. Pointing both modes at one
+    // generator would make `--mode component` silently produce app briefs.
+    it("gives each mode a distinct idea pool", () => {
+      const [a, b] = MODES.map((m) => config.briefGenerators[m].domains);
+      expect(a).not.toEqual(b);
     });
   });
 

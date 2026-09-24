@@ -1,28 +1,24 @@
 /**
  * Project validation.
  *
- * Runs the generated project end-to-end:
+ * Runs the generated project from start to finish:
  *
- *   1. `npm install` the agent-generated dependencies
- *   2. `tsc --noEmit` type check
+ *   1. `npm install` the dependencies the agent asked for
+ *   2. Type check with `tsc --noEmit`
  *   3. Start the dev server
  *   4. Open the page in headless Chrome
- *   5. Record any console errors and whether the page actually rendered
+ *   5. Record console errors and whether anything rendered
  *
- * Returns a structured result the runner can use to decide whether to
- * proceed with the other evaluations (screenshot, dom-count, etc.) or
- * fall into the fix loop.
+ * Returns a result the runner uses to decide whether to carry on with the
+ * other checks or go into the fix loop.
  *
- * Logs are written to `_npm_install.txt`, `_tsc_check.txt`, and
- * `_dev_server.txt` inside the iteration directory so debugging doesn't
- * require recreating the run.
+ * Logs go to `_npm_install.txt`, `_tsc_check.txt` and `_dev_server.txt` in
+ * the iteration directory, so debugging does not mean re-running anything.
  *
- * The dev server is bound to an OS-allocated random port (via `bind(0)`)
- * and pinned with `--strictPort`, so a port collision fails loudly
- * rather than landing Puppeteer on the wrong server.
+ * The dev server gets a random free port and is pinned to it, so a clash
+ * fails loudly instead of quietly pointing the browser at another server.
  *
- * This file does NOT take measurements (no DOM counting, no screenshots,
- * no semantic-HTML analysis). Each of those lives in its own module.
+ * This file takes no measurements. Those each live in their own module.
  */
 
 import { execFile, spawn } from "node:child_process";
@@ -145,13 +141,11 @@ export async function validateProject(projectDir, iterLabel, opts = {}) {
 }
 
 /**
- * Kill a dev server process cleanly. Safe to call with `null`.
+ * Stop a dev server. Safe to call with null.
  *
- * Note `child.killed` only records that a signal was *sent*, not that
- * the process exited — escalation has to check the actual exit state.
- * The server is `npm run dev`, which spawns Vite as its own child, so
- * on POSIX the whole detached process group is signalled; signalling
- * just `npm` leaves Vite holding the port.
+ * `child.killed` only means a signal was sent, not that the process is
+ * gone, so this checks whether it actually exited. The server starts Vite
+ * as its own child, so the whole process group is signalled together.
  */
 export function killDevServer(devServer) {
   if (!devServer) return;
@@ -184,14 +178,9 @@ async function runNpmInstall(projectDir, iterLabel) {
   console.log(`${tag(iterLabel)} Installing dependencies...`);
   const iterDir = dirname(projectDir);
   try {
-    // No --legacy-peer-deps: that flag reverts npm to v6 behavior where
-    // peer dependencies are NOT auto-installed. Modern packages depend on
-    // npm v7+ auto-installing peers. Suppressing it silently leaves the
-    // tree incomplete, which surfaced as bogus "Property X does not exist
-    // on Box" tsc errors when the agent's code referenced the real API
-    // surface against incomplete types. If a peer conflict ever surfaces
-    // from agent-generated code, that's a real signal worth reporting in
-    // the fix loop — not something to mask.
+    // Don't add --legacy-peer-deps. It stops npm installing peer dependencies
+    // automatically, which modern packages rely on. The tree ends up
+    // incomplete, which showed up as type errors about props that do exist.
     const { stdout, stderr } = await execFileAsync("npm", ["install", "--no-audit", "--no-fund"], {
       cwd: projectDir,
       timeout: 120_000,
@@ -235,19 +224,18 @@ async function runNpmInstall(projectDir, iterLabel) {
 }
 
 /**
- * Pre-flight for the type check. Verifies the state tsc is about to trust:
- *   - tsconfig.json exists and parses (a configless tsc run silently falls
- *     back to defaults → bogus TS17004/TS2305 storms);
- *   - every declared dependency — and the typescript compiler itself — is
- *     resolvable from the project (an unsettled node_modules produces the
- *     same storms).
- * Returns { tsconfig, missing, tscBin }; missing is [] when quiescent.
+ * Check the things tsc is about to rely on:
+ *   - tsconfig.json exists and can be parsed. Without it tsc quietly falls
+ *     back to defaults and reports a flood of errors that are not real.
+ *   - every declared dependency, and tsc itself, is actually installed. A
+ *     half-finished install produces the same flood.
+ *
+ * Returns { tsconfig, missing, tscBin }. `missing` is empty when ready.
  */
 async function preflightTypeCheck(projectDir) {
-  // tsconfig.json: a MISSING file is a scaffold error (tsc would silently
-  // fall back to defaults and storm TS17004/TS2305). An unparseable-to-us
-  // file is NOT fatal — tsc's JSONC dialect is the authority, ours is an
-  // approximation — it only means flake signature 1 can't be evaluated.
+  // A missing tsconfig.json is a broken project. A file we cannot parse is
+  // not fatal, since tsc's dialect is the real authority and ours is only an
+  // approximation; it just means one of the flake checks cannot run.
   let tsconfigRaw = null;
   try {
     tsconfigRaw = await readFile(join(projectDir, "tsconfig.json"), "utf-8");
@@ -261,11 +249,9 @@ async function preflightTypeCheck(projectDir) {
   }
   const tsconfig = parseTsconfig(tsconfigRaw);
 
-  // Quiescence probe: is each declared dependency physically present?
-  // Deliberately a FILESYSTEM check, not require.resolve — modern packages
-  // whose `exports` map hides "./package.json" (e.g. @vitejs/plugin-react)
-  // throw ERR_PACKAGE_PATH_NOT_EXPORTED from require.resolve even when
-  // perfectly installed, which read as "missing" and failed every iteration.
+  // Check each dependency is on disk. This looks at the filesystem rather
+  // than trying to import it, because some packages hide their package.json
+  // from imports and would look missing when they are installed fine.
   const installed = async (name) => {
     try {
       await readFile(join(projectDir, "node_modules", ...name.split("/"), "package.json"), "utf-8");
@@ -320,11 +306,9 @@ async function execTscOnce(projectDir, tscBin) {
 }
 
 /**
- * Does the failure contradict the on-disk project state? True when either
- * flake signature checks out against ground truth — meaning the failure is
- * transient toolchain noise, not the agent's code.
+ * True when the failure does not match what is actually on disk, which
+ * means it is toolchain noise rather than a problem with the agent's code.
  */
-/** True when `p` resolves to `root` or somewhere inside it (lexical). */
 function isWithin(root, p) {
   const r = resolve(root);
   const full = resolve(root, p);
@@ -337,11 +321,10 @@ async function isSuspiciousTscFailure(projectDir, tsconfig, errors) {
   const nmRoot = join(projectDir, "node_modules");
   for (const { module, member } of extractMissingExports(errors).slice(0, 5)) {
     try {
-      // Both `module` (a bare specifier, but could contain `..`) and the
-      // package's `types`/`typings` field (fully controlled by a hostile
-      // installed dependency) are agent-influenced. Confine every derived
-      // path to the sandbox so a traversing value like `../../../etc/passwd`
-      // can't turn this read into an out-of-sandbox content oracle.
+      // Both the module name and the package's own types field are influenced
+      // by the agent or by an installed package, so keep every path built from
+      // them inside the project. Otherwise a value like `../../../etc/passwd`
+      // would turn this into a way to read any file.
       const modSegments = module.split("/");
       if (modSegments.includes("..")) continue;
       // Filesystem path, not require.resolve — `exports` maps that hide
@@ -458,11 +441,9 @@ async function runTypeCheck(projectDir, iterLabel) {
 }
 
 /**
- * Ask the OS for an available loopback port by binding to port 0 and
- * reading back the assigned number. There's a tiny race between closing
- * the probe socket and the dev server binding the port — `--strictPort`
- * below turns any collision into a loud, diagnosable failure instead of
- * the silent misdetection the harness used to suffer from.
+ * Get a free port by binding to port 0 and reading back what the OS picked.
+ * There is a small gap between releasing it and the dev server taking it,
+ * so the server is pinned to that exact port and fails loudly on a clash.
  */
 function getAvailablePort() {
   return new Promise((resolveFn, rejectFn) => {
@@ -477,11 +458,9 @@ function getAvailablePort() {
 }
 
 /**
- * Spawn `npm run dev` against the project, pinning Vite to a specific
- * port we already know is free. `--strictPort` makes Vite exit rather
- * than silently auto-incrementing (which is what caused the harness to
- * connect to the wrong port and report bogus "ERR_CONNECTION_REFUSED at
- * localhost:5173" errors).
+ * Start the dev server on a port already known to be free. Pinning the port
+ * makes Vite exit on a clash instead of quietly moving to the next one,
+ * which used to leave the harness talking to the wrong server.
  */
 function startDevServer(projectDir, iterLabel, port) {
   console.log(`${tag(iterLabel)} Starting dev server on port ${port}...`);
@@ -496,22 +475,12 @@ function startDevServer(projectDir, iterLabel, port) {
 }
 
 /**
- * Stream the dev server's stdout/stderr into `_dev_server.txt` while
- * watching for a readiness signal. Resolves with the URL we constructed
- * ourselves (no stdout-parsing for URLs — we already know the port).
+ * Write the dev server's output to `_dev_server.txt` while watching for it
+ * to become ready. Resolves with the URL we built ourselves, since we
+ * already know the port.
  *
- * Considered "ready" when either:
- *   - the configured port appears in a `localhost:<port>` URL, or
- *   - vite prints a `ready in <ms> ms` banner.
- *
- * Rejects if the process exits before ready, or if 30s elapse without a
- * signal. In both cases the full output is on disk for diagnosis.
- *
- * `serverOutput` (optional) is a mutable `{ text }` box the caller owns.
- * Once ready, every subsequent chunk of dev-server output is also
- * appended there — this is what lets `validateProject` scan for a Vite
- * server-side error (see `extractViteServerError`) after a failed render,
- * scoped to just this attempt's output rather than the whole file on disk.
+ * Ready means either the port shows up in a localhost URL, or the server
+ * prints its usual startup line.
  */
 function waitForReady(devServer, port, iterDir, serverOutput) {
   const logPath = resolve(iterDir, "_dev_server.txt");
@@ -572,13 +541,9 @@ function waitForReady(devServer, port, iterDir, serverOutput) {
       if (resolved) return;
       resolved = true;
       clearTimeout(timer);
-      // A crash before "ready" (e.g. a missing devDependency the model
-      // forgot to declare, like `@vitejs/plugin-react`) has its real cause
-      // sitting right there in `preReadyOutput` — without this, the model
-      // only ever sees "exited with code 1", never WHY, and burns a fix
-      // attempt guessing (observed 2026-08-19 with a local model: 2 fix
-      // attempts spent blind before the budget ran out, when the actual
-      // cause — an undeclared `@vitejs/plugin-react` — was one line away).
+      // When the server dies before it is ready, the reason is sitting in the
+      // output it already printed. Without passing that along, the model only
+      // sees "exited with code 1" and wastes a fix attempt guessing why.
       const viteError = extractViteServerError(preReadyOutput);
       rejectFn(
         new Error(
@@ -592,9 +557,8 @@ function waitForReady(devServer, port, iterDir, serverOutput) {
 }
 
 /**
- * Open the page in headless Chrome, capture console errors, and check
- * whether anything actually rendered. Returns just what validation needs
- * — no measurements.
+ * Open the page in headless Chrome, collect console errors, and check
+ * whether anything rendered. Returns only what validation needs.
  */
 async function checkPageRender(serverUrl, iterLabel) {
   const browser = await launchBrowser();
@@ -621,36 +585,17 @@ async function checkPageRender(serverUrl, iterLabel) {
 
     const rendered = await waitForRenderedContent(page, { iterLabel });
 
-    // Captured regardless of `rendered` — some failure modes render a
-    // library's own graceful-degradation message as ordinary visible text
-    // (no thrown error, no console output), which satisfies "something is
-    // on the page" while the app is completely broken. `rendered` alone
-    // can't tell the two apart; see `renderFailureSignatures` below.
+    // Collected whether or not the page rendered. Some libraries print their
+    // own error message as ordinary text instead of throwing, which counts as
+    // "something is on the page" while the app is entirely broken.
     const bodyText = await page
       .evaluate(() => document.body.innerText)
       .catch(() => "");
 
-    // Total CSS rules the page actually loaded. A build-time stylesheet step
-    // that never ran (an unregistered Tailwind/PostCSS plugin, a CSS entry
-    // nothing imports) yields valid HTML with browser-default styling —
-    // `rendered` is true, no error is thrown, nothing appears in the
-    // console. This count is the only cheap signal that separates "styled
-    // app" from "raw HTML"; see `minStylesheetRules` in detectFatalError.
-    // Cross-origin sheets throw on `.cssRules` access — skip those rather
-    // than abort the count.
-    //
-    // MUST recurse into container rules (`@layer`, `@media`, `@supports`,
-    // `@container`, `@scope`). `sheet.cssRules.length` only counts direct
-    // children, so a stylesheet that wraps its content in one `@layer`
-    // block — which is how compiled StyleX output (Astryx) and Tailwind v4
-    // both ship — reports as a single rule regardless of how much real CSS
-    // is inside it. Measured 2026-09-10 on Astryx: a broken build (StyleX
-    // Vite plugin omitted, components render with unbacked atomic class
-    // names) and a correctly styled one both showed the same top-level
-    // count (~5-6), because virtually everything either app emits lives
-    // inside the same handful of `@layer` wrappers — a shallow count cannot
-    // tell them apart at any threshold. Recursing separated them cleanly
-    // (~112 broken vs 596+ styled in the same test).
+    // How many CSS rules the page loaded. When a stylesheet build step never
+    // runs, the result is valid HTML with browser default styling: it
+    // renders, nothing throws, and the console is clean. This count is the
+    // only way to tell.
     const stylesheetRules = await page
       .evaluate(() => {
         let total = 0;
@@ -685,9 +630,8 @@ async function checkPageRender(serverUrl, iterLabel) {
 }
 
 /**
- * Identify whether the captured console errors indicate a fatal problem
- * (one that prevents React from mounting), or whether the page simply
- * never rendered.
+ * Work out whether the console errors mean something fatal stopped React
+ * from mounting, or whether the page simply never rendered.
  */
 const FATAL_PATTERNS = [
   /does not provide an export named/i,
@@ -700,19 +644,13 @@ const FATAL_PATTERNS = [
 ];
 
 /**
- * Detect a rendered page whose entire visible content is a library's own
- * graceful-degradation message rather than the app — e.g. a UI kit's
- * `ThemeProvider` catching a missing required prop and rendering an error
- * string in place of the tree, instead of throwing. This satisfies both
- * existing checks (some DOM is present, no console/pageerror fires) while
- * shipping a completely broken app, so neither `FATAL_PATTERNS` nor the
- * `rendered` flag ever catches it on its own.
+ * Catch a page whose only visible content is a library's own error message
+ * rather than the app, such as a theme provider printing a warning in place
+ * of the tree instead of throwing.
  *
- * Deliberately generic and empty by default: this file ships to every user
- * of the harness, so it can't assume any specific library's error text.
- * A test supplies its own signatures via `test.renderFailureSignatures`
- * (an array of strings or RegExps) in its config.js — see
- * `tests.internal/ui5-mcp/config.js` for a worked example.
+ * This passes both the other checks: there is content on the page and
+ * nothing was logged. Only the test knows what its own library prints, so
+ * the patterns come from its `renderFailureSignatures` config.
  */
 export function detectRenderFailureSignature(bodyText, signatures) {
   if (!bodyText || !signatures?.length) return null;
@@ -755,12 +693,10 @@ export function detectFatalError(
     return `Page rendered a known failure signature instead of the app: "${signatureMatch}"`;
   }
 
-  // A page whose build-time stylesheet step never ran renders as valid HTML
-  // with browser-default styling — no error, no console output, `rendered`
-  // true. Only a test that knows its stack ships CSS can say what "too few
-  // rules" means, so this is opt-in per test via `minStylesheetRules`
-  // (default 0 = disabled). `null` means the count itself failed and is
-  // treated as unknown, never as a failure.
+  // A page whose stylesheet step never ran still renders, with no error and
+  // nothing in the console. Only a test that knows its own stack ships CSS
+  // can say what too few rules means, so this is opt-in per test and off by
+  // default.
   if (minStylesheetRules > 0 && stylesheetRules !== null && stylesheetRules < minStylesheetRules) {
     return (
       `Page rendered but almost no CSS was applied: ${stylesheetRules} stylesheet rule(s) found, ` +
@@ -774,14 +710,10 @@ export function detectFatalError(
 }
 
 /**
- * Vite dev-server-side errors (a bad import specifier it can't resolve,
- * an esbuild pre-transform failure, etc.) are printed only to the dev
- * server's own stdout/stderr — the browser never receives them as a
- * `console`/`pageerror` event, so `FATAL_PATTERNS` above never sees them.
- * The page just silently fails to render, and the fix loop previously
- * reported the content-free "Page did not render" fallback with no way
- * for the model to diagnose the real cause. These patterns catch the
- * Vite/esbuild error banners so that text can be surfaced instead.
+ * Errors from the dev server itself, such as an import it cannot resolve,
+ * are only printed to its own output. The browser never sees them, so the
+ * console-error checks above never find them and the page just fails to
+ * render with no explanation.
  */
 const VITE_SERVER_ERROR_PATTERNS = [
   /Internal server error:/i,
@@ -799,15 +731,10 @@ const VITE_SERVER_ERROR_PATTERNS = [
 ];
 
 /**
- * Pull the first Vite server-error block out of dev-server output captured
- * since the server last reported ready (see `waitForReady`). Returns the
- * matching banner line plus its immediately-following context (Vite prints
- * a `Plugin:`/`File:`/code-frame block that pinpoints the bad import) and
- * stops before the noisy internal stack trace (`      at ...` frames from
- * esbuild/vite's own source) or after a line cap, whichever comes first.
- * Returns null if no known error banner is present.
+ * Pull the first server error out of the dev server output since it last
+ * reported ready. Returns the error line plus the few lines after it, which
+ * is where the file and line number are, and stops before the noise.
  */
-// eslint-disable-next-line no-control-regex -- matches raw ANSI escape codes, not arbitrary control chars
 const ANSI_ESCAPE_PATTERN = /\[[0-9;]*m/g;
 
 export function extractViteServerError(serverOutput) {

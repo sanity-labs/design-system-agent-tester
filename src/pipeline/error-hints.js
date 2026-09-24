@@ -1,21 +1,20 @@
 /**
- * Turn raw TypeScript / build errors into actionable, generic fix hints —
- * "pair each error with its fix, not just the error."
+ * Turn build errors into hints that say how to fix them, not just what went
+ * wrong.
  *
- * Weak models (Haiku) re-guess when handed only the raw TS type-soup
- * (`… Omit<ButtonProps & Omit<HTMLProps<…>>>`). Naming the component and the
- * bad prop converges the repair far faster than the raw compiler output alone.
+ * Weaker models tend to guess again when handed raw TypeScript type errors,
+ * which are long and hard to read. Naming the component and the bad prop
+ * gets to a fix much faster.
  *
- * Deliberately generic: this file ships to every user of the harness
- * regardless of which design system (if any) their tests target, so it must
- * not assume a specific package, component library, or MCP tool exists.
- * Product-specific hints (e.g. "this package's ThemeProvider is called X")
- * belong in that test's own config, not here.
+ * Everything here stays generic. This file ships to every user of the
+ * harness whatever design system they test, so it must not assume a
+ * particular package or component exists. Hints specific to one product
+ * belong in that test's own config.
  */
 
 /**
- * Scan combined error text and return an ordered, de-duplicated list of fix hints.
- * @param {string} text - fatal error + console errors, concatenated
+ * Read the error text and return fix hints, in order and without repeats.
+ * @param {string} text - fatal error and console errors, joined
  * @returns {string[]}
  */
 export function deriveErrorHints(text) {
@@ -33,11 +32,10 @@ export function deriveErrorHints(text) {
     );
   }
 
-  // 2. Boolean prop given a string: `Type 'string' is not assignable to type 'Responsive<boolean>'`
-  // Note: no trailing `'` anchor — optional props (the overwhelming majority)
-  // render as `'Responsive<boolean> | undefined'`, not `'Responsive<boolean>'`
-  // exactly. Anchoring on the closing quote meant this never matched a real
-  // optional-prop error (2026-07-25).
+  // 2. A boolean prop was given a string.
+  // The pattern deliberately does not require a closing quote: most props are
+  // optional, so the type reads "Responsive<boolean> | undefined" and
+  // anchoring on the quote never matched a real error.
   if (/is not assignable to type '(?:Responsive<boolean>|boolean)/.test(text)) {
     hints.add(
       'A boolean prop was given a string (e.g. `fullWidth="true"`). Use the bare prop (`fullWidth`) or a brace boolean (`fullWidth={false}`), never a string.',
@@ -61,14 +59,10 @@ export function deriveErrorHints(text) {
     );
   }
 
-  // 5. Missing devDependency crashes the dev server (or a Node-level
-  // `require`/`import` failure elsewhere) instead of raising a tsc error —
-  // e.g. `vite.config.ts` importing `@vitejs/plugin-react` without it being
-  // declared in package.json. Generic Node error text, not design-system-
-  // specific: any package can be missing this way. Observed 2026-08-19: a
-  // weaker model was shown this exact error twice in a row across two fix
-  // attempts and made no change both times — the fix (add the package to
-  // package.json) apparently wasn't obvious from the raw error alone.
+  // 5. A package is used but never declared, so the dev server crashes
+  // instead of tsc reporting it. A common case is vite.config.ts importing a
+  // plugin that is missing from package.json. The wording stays generic,
+  // since any package can be missing this way.
   const missingModuleRe = /Cannot find module '([^']+)'/g;
   const missingModules = new Set();
   while ((m = missingModuleRe.exec(text)) !== null) missingModules.add(m[1]);
@@ -78,26 +72,12 @@ export function deriveErrorHints(text) {
     );
   }
 
-  // 6. The project's own tsconfig is misconfigured.
+  // 6. The project's own tsconfig is wrong.
   //
-  // The agent AUTHORS every file in this harness, tsconfig.json included —
-  // there is no pre-provided scaffold. So a compiler-config error can only
-  // be fixed by editing that file, and the hint has to say so.
-  //
-  // This previously emitted the exact opposite ("Do not modify
-  // tsconfig.json … they are pre-configured and valid. Only edit files
-  // under `src/`."), which fired on ANY error text merely containing
-  // "tsconfig.json". That made TS5070 / TS5023 / TS6306 / TS6310
-  // unwinnable: tsc reports them against tsconfig.json, the hint forbade
-  // touching tsconfig.json, and the model burned its whole fix budget
-  // editing `src/` files that were never the problem (observed
-  // 2026-09-03 — a model hit TS5070 and never once tried the one edit
-  // that resolves it). Config errors are now paired with the fix, like
-  // every other hint here.
-  // Keep in sync with TSCONFIG_SCAFFOLD_ERROR_CODES in evaluation/tsc-flake.js
-  // — the same codes the report counts as scaffold errors. TS6142 is
-  // deliberately excluded: it doubles as a configless-tsc flake signature
-  // (see isProbablyConfiglessRun), which the retry path already handles.
+  // The agent writes every file here, tsconfig.json included, so a compiler
+  // config error can only be fixed by editing that file and the hint has to
+  // say so. It used to say the opposite, which left the agent unable to fix
+  // the one file at fault.
   const configErrorCodes = /TS5023|TS5070|TS6053|TS6305|TS6306|TS6310/;
   if (
     configErrorCodes.test(text) ||

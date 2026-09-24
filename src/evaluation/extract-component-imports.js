@@ -1,36 +1,22 @@
 import { isJsxFile, MAX_PARSE_BYTES } from "./parse-files.js";
 
 /**
- * Extract unique imported component names from a set of source files,
- * scanning imports from any of the listed packages — and, optionally, from
- * local path prefixes.
+ * Collect the component names a project imports from the design system.
  *
- * `importPathPrefixes` exists for "copy-in" design systems, where components
- * are vendored into the project's own tree rather than installed as a
- * package. shadcn/ui is the reference case: `npx shadcn add button` writes
- * `src/components/ui/button.tsx`, and app code imports
- * `from '@/components/ui/button'` — there is no package specifier to match,
- * so package-name matching alone reports ~0 components for an app that
- * actually uses dozens (measured 2026-09-03: 7 captured vs ~25 real, all 7
- * being icons from the one genuinely-installed package). That made the
- * report's component counts incomparable between copy-in and installed
- * systems.
+ * `importPathPrefixes` covers design systems that are copied into the project
+ * rather than installed. shadcn/ui works this way: `npx shadcn add button`
+ * writes `src/components/ui/button.tsx` and app code imports from
+ * `@/components/ui/button`, so there is no package name to match on and
+ * matching by package alone would report almost nothing.
  *
- * This is measurement only. It changes what the harness *counts*, never what
- * the agent is told, installs, or builds. Omitted/empty leaves behaviour
- * byte-identical to package-name-only matching.
+ * This only affects what gets counted. It never changes what the agent is
+ * told, installs, or builds.
  *
  * @param {Array<{path:string,content:string}>} files
- * @param {string[]} [packageNames]
- *        Package names whose named imports should be collected.
- * @param {string[]} [importPathPrefixes]
- *        Local import-specifier prefixes to also collect from, e.g.
- *        `["@/components/ui/"]`. Matched as a literal prefix of the
- *        specifier, so `@/components/ui/button` matches but
- *        `@/components/layout/header` does not.
- * @returns {Set<string>}
- *        Empty when both `packageNames` and `importPathPrefixes` are
- *        empty/omitted.
+ * @param {string[]} [packageNames] Packages whose named imports to collect.
+ * @param {string[]} [importPathPrefixes] Local path prefixes to also collect
+ *        from, e.g. `["@/components/ui/"]`. Matched as a plain prefix.
+ * @returns {Set<string>} Empty when neither argument is given.
  */
 export function extractComponentImports(files, packageNames, importPathPrefixes) {
   const components = new Set();
@@ -41,35 +27,24 @@ export function extractComponentImports(files, packageNames, importPathPrefixes)
   }
 
   const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  // Package names keep EXACT whole-specifier matching, unchanged — adding
-  // subpath tolerance here would silently alter what every existing test
-  // counts (e.g. `@sanity/icons/Search`) and break comparability with past
-  // runs. Path prefixes are purely additive: they match any specifier
-  // starting with the prefix. One alternation keeps the tail test a single
-  // anchored regex, preserving the linear-scan properties above.
+  // Package names must match the whole import path. Path prefixes match any
+  // import that starts with them.
   const alternatives = [...names.map(escRe), ...prefixes.map((p) => `${escRe(p)}[^'"]*`)];
   const pattern = alternatives.join("|");
-  // Anchor: `import [type] {` up to the opening brace. No nested unbounded
-  // quantifiers, so no catastrophic backtracking. The brace BODY and the
-  // `} from "pkg"` tail are matched WITHOUT a `[^}]+`-to-far-terminator regex
-  // (see below) — that pattern backtracked across the whole buffer at every
-  // anchor on `import {`-flood input (O(n²)); a size cap alone can't tame
-  // that at multi-MB sizes, so the body is found by linear indexOf instead.
-  // The optional `Default,` before the brace matters: Atlaskit writes
-  // `import Avatar, { AvatarItem } from "@atlaskit/avatar"`, and anchoring
-  // strictly on `import {` dropped the NAMED half of every such statement.
-  // Bounded group, so the linear-scan property above is unchanged.
+  // Find `import {` and then locate the closing brace by searching forward,
+  // rather than matching the whole statement with one regex. A single regex
+  // gets very slow on files with many import statements.
+  //
+  // The optional name before the brace matters: Atlaskit writes
+  // `import Avatar, { AvatarItem } from "@atlaskit/avatar"`, and matching
+  // only on `import {` would miss the named half of those.
   const anchorRe = /import\s+(?:type\s+)?(?:[A-Za-z_$][\w$]*\s*,\s*)?\{/g;
   const tailRe = new RegExp(`^\\s*from\\s*['"](?:${pattern})['"]`);
 
-  // Default imports (`import Button from "@atlaskit/button/new"`). The brace
-  // scanner below only sees `import { … } from`, which is what Sanity UI and
-  // shadcn use — but Atlassian's design system exports most components as
-  // DEFAULTS, one package per component, so without this the majority of an
-  // Atlaskit app's components are invisible to the count (measured
-  // 2026-09-09: 3 of 6 real imports captured). Scoped to the same specifier
-  // list as the named-import path, so a test that matches no specifier here
-  // is unaffected.
+  // Default imports, e.g. `import Button from "@atlaskit/button/new"`. Sanity
+  // UI and shadcn use named imports, but Atlaskit ships most components as
+  // default exports with one package each, so without this most of an
+  // Atlaskit app's components would not be counted.
   const defaultRe = new RegExp(
     `import\\s+(?:type\\s+)?([A-Za-z_$][\\w$]*)\\s*(?:,\\s*\\{[^}]*\\})?\\s*from\\s*['"](?:${pattern})['"]`,
     "g",
@@ -84,7 +59,6 @@ export function extractComponentImports(files, packageNames, importPathPrefixes)
     defaultRe.lastIndex = 0;
     let dm;
     while ((dm = defaultRe.exec(content)) !== null) {
-      // `import type X from` is a type-only import; still a referenced export.
       if (dm[1]) components.add(dm[1]);
     }
 
@@ -93,11 +67,9 @@ export function extractComponentImports(files, packageNames, importPathPrefixes)
     while ((anchor = anchorRe.exec(content)) !== null) {
       const braceOpen = anchor.index + anchor[0].length; // just past `{`
       const close = content.indexOf("}", braceOpen);
-      // No closing brace anywhere ahead → no valid import can follow either,
-      // since anchors only advance. Stop instead of rescanning to EOF per
-      // anchor (which is what made the old regex quadratic).
+      // No closing brace ahead means no further import can match either.
       if (close === -1) break;
-      // Only inspect a bounded tail window for the `} from "pkg"` suffix.
+      // Check a short window after the brace for the `from "pkg"` part.
       if (tailRe.test(content.slice(close + 1, close + 1 + 512))) {
         const names = content
           .slice(braceOpen, close)

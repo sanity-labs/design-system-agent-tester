@@ -1,24 +1,16 @@
 /**
- * DOM element count + serialized size.
+ * Count DOM elements and measure the page's HTML size.
  *
- * Data points: the total number of DOM elements rendered, plus the byte
- * size of the serialized HTML tree (`document.documentElement.outerHTML`
- * as UTF-8). Together they show how much markup the agent produced and
- * how verbose each element is.
- *
- * This module is self-contained: it opens its own browser, navigates to
- * the page, runs the measurement, and closes the browser.
+ * Together these show how much markup the agent produced and how heavy each
+ * element is. Opens its own browser and closes it again.
  */
 
 import { withPage } from "./puppeteer-helpers.js";
 
 /**
- * Count every DOM element on the rendered page and measure the byte
- * size of the serialized HTML tree.
- *
- * @param {string} serverUrl  — URL of the running dev server
- * @param {string} [iterLabel] — optional label for log output
- * @returns {Promise<{count:number,htmlBytes:number}|null>} — null on failure
+ * @param {string} serverUrl - URL of the running dev server
+ * @param {string} [iterLabel] - label for log output
+ * @returns {Promise<{count:number,htmlBytes:number}|null>} null on failure
  */
 export async function measureDom(serverUrl, iterLabel) {
   try {
