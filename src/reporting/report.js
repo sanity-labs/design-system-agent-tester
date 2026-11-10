@@ -15,6 +15,7 @@ import {
   analyzeSemanticHtml,
   computeCodeVariance,
   iterationBuilt,
+  analyzeRatings,
 } from "./aggregators.js";
 import { renderMarkdown } from "./render-markdown.js";
 import { mean, round, stdDev, sum } from "./stats.js";
@@ -183,9 +184,16 @@ export async function generateReport(
         iteration: r.iteration,
         count: r.domElementCount,
         htmlBytes: r.domHtmlBytes ?? null,
+        maxDepth: r.domMaxDepth ?? null,
+        avgDepth: r.domAvgDepth ?? null,
       }));
     const counts = domSamples.map((d) => d.count);
     const byteSamples = domSamples.map((d) => d.htmlBytes).filter((b) => b != null);
+    // Nesting depth: `<html>` is depth 1. Max depth is the deepest element
+    // in each iteration; avg depth is the mean depth of all its elements.
+    // Both are `null` for runs that predate the metric.
+    const maxDepths = domSamples.map((d) => d.maxDepth).filter((d) => d != null);
+    const avgDepths = domSamples.map((d) => d.avgDepth).filter((d) => d != null);
     const domElementAnalysis = {
       iterationsWithData: domSamples.length,
       totalIterations: validIterations.length,
@@ -200,6 +208,11 @@ export async function generateReport(
       htmlBytesMin: byteSamples.length ? Math.min(...byteSamples) : null,
       htmlBytesMax: byteSamples.length ? Math.max(...byteSamples) : null,
       htmlBytesStdDev: byteSamples.length ? round(stdDev(byteSamples)) : null,
+      maxDepthAverage: maxDepths.length ? round(mean(maxDepths)) : null,
+      maxDepthMin: maxDepths.length ? Math.min(...maxDepths) : null,
+      maxDepthMax: maxDepths.length ? Math.max(...maxDepths) : null,
+      maxDepthStdDev: maxDepths.length ? round(stdDev(maxDepths)) : null,
+      avgDepthAverage: avgDepths.length ? round(mean(avgDepths)) : null,
       perIteration: domSamples,
     };
 
@@ -317,6 +330,7 @@ export async function generateReport(
       tscFlakes: tscFlakeAnalysis,
       tsconfigErrors: tsconfigErrorAnalysis,
       repairLoop: analyzeRepairLoop(validIterations),
+      ratings: analyzeRatings(validIterations),
       failures: analyzeFailures(validIterations),
       tieredCoverage: analyzeTieredCoverage(validIterations),
       jsxPropDensity: analyzeJsxPropDensity(validIterations),

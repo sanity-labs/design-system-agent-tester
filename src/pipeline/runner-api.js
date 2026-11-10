@@ -6,10 +6,12 @@ import { isReasoningModel } from "../config/prompts.js";
 import { groupFindingsByFile, runJevGate, writeJevResults } from "../evaluation/jev.js";
 import { parseFeedback } from "../evaluation/parse-feedback.js";
 import { parseFiles } from "../evaluation/parse-files.js";
+import { parseRatings } from "../evaluation/questionnaire.js";
 import { killDevServer, validateProject } from "../evaluation/validate.js";
 import { error, success, tag, warn } from "../util/color.js";
 import { isLocalModel } from "../util/local-model.js";
 import { isTransientError } from "../util/retry.js";
+import { describeAutofixRewrites, formatAutofixNote, withAutofixNote } from "./autofix-note.js";
 import {
   buildCliTool,
   execCliRaw,
@@ -18,6 +20,11 @@ import {
   resolveCliCwd,
   runCliTool,
 } from "./cli-tool.js";
+import {
+  closingFollowUpText,
+  MAX_CLOSING_FOLLOW_UPS,
+  missingClosingBlocks,
+} from "./closing-blocks.js";
 import { createMcpClient } from "./mcp-client.js";
 import { createOllamaClient } from "./ollama-client.js";
 import {
@@ -57,6 +64,15 @@ const API_CALL_RETRY_DELAY_MS = 15_000; // 15 seconds
 // same conversation gets them back. Starting a fresh attempt would throw
 // that work away and usually fail the same way.
 const MAX_EMISSION_NUDGES = 2;
+
+// Output cap for every generation and repair call. Thinking counts toward it,
+// not just the text. At 32k, 8 of 10 ui5-frontload answers on 2026-10-07 hit
+// it before their FEEDBACK and RATINGS blocks: ~47k output tokens per
+// iteration, against ~20k characters of visible text, so most of it was
+// thinking. 64k is the largest value every model the harness runs accepts:
+// the Claude 5 family allows 128k, Haiku 4.5 allows 64k (checked against the
+// API's own error message, 2026-10-07). Ollama ignores it.
+const GENERATION_MAX_TOKENS = 64000;
 
 /**
  * Call `client.messages.create()` with retry logic for transient connection errors.
@@ -161,27 +177,64 @@ export function resolveExcludedTools(mcpConfig, model) {
  * iteration uses the same one, so later attempts hit the cache and are
  * billed at a fraction of the normal rate.
  */
-async function generateSimple({ client, model, promptContent, systemPrompt, effort = null }) {
+async function generateSimple({
+  client,
+  model,
+  promptContent,
+  systemPrompt,
+  effort = null,
+  recoverClosingBlocks = false,
+}) {
   const response = await callAnthropicWithRetry(client, {
     model,
-    max_tokens: 32000,
+    max_tokens: GENERATION_MAX_TOKENS,
     ...modelTuning(model, effort),
     system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
     messages: [{ role: "user", content: promptContent }],
   });
 
-  const fullText = response.content
-    .filter((block) => block.type === "text")
-    .map((block) => block.text)
-    .join("\n");
+  const textOf = (r) =>
+    r.content
+      .filter((block) => block.type === "text")
+      .map((block) => block.text)
+      .join("\n");
+  let fullText = textOf(response);
+  const usage = [response.usage ?? {}];
 
-  const u = response.usage ?? {};
+  // The FEEDBACK and RATINGS blocks come last, so an answer cut off by the
+  // output limit loses them first. Ask once more, in the same conversation,
+  // for only what is missing — see closing-blocks.js. Initial generation only:
+  // repair answers are not asked for either block.
+  let closingFollowUp = false;
+  const missing = missingClosingBlocks(fullText);
+  if (recoverClosingBlocks && missing.any) {
+    closingFollowUp = true;
+    const followUp = await callAnthropicWithRetry(client, {
+      model,
+      max_tokens: GENERATION_MAX_TOKENS,
+      ...modelTuning(model, effort),
+      system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
+      messages: [
+        { role: "user", content: promptContent },
+        { role: "assistant", content: response.content },
+        {
+          role: "user",
+          content: closingFollowUpText(missing),
+        },
+      ],
+    });
+    fullText += `\n${textOf(followUp)}`;
+    usage.push(followUp.usage ?? {});
+  }
+
+  const sum = (k) => usage.reduce((n, u) => n + (u[k] ?? 0), 0);
   return {
     fullText,
-    uncachedInputTokens: u.input_tokens ?? 0,
-    cacheReadInputTokens: u.cache_read_input_tokens ?? 0,
-    cacheCreationInputTokens: u.cache_creation_input_tokens ?? 0,
-    outputTokens: u.output_tokens ?? 0,
+    closingFollowUp,
+    uncachedInputTokens: sum("input_tokens"),
+    cacheReadInputTokens: sum("cache_read_input_tokens"),
+    cacheCreationInputTokens: sum("cache_creation_input_tokens"),
+    outputTokens: sum("output_tokens"),
   };
 }
 
@@ -283,7 +336,9 @@ async function generateWithTools({
       );
     }
     if (cliInstructions) {
-      console.log(`[${iterLabel}] CLI front-loaded ${cliInstructions.length} chars of instructions`);
+      console.log(
+        `[${iterLabel}] CLI front-loaded ${cliInstructions.length} chars of instructions`,
+      );
     }
     if (!frontloadInstructions) {
       console.log(`[${iterLabel}] Repair turn — tool instructions not front-loaded`);
@@ -324,6 +379,8 @@ async function generateWithTools({
     // In-conversation emission recovery (see MAX_EMISSION_NUDGES).
     let emissionNudges = 0;
     let forceTextOnly = false;
+    // In-conversation recovery of the FEEDBACK/RATINGS blocks (closing-blocks.js).
+    let closingFollowUps = 0;
     // A full project with no calls to any per-component lookup tool means every
     // prop and export name in it is a guess. When that happens, ask the model
     // in the same conversation to check its work and re-send anything that was
@@ -374,7 +431,7 @@ async function generateWithTools({
         client,
         {
           model,
-          max_tokens: 32000,
+          max_tokens: GENERATION_MAX_TOKENS,
           ...modelTuning(model, effort),
           // On an emission-nudge turn the model must write files as text, not
           // reach for the lint tool again. Changing tool_choice invalidates
@@ -484,6 +541,40 @@ async function generateWithTools({
           continue;
         }
 
+        // The FEEDBACK and RATINGS blocks come last, so an answer cut off by the
+        // output limit loses them first. Ask once more, in this conversation,
+        // for only what is missing — see closing-blocks.js. Initial generation
+        // only: repair answers are not asked for either block.
+        if (
+          !repairTurn &&
+          hasScaffold &&
+          closingFollowUps < MAX_CLOSING_FOLLOW_UPS &&
+          turns < MAX_TOOL_TURNS
+        ) {
+          const missing = missingClosingBlocks(allTextParts.join("\n"));
+          if (missing.any) {
+            closingFollowUps++;
+            const what = [missing.feedback && "FEEDBACK", missing.ratings && "RATINGS"]
+              .filter(Boolean)
+              .join(" + ");
+            console.log(
+              `[${iterLabel}] Answer ended without ${what}${response.stop_reason === "max_tokens" ? " (hit the output limit)" : ""} — asking for it`,
+            );
+            messages.push({ role: "assistant", content: response.content });
+            messages.push({
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: closingFollowUpText(missing),
+                },
+              ],
+            });
+            forceTextOnly = true;
+            continue;
+          }
+        }
+
         console.log(
           `[${iterLabel}] Generation complete after ${turns} turn(s), ${toolLog.length} tool call(s)`,
         );
@@ -573,6 +664,7 @@ async function generateWithTools({
 
     return {
       fullText: allTextParts.join("\n"),
+      closingFollowUp: closingFollowUps > 0,
       uncachedInputTokens,
       cacheReadInputTokens,
       cacheCreationInputTokens,
@@ -657,7 +749,10 @@ export function selfLintStats(toolLog, toolName) {
 function selfLintStatsFor(iterDir, toolName) {
   if (!toolName) return { selfLintCalls: null, selfLintFindings: null };
   try {
-    return selfLintStats(JSON.parse(readFileSync(resolve(iterDir, "_mcp_tool_log.json"), "utf-8")), toolName);
+    return selfLintStats(
+      JSON.parse(readFileSync(resolve(iterDir, "_mcp_tool_log.json"), "utf-8")),
+      toolName,
+    );
   } catch {
     return { selfLintCalls: 0, selfLintFindings: null };
   }
@@ -1021,6 +1116,8 @@ export async function runAgent({
   // the `--max-lint-fixes` flag in index.js for the full rationale.
   maxLintFixes = 0,
   jevConfig = null,
+  // What the agent's RATINGS block rates ("Sanity UI 5"), for the report.
+  ratingSubject = null,
   maxGenerationRetries = 3,
   // When false (CLI `--no-fix-accessibility`), axe still runs and violations
   // are measured/recorded, but the agent is never sent back to fix them — no
@@ -1078,6 +1175,9 @@ export async function runAgent({
 
   // --- Step 1: Initial generation (with retries if no files are produced) ---
   let fullText = "";
+  let ratings = null;
+  // True when the FEEDBACK/RATINGS blocks had to be asked for after the answer.
+  let closingFollowUp = false;
   let files = [];
   let generationAttempt = 0;
 
@@ -1176,11 +1276,13 @@ export async function runAgent({
         promptContent: attemptPrompt,
         systemPrompt,
         effort,
+        recoverClosingBlocks: true,
       });
     }
 
     addUsage(result);
     fullText = result.fullText;
+    closingFollowUp = Boolean(result.closingFollowUp);
 
     // Save raw response
     await writeFile(resolve(iterDir, "_raw_response.txt"), fullText, "utf-8");
@@ -1256,6 +1358,23 @@ export async function runAgent({
   }
 
   const feedback = parseFeedback(fullText);
+
+  // Ratings: the agent's own 1–10 scores of the design system, each with a
+  // reason, written right after its feedback in the same answer.
+  ratings = parseRatings(fullText);
+  // Recorded so analysis can tell follow-up ratings apart: they come from the
+  // same conversation, but after a prompt asking for them.
+  ratings.followUp = closingFollowUp;
+  await writeFile(resolve(iterDir, "_ratings.json"), JSON.stringify(ratings, null, 2), "utf-8");
+  console.log(
+    `${tag(iterLabel)} Ratings: ${
+      ratings.valid
+        ? Object.entries(ratings.scores)
+            .map(([k, v]) => `${k} ${v}`)
+            .join(", ")
+        : `unusable — ${ratings.error}`
+    }`,
+  );
 
   if (feedback.length > 0) {
     console.log(`[${iterLabel}] Extracted ${feedback.length} feedback item(s)`);
@@ -1362,10 +1481,24 @@ export async function runAgent({
         // before the build has ever worked. The result is kept so the check
         // after the render does not need a second call.
         let lastLintResult = null;
+        // What the autofix changed in this pass, for the next repair prompt. Every
+        // repair stage in this loop pass runs on the autofixed files, so all of them
+        // carry it. Without it the agent sees an error on code it never wrote,
+        // assumes its own edit was wrong, and repeats it — see autofix-note.js.
+        let autofixNote = "";
         if (lintGateActive) {
+          const beforeAutofix = await readProjectFiles(projectDir, files);
           const autofix = await runConfiguredLintGate();
           if (!autofix.unavailable && !autofix.error) {
             files = await readProjectFiles(projectDir, files); // pick up applied auto-fixes
+            const rewrites = describeAutofixRewrites(beforeAutofix, files);
+            autofixNote = formatAutofixNote(rewrites);
+            if (rewrites.length) {
+              const lines = rewrites.reduce((n, r) => n + r.hunks.length, 0);
+              console.log(
+                `${tag(iterLabel)} Lint autofix rewrote ${lines} place(s) in ${rewrites.length} file(s); the next repair prompt will say so`,
+              );
+            }
             lastLintResult = autofix;
             lintAutofixed += autofix.autofixed ?? 0;
             lintGateStatus = "ran";
@@ -1429,14 +1562,20 @@ export async function runAgent({
                   const { text: lintFilesText, newHashes } = await buildCurrentFilesText(
                     projectDir,
                     files,
-                    { previousHashes: previousFileHashes, errorReferencedPaths: lintReferencedPaths },
+                    {
+                      previousHashes: previousFileHashes,
+                      errorReferencedPaths: lintReferencedPaths,
+                    },
                   );
                   previousFileHashes = newHashes;
                   const fix = await runRepair({
                     client,
                     model,
                     fixSystemPrompt,
-                    fixPrompt: buildLintFixPrompt(lastLintResult.files, lintFilesText),
+                    fixPrompt: withAutofixNote(
+                      buildLintFixPrompt(lastLintResult.files, lintFilesText),
+                      autofixNote,
+                    ),
                     files,
                     projectDir,
                     iterDir,
@@ -1521,7 +1660,10 @@ export async function runAgent({
                     client,
                     model,
                     fixSystemPrompt,
-                    fixPrompt: buildJevFixPrompt(byFile, jevFilesText),
+                    fixPrompt: withAutofixNote(
+                      buildJevFixPrompt(byFile, jevFilesText),
+                      autofixNote,
+                    ),
                     files,
                     projectDir,
                     iterDir,
@@ -1613,7 +1755,10 @@ export async function runAgent({
                   client,
                   model,
                   fixSystemPrompt,
-                  fixPrompt: buildA11yFixPrompt(a11yResults.axeViolations, a11yFilesText),
+                  fixPrompt: withAutofixNote(
+                    buildA11yFixPrompt(a11yResults.axeViolations, a11yFilesText),
+                    autofixNote,
+                  ),
                   files,
                   projectDir,
                   iterDir,
@@ -1637,10 +1782,16 @@ export async function runAgent({
             // + React profiler (each runs its own browser).
             exitStage = gateLintAndA11y && (residualAxe ?? 0) > 0 ? "accessibility" : "clean";
 
-            const { screenshotPath, domElementCount, domHtmlBytes, semanticHtml } =
-              await runStaticMeasurements(validation.serverUrl, iterDir, iterLabel, {
-                screenshots: measureScreenshots,
-              });
+            const {
+              screenshotPath,
+              domElementCount,
+              domHtmlBytes,
+              domMaxDepth,
+              domAvgDepth,
+              semanticHtml,
+            } = await runStaticMeasurements(validation.serverUrl, iterDir, iterLabel, {
+              screenshots: measureScreenshots,
+            });
 
             const { lighthouseResults, reactProfile } = measurePerformance
               ? await runPerformance(validation.serverUrl, iterDir, iterLabel)
@@ -1678,6 +1829,8 @@ export async function runAgent({
               reactProfile,
               domElementCount,
               domHtmlBytes,
+              domMaxDepth,
+              domAvgDepth,
               semanticHtml,
               runner: "api",
               exitStage,
@@ -1685,6 +1838,9 @@ export async function runAgent({
               firstTryLintRules,
               lintAutofixed: lintGateStatus ? lintAutofixed : null,
               lintGateStatus,
+              ratings: ratings?.valid
+                ? { subject: ratingSubject, ...ratings.scores, reasons: ratings.reasons, answers: ratings.answers ?? {} }
+                : null,
               ...selfLintStatsFor(iterDir, mcpConfig?.lintTool),
               firstTryAxe,
               residualLint,
@@ -1766,10 +1922,9 @@ export async function runAgent({
             filesTextOpts,
           );
           previousFileHashes = newHashes;
-          const fixPrompt = buildFixPrompt(
-            currentFilesText,
-            validation.consoleErrors,
-            validation.fatalError,
+          const fixPrompt = withAutofixNote(
+            buildFixPrompt(currentFilesText, validation.consoleErrors, validation.fatalError),
+            autofixNote,
           );
 
           console.log(`[${iterLabel}] Asking Claude to fix errors...`);
@@ -1830,6 +1985,8 @@ export async function runAgent({
       let screenshotPath = null;
       let lastDomElementCount = null;
       let lastDomHtmlBytes = null;
+      let lastDomMaxDepth = null;
+      let lastDomAvgDepth = null;
       let lastSemanticHtml = null;
       let lastA11y = null;
 
@@ -1850,6 +2007,8 @@ export async function runAgent({
               screenshotPath,
               domElementCount: lastDomElementCount,
               domHtmlBytes: lastDomHtmlBytes,
+              domMaxDepth: lastDomMaxDepth,
+              domAvgDepth: lastDomAvgDepth,
               semanticHtml: lastSemanticHtml,
             } = await runStaticMeasurements(lastValidation.serverUrl, iterDir, iterLabel, {
               screenshots: measureScreenshots,
@@ -1899,6 +2058,8 @@ export async function runAgent({
         reactProfile: null,
         domElementCount: lastDomElementCount,
         domHtmlBytes: lastDomHtmlBytes,
+        domMaxDepth: lastDomMaxDepth,
+        domAvgDepth: lastDomAvgDepth,
         semanticHtml: lastSemanticHtml,
         runner: "api",
         exitStage,
@@ -1906,6 +2067,9 @@ export async function runAgent({
         firstTryLintRules,
         lintAutofixed: lintGateStatus ? lintAutofixed : null,
         lintGateStatus,
+        ratings: ratings?.valid
+          ? { subject: ratingSubject, ...ratings.scores, reasons: ratings.reasons, answers: ratings.answers ?? {} }
+          : null,
         ...selfLintStatsFor(iterDir, mcpConfig?.lintTool),
         firstTryAxe,
         residualLint,
@@ -1946,6 +2110,8 @@ export async function runAgent({
     reactProfile: null,
     domElementCount: null,
     domHtmlBytes: null,
+    domMaxDepth: null,
+    domAvgDepth: null,
     semanticHtml: null,
     runner: "api",
     npmInstallFailures,

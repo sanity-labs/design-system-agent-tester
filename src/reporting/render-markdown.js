@@ -4,6 +4,7 @@
  * aggregation logic here — that lives in aggregators.js.
  */
 import { relative } from "node:path";
+import { QUESTION_DEFS, TEXT_QUESTION_DEFS } from "../evaluation/questionnaire.js";
 import { extractMetrics, formatBytes, renderMetricsTables } from "./aggregate.js";
 import { round } from "./stats.js";
 
@@ -438,6 +439,14 @@ export function renderMarkdown(report, runDir = null) {
         );
       }
       rows.push(
+        // Design-system tags only. See `isPresentationProp` and `defaultValued`
+        // in jsx-prop-density.js.
+        ["Presentation props / DS tag", cell(round(pd.presentationAverage, 2))],
+        ["Default-valued props / iteration", cell(round(pd.defaultValuedPerIteration, 1))],
+        [
+          "Default-valued share of DS props",
+          pd.defaultValuedShare == null ? "—" : `${(pd.defaultValuedShare * 100).toFixed(1)}%`,
+        ],
         ["Tags per iteration", cell(round(pd.averageTags, 0))],
         ["Props per iteration", cell(round(pd.averageProps, 0))],
         // A spread is one attribute carrying an unknown number of props, so a
@@ -446,6 +455,19 @@ export function renderMarkdown(report, runDir = null) {
         ["Iterations measured", pd.iterationsWithData],
       );
       md += metricTable(rows);
+
+      // Props set to the component's own default. Each renders what leaving
+      // it out renders, so each is pure noise.
+      const defaultsRanked = Object.entries(pd.defaultValuedByProp ?? {}).sort(
+        (a, b) => b[1] - a[1],
+      );
+      if (defaultsRanked.length > 0) {
+        md += `**Props set to their default** (all iterations; each renders the same without it):\n\n`;
+        md += `| Prop | Times |\n|------|-------|\n`;
+        for (const [label, n] of defaultsRanked.slice(0, 10))
+          md += `| \`${sanitizeCode(label)}\` | ${n} |\n`;
+        md += `\n`;
+      }
 
       // Per-component, pooled across iterations. Thresholded because an
       // average over one or two instances says nothing.
@@ -624,13 +646,17 @@ export function renderMarkdown(report, runDir = null) {
     md += `### Accessibility\n\n`;
     // Accessibility
     md += `#### Accessibility\n\n`;
+    md += `Gating: axe-core at page load, light and dark. The pass rate covers only these checks. The checks past the first load are reported below and do not affect it.\n\n`;
     const a11y = data.accessibility;
     if (a11y && a11y.iterationsWithResults > 0) {
       md += metricTable([
         ["Iterations tested", `${a11y.iterationsWithResults}/${a11y.totalIterations}`],
         ["Total violations", a11y.totalViolations],
         ["Avg violations/iteration", a11y.averageViolations],
-        ["Pass rate", a11y.passRate !== null ? round(a11y.passRate * 100, 1) + "%" : "—"],
+        [
+          "Pass rate (static axe checks)",
+          a11y.passRate !== null ? round(a11y.passRate * 100, 1) + "%" : "—",
+        ],
       ]);
 
       // Top violations
@@ -652,6 +678,31 @@ export function renderMarkdown(report, runDir = null) {
         md += `| ${p.iteration} | ${p.violations} | ${p.lightViolations} | ${p.darkOnlyViolations} | ${status} |\n`;
       }
       md += `\n`;
+
+      const beyond = a11y.beyondStatic;
+      if (beyond) {
+        md += `**Beyond the first load (report only, not gating):**\n\n`;
+        md += metricTable([
+          [
+            "Iterations with unnamed controls",
+            `${beyond.iterationsWithUnnamed}/${beyond.iterationsWithResults}`,
+          ],
+          ["Avg unnamed interactive controls", beyond.unnamedInteractiveAvg],
+          ["Interaction states tested", beyond.statesTested],
+          ["States with new axe violations", beyond.statesWithNewViolations],
+          ["Focus not moved into an opened dialog", beyond.focusNotInDialog],
+          ["Focus not restored after Escape", beyond.focusNotRestored],
+          ["Live-region announcements", beyond.liveAnnouncements],
+        ]);
+        if (beyond.topStateViolations.length > 0) {
+          md += `**Rules that fired only inside an interaction state:**\n\n`;
+          md += `| Rule | States |\n|------|--------|\n`;
+          for (const v of beyond.topStateViolations) {
+            md += `| \`${sanitizeCode(v.id)}\` | ${v.count} |\n`;
+          }
+          md += `\n`;
+        }
+      }
     } else {
       md += `No accessibility results collected for this prompt.\n\n`;
     }
@@ -661,6 +712,7 @@ export function renderMarkdown(report, runDir = null) {
     if (dom && dom.iterationsWithData > 0) {
       md += `#### DOM elements\n\n`;
       const domHasBytes = dom.htmlBytesAverage != null;
+      const domHasDepth = dom.maxDepthAverage != null;
       md += metricTable([
         ["Average elements", dom.average],
         ["Std Dev (elements)", dom.stdDev],
@@ -670,23 +722,37 @@ export function renderMarkdown(report, runDir = null) {
         domHasBytes && ["Std Dev (HTML size)", formatBytes(dom.htmlBytesStdDev)],
         domHasBytes && ["Min HTML size", formatBytes(dom.htmlBytesMin)],
         domHasBytes && ["Max HTML size", formatBytes(dom.htmlBytesMax)],
+        domHasDepth && ["Avg max nesting depth", dom.maxDepthAverage],
+        domHasDepth && ["Std Dev (max nesting depth)", dom.maxDepthStdDev],
+        domHasDepth && ["Min max nesting depth", dom.maxDepthMin],
+        domHasDepth && ["Max max nesting depth", dom.maxDepthMax],
+        domHasDepth && ["Avg nesting depth (all elements)", dom.avgDepthAverage],
         ["Iterations measured", `${dom.iterationsWithData}/${dom.totalIterations}`],
       ]);
 
       if (dom.perIteration.length > 0) {
         md += `**Per iteration:**\n\n`;
+        // Columns for the metrics this run recorded. Runs that predate a
+        // metric leave its column out rather than filling it with dashes.
         const hasBytes = dom.perIteration.some((d) => d.htmlBytes != null);
-        if (hasBytes) {
-          md += `| Iteration | DOM Elements | HTML size |\n|-----------|--------------|----------|\n`;
-          for (const d of dom.perIteration) {
-            const size = d.htmlBytes != null ? formatBytes(d.htmlBytes) : "—";
-            md += `| ${d.iteration} | ${d.count.toLocaleString()} | ${size} |\n`;
-          }
-        } else {
-          md += `| Iteration | DOM Elements |\n|-----------|-------------|\n`;
-          for (const d of dom.perIteration) {
-            md += `| ${d.iteration} | ${d.count.toLocaleString()} |\n`;
-          }
+        const hasMaxDepth = dom.perIteration.some((d) => d.maxDepth != null);
+        const hasAvgDepth = dom.perIteration.some((d) => d.avgDepth != null);
+        const columns = [
+          ["Iteration", (d) => d.iteration],
+          ["DOM Elements", (d) => d.count.toLocaleString()],
+        ];
+        if (hasBytes)
+          columns.push([
+            "HTML size",
+            (d) => (d.htmlBytes != null ? formatBytes(d.htmlBytes) : "—"),
+          ]);
+        if (hasMaxDepth) columns.push(["Max depth", (d) => d.maxDepth ?? "—"]);
+        if (hasAvgDepth)
+          columns.push(["Avg depth", (d) => (d.avgDepth != null ? d.avgDepth.toFixed(1) : "—")]);
+        md += `| ${columns.map(([h]) => h).join(" | ")} |\n`;
+        md += `|${columns.map(() => "---").join("|")}|\n`;
+        for (const d of dom.perIteration) {
+          md += `| ${columns.map(([, cell]) => cell(d)).join(" | ")} |\n`;
         }
         md += `\n`;
       }
@@ -838,6 +904,42 @@ export function renderMarkdown(report, runDir = null) {
       for (const ss of data.screenshots) {
         const relPath = linkPath(ss, runDir);
         md += `![${relPath}](${relPath})\n\n`;
+      }
+    }
+
+    // Ratings — from each agent's RATINGS block, written with its feedback.
+    const rt = data.ratings;
+    if (rt && rt.measured > 0) {
+      const labels = Object.fromEntries(QUESTION_DEFS.map((q) => [q.id, q.label]));
+      md += `### Agent ratings${rt.subject ? ` — ${rt.subject}` : ""}\n\n`;
+      md += `Each agent's own 1–10 ratings, with a reason for each, written with its feedback after doing the task. Usable answers: ${rt.measured}/${rt.totalIterations}.\n\n`;
+      md += `| Question | n | Median | Mean | Scores 1–10 (count of each) | Median if built | Median if not built |\n`;
+      md += `|---|---|---|---|---|---|---|\n`;
+      for (const [id, q] of Object.entries(rt.questions)) {
+        md += `| ${labels[id] ?? id} | ${q.n} | ${cell(q.median)} | ${cell(q.mean)} | ${q.distribution.join(" · ")} | ${cell(q.medianWhenBuilt)} | ${cell(q.medianWhenNotBuilt)} |\n`;
+      }
+      md += `\n`;
+      for (const tq of TEXT_QUESTION_DEFS) {
+        const list = rt.answers?.[tq.id] ?? [];
+        if (!list.length) continue;
+        md += `**${tq.label}** (${list.length}/${rt.measured} answered, each beside that agent's sentiment score):\n\n`;
+        for (const a of [...list].sort((x, y) => (x.iteration ?? 0) - (y.iteration ?? 0))) {
+          md += `- ${a.sentiment ?? "—"}${a.iteration != null ? ` (iteration ${a.iteration})` : ""}: ${a.text}\n`;
+        }
+        md += `\n`;
+      }
+      const low = Object.entries(rt.questions).filter(([, q]) => q.lowReasons?.length);
+      if (low.length) {
+        md += `**Why agents scored 4 or below:**\n\n`;
+        for (const [id, q] of low) {
+          md += `- ${labels[id] ?? id}:\n`;
+          for (const r of q.lowReasons.slice(0, 8)) {
+            md += `  - ${r.score}${r.iteration != null ? ` (iteration ${r.iteration})` : ""}: ${r.reason}\n`;
+          }
+          if (q.lowReasons.length > 8)
+            md += `  - …and ${q.lowReasons.length - 8} more in \`_ratings.json\`\n`;
+        }
+        md += `\n`;
       }
     }
 

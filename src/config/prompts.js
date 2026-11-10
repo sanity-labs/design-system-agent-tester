@@ -539,6 +539,9 @@ function normalise(raw, dirName, testDir) {
     // owns the questions and the calibrated thresholds; nothing about
     // either is duplicated here.
     jev: raw.jev ?? null,
+    // What this test's agents rate in their RATINGS block ("Sanity UI 5").
+    // null asks them to rate "the design system you used".
+    ratingSubject: typeof raw.ratingSubject === "string" ? raw.ratingSubject : null,
     docsPath: raw.docsPath ? resolveTestPath(testDir, raw.docsPath) : null,
     prompts: {
       system: resolveTestPath(testDir, raw.prompts.system),
@@ -694,6 +697,7 @@ export function buildSystemPrompt(label, model = null) {
   );
   return composeSystem(intro, {
     lintAdvisory: test.lintAdvisoryPath ? loadTemplate(test.lintAdvisoryPath) : "",
+    ratingSubject: test.ratingSubject,
   });
 }
 

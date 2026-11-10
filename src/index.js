@@ -414,6 +414,7 @@ async function main() {
               mcpConfig: test.mcp,
               cliConfig: test.cli,
               jevConfig: test.jev,
+              ratingSubject: test.ratingSubject,
               renderFailureSignatures: test.renderFailureSignatures,
               minStylesheetRules: test.minStylesheetRules,
             });

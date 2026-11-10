@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   analyzeJsxPropDensity,
   computeJsxPropDensity,
+  isPresentationProp,
   readTagAttributes,
 } from "./jsx-prop-density.js";
 
@@ -188,5 +189,108 @@ describe("analyzeJsxPropDensity", () => {
   it("omits tiers when no iteration has them", () => {
     const r = analyzeJsxPropDensity([iter(1, { tags: 1, props: 1, average: 1, byComponent: {} })]);
     expect(r.byTier).toBeNull();
+  });
+});
+
+// Design-system tags only: the presentation share of the props, and props set
+// to the component's own default (2026-10-07).
+describe("designSystem: presentation and default-valued props", () => {
+  const file = (content) => [{ path: "src/App.tsx", content }];
+  const DEFAULTS = {
+    Card: { density: "regular", tone: "neutral" },
+    Button: { level: "primary" },
+    "List.Item": { density: "regular" },
+  };
+  const ds = ["Card", "Button", "List", "Text"];
+
+  it("reads literal attribute values, and leaves expressions undefined", () => {
+    const src = `<Card density="regular" tone={'neutral'} size={2} gap={-1} border open={x} flag={false}>`;
+    const { names, values } = readTagAttributes(src, 5);
+    expect(Object.fromEntries(names.map((n, i) => [n, values[i]]))).toEqual({
+      density: "regular",
+      tone: "neutral",
+      size: 2,
+      gap: -1,
+      border: true,
+      open: undefined,
+      flag: false,
+    });
+  });
+
+  it("splits presentation from wiring", () => {
+    for (const p of ["padding", "gap", "tone", "size", "density", "level", "flexGrow", "muted"])
+      expect(isPresentationProp(p)).toBe(true);
+    for (const p of [
+      "key",
+      "value",
+      "onChange",
+      "aria-label",
+      "data-testid",
+      "text",
+      "htmlFor",
+      "style",
+      "...",
+    ])
+      expect(isPresentationProp(p)).toBe(false);
+  });
+
+  it("counts presentation props per design-system tag, ignoring raw and local tags", () => {
+    const r = computeJsxPropDensity(
+      file(
+        `<Card density="loose" tone="critical" key={k}><Text size={1} weight="bold">x</Text><div className="a" /><Local padding={3} /></Card>`,
+      ),
+      { dsComponents: ds, propDefaults: DEFAULTS },
+    );
+    expect(r.designSystem.tags).toBe(2);
+    expect(r.designSystem.presentation).toBe(4); // density, tone, size, weight — not key
+    expect(r.designSystem.presentationAverage).toBe(2);
+  });
+
+  it("counts props set to the component's default, including compound members", () => {
+    const r = computeJsxPropDensity(
+      file(
+        `<Card density="regular"><Button level="primary" text="Save" /><Button level="tertiary" /><List><List.Item density="regular">a</List.Item></List></Card>`,
+      ),
+      { dsComponents: ds, propDefaults: DEFAULTS },
+    );
+    expect(r.designSystem.defaultValued).toBe(3);
+    expect(r.designSystem.defaultValuedByProp).toEqual({
+      'Card density="regular"': 1,
+      'Button level="primary"': 1,
+      'List.Item density="regular"': 1,
+    });
+  });
+
+  it("does not count a default that follows a spread — it overrides the spread", () => {
+    const r = computeJsxPropDensity(file(`<Button {...rest} level="primary" />`), {
+      dsComponents: ds,
+      propDefaults: DEFAULTS,
+    });
+    expect(r.designSystem.defaultValued).toBe(0);
+  });
+
+  it("reports default-valued props as unknown, not zero, without a defaults table", () => {
+    const r = computeJsxPropDensity(file(`<Card density="regular" />`), { dsComponents: ds });
+    expect(r.designSystem.defaultValued).toBeNull();
+    expect(r.designSystem.presentationAverage).toBe(1);
+  });
+
+  it("averages per iteration and pools the default-valued props", () => {
+    const it1 = computeJsxPropDensity(file(`<Card density="regular" />`), {
+      dsComponents: ds,
+      propDefaults: DEFAULTS,
+    });
+    const it2 = computeJsxPropDensity(file(`<Card density="regular" /><Card density="loose" />`), {
+      dsComponents: ds,
+      propDefaults: DEFAULTS,
+    });
+    const a = analyzeJsxPropDensity([
+      { iteration: 1, jsxPropDensity: it1 },
+      { iteration: 2, jsxPropDensity: it2 },
+    ]);
+    expect(a.defaultValuedPerIteration).toBe(1);
+    expect(a.defaultValuedByProp).toEqual({ 'Card density="regular"': 2 });
+    expect(a.presentationAverage).toBe(1);
+    expect(a.defaultValuedShare).toBeCloseTo((1 / 1 + 1 / 2) / 2);
   });
 });

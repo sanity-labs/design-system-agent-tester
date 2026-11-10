@@ -2,14 +2,16 @@
  * Prompt text the harness itself needs, as opposed to anything a test
  * author wants to say.
  *
- * The harness reads the agent's output for `---FILE: …---` blocks and a
- * `---FEEDBACK---` section. Without instructions describing that format in
+ * The harness reads the agent's output for `---FILE: …---` blocks, a
+ * `---FEEDBACK---` section and a `---RATINGS---` section. Without instructions describing that format in
  * the system prompt, there is nothing for it to read.
  *
  * Keeping this here means a test author writes only what is specific to
  * their design system, and cannot accidentally leave out the parts that
  * make the run work at all.
  */
+
+import { QUESTION_DEFS, SCALE_MAX, TEXT_QUESTION_DEFS } from "../evaluation/questionnaire.js";
 
 export const OUTPUT_FORMAT = `Your task is to produce ALL the files needed for a complete, working project. Output each file using the following format:
 
@@ -22,6 +24,14 @@ markdown code fences (\`\`\`json, \`\`\`tsx, etc.). The contents
 between FILE markers are written verbatim to disk. A fenced
 \`package.json\` will fail \`npm install\` with EJSONPARSE; a fenced
 \`.tsx\` file will fail to compile. Emit raw file contents only.`;
+
+// Agents were reporting "I did not run the linter or a build, so the project
+// is unverified" as friction — 40 of 772 feedback items on 2026-10-07, in every
+// run — and some rated speed and sentiment down for it. The harness installs,
+// builds and loads every project after the answer and sends the errors back to
+// fix, in every arm, so not verifying is expected, not a design-system cost.
+// Stated for every arm alike so it cannot skew one against another.
+const VERIFIED_AFTER = `After you answer, the harness installs your project, builds it and loads it in a browser, and sends you any errors to fix. You are not expected to run a build, linter or dev server yourself, so do not report that as friction.`;
 
 export const FEEDBACK_FORMAT = `After ALL file blocks, you MUST provide feedback on areas of friction you encountered when using the design system. Output your feedback in this exact format:
 
@@ -39,15 +49,50 @@ Each line must start with a dash and a category tag. Be specific and actionable.
 - Missing components or features you expected to exist
 - Theming or styling difficulties
 - Icon naming inconsistencies
-- General developer experience friction`;
+- General developer experience friction
+
+${VERIFIED_AFTER}`;
+
+/**
+ * The ratings block: one 1–10 rating per question in QUESTION_DEFS, each with a
+ * required reason, written straight after the feedback — by the agent that
+ * just used the system for the task, from that experience.
+ *
+ * @param {string} subject - what to rate, e.g. "Sanity UI 5"
+ */
+export function ratingsFormat(subject = "the design system you used") {
+  // Built from QUESTION_DEFS so the prompt, the parser and the report can't
+  // disagree about which questions exist.
+  const lines = [
+    ...QUESTION_DEFS.map((q) => `${q.id}: <1-${SCALE_MAX}> | <reason>`),
+    ...TEXT_QUESTION_DEFS.map((q) => `${q.id}: <answer>`),
+  ].join("\n");
+  const described = QUESTION_DEFS.map(
+    (q) => `- ${q.id}: ${q.ask(subject)} (1: ${q.low} — ${SCALE_MAX}: ${q.high})`,
+  ).join("\n");
+  const answered = TEXT_QUESTION_DEFS.map((q) => `- ${q.id}: ${q.ask(subject)}`).join("\n");
+  return `After the FEEDBACK block, you MUST rate ${subject} based on your experience using it for this task. Output your ratings in this exact format:
+
+---RATINGS---
+${lines}
+---END RATINGS---
+
+What each line rates, on a scale of 1 to ${SCALE_MAX}:
+${described}
+
+Then answer in words, in one to three sentences, on its own line:
+${answered}
+
+Every rated line needs both a whole-number score and a reason. The reason is required: explain what, specifically, in your work on this task made you choose that score, in one to three sentences. There are no right answers. Rate the design system, not whether you could check your own work: the project is built and checked after you answer.`;
+}
 
 export const BASE_RULES = `Rules:
 - Output ALL files needed (package.json, index.html, config files, source files, etc.)
 - Use relative paths from the project root
-- Do not include explanations outside of file blocks (except the FEEDBACK block at the end)
+- Do not include explanations outside of file blocks (except the FEEDBACK and RATINGS blocks at the end)
 - Do not include unit tests
 - Make sure the project works with "npm install && npm run dev"
-- The FEEDBACK block must appear after all FILE blocks`;
+- The FEEDBACK block must appear after all FILE blocks, and the RATINGS block after the FEEDBACK block`;
 
 // A test's own lint rules, added to the generation prompt so the agent
 // writes code that follows them the first time instead of tripping them and
@@ -77,8 +122,14 @@ export const FIX_RULES_BASE = `Rules:
  * Build the full system prompt: the test's own intro, then the blocks the
  * harness needs.
  */
-export function composeSystem(testIntro, { lintAdvisory = "" } = {}) {
-  const blocks = [testIntro.trim(), OUTPUT_FORMAT, FEEDBACK_FORMAT, BASE_RULES];
+export function composeSystem(testIntro, { lintAdvisory = "", ratingSubject = null } = {}) {
+  const blocks = [
+    testIntro.trim(),
+    OUTPUT_FORMAT,
+    FEEDBACK_FORMAT,
+    ratingsFormat(ratingSubject ?? undefined),
+    BASE_RULES,
+  ];
   // Only tests that supply this text get it, so comparing a lint-enabled
   // test against a lint-free one measures everything linting contributes,
   // both the advice up front and the gate afterwards.

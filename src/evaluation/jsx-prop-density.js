@@ -123,21 +123,24 @@ function skipQuoted(content, i) {
 /**
  * Read one JSX opening tag's attribute list, starting just past the tag name.
  *
- * @returns {{count: number, spreads: number, names: string[], end: number}}
+ * @returns {{count: number, spreads: number, names: string[], values: any[], end: number}}
  *          `end` is the index just past the tag's `>`, so the caller can
- *          resume scanning without re-reading the attributes.
+ *          resume scanning without re-reading the attributes. `values[i]` is
+ *          the literal value of `names[i]` — a string, number or boolean — or
+ *          undefined when it is an expression (or a spread).
  */
 export function readTagAttributes(content, i) {
   let count = 0;
   let spreads = 0;
   const names = [];
+  const values = [];
 
   while (i < content.length) {
     const c = content[i];
 
     // End of the opening tag. `/` here is the self-closing slash.
-    if (c === ">") return { count, spreads, names, end: i + 1 };
-    if (c === "/" && content[i + 1] === ">") return { count, spreads, names, end: i + 2 };
+    if (c === ">") return { count, spreads, names, values, end: i + 1 };
+    if (c === "/" && content[i + 1] === ">") return { count, spreads, names, values, end: i + 2 };
 
     if (/\s/.test(c)) {
       i++;
@@ -154,6 +157,7 @@ export function readTagAttributes(content, i) {
         count++;
         spreads++;
         names.push("...");
+        values.push(undefined);
       }
       i = next;
       continue;
@@ -170,11 +174,16 @@ export function readTagAttributes(content, i) {
       // Skip the value, if there is one. A bare name is a boolean shorthand
       // (`selected`, `border`) and still counts as one prop.
       while (i < content.length && /\s/.test(content[i])) i++;
-      if (content[i] !== "=") continue;
+      if (content[i] !== "=") {
+        values.push(true);
+        continue;
+      }
       i++;
       while (i < content.length && /\s/.test(content[i])) i++;
+      const valueStart = i;
       if (content[i] === "{") i = skipBraced(content, i);
       else if (content[i] === '"' || content[i] === "'") i = skipQuoted(content, i);
+      values.push(literalValue(content.slice(valueStart, i)));
       continue;
     }
 
@@ -184,7 +193,36 @@ export function readTagAttributes(content, i) {
   }
 
   // Unterminated tag — truncated source. Report what was read.
-  return { count, spreads, names, end: content.length };
+  return { count, spreads, names, values, end: content.length };
+}
+
+/**
+ * The literal an attribute value spells: `"x"`, `'x'`, `{"x"}`, `{2}`, `{-1}`,
+ * `{true}`. Anything else — a variable, a call, a conditional — is undefined.
+ */
+function literalValue(raw) {
+  let v = raw.trim();
+  if (v.startsWith("{") && v.endsWith("}")) v = v.slice(1, -1).trim();
+  const quoted = v.match(/^(["'`])((?:(?!\1)[^\\$]|\\.)*)\1$/s);
+  if (quoted) return quoted[2].replace(/\\(.)/g, "$1");
+  if (/^-?\d+(\.\d+)?$/.test(v)) return Number(v);
+  if (v === "true") return true;
+  if (v === "false") return false;
+  return undefined;
+}
+
+// What a prop is for. Everything a component needs whatever the design system
+// is — what it says, what state it holds, what it does, how it is named for
+// assistive technology, how React tracks it — is wiring. The rest chooses how
+// it looks: layout, spacing, size, tone, weight. Only that share says whether
+// a design system's defaults fit the job; the wiring is the same ~0.8 props
+// per tag in every system measured (2026-10-07).
+const WIRING_PROP =
+  /^(key|ref|id|name|type|href|target|rel|htmlFor|for|as|role|tabIndex|title|text|label|header|subtitle|description|placeholder|alt|src|icon|iconStart|iconEnd|iconLeft|iconRight|value|defaultValue|checked|defaultChecked|selected|open|disabled|required|readOnly|hidden|indeterminate|pressed|autoFocus|autoComplete|min|max|step|children|content|portal|placement|menu|button|footer|style|className|\.\.\.)$|^(aria-|data-|on[A-Z])/;
+
+/** True for a prop that chooses how a component looks, not what it does. */
+export function isPresentationProp(name) {
+  return !WIRING_PROP.test(name);
 }
 
 /**
@@ -205,7 +243,19 @@ export function readTagAttributes(content, i) {
  *        breakdown is omitted and only the overall average is returned.
  * @param {string[]} [options.primitives] Which of those are layout primitives.
  * @param {string[]} [options.rawAllowlist] Defaults to DEFAULT_RAW_ALLOWLIST.
+ * @param {object|null} [options.propDefaults] Each component's default prop
+ *        values for the installed version (`prop-defaults.js`). Without it,
+ *        default-valued props are not counted (`defaultValued` is null).
  * @returns {object|null} null when the project contains no JSX tags at all.
+ *
+ * `designSystem` covers the design system's own component tags only:
+ *   - `presentationAverage` — presentation props per tag (see
+ *     `isPresentationProp`). The total mixes in wiring every system needs, so
+ *     it barely moves between systems; this is the part defaults can remove.
+ *   - `defaultValued` — props set to the value the component already
+ *     defaults to (`<Card density="regular">`). Each renders exactly what
+ *     leaving it out renders. An attribute after a spread is not counted: it
+ *     overrides the spread, so it is not redundant.
  */
 export function computeJsxPropDensity(files, options = {}) {
   const ds = new Set(options.dsComponents ?? []);
@@ -225,6 +275,9 @@ export function computeJsxPropDensity(files, options = {}) {
   };
   const byComponent = {};
   const overall = bucket();
+  const defaults = options.propDefaults ?? null;
+  const dsTotals = { tags: 0, props: 0, presentation: 0, defaultValued: 0 };
+  const defaultValuedByProp = {};
 
   for (const file of files ?? []) {
     if (!isJsxFile(file.path)) continue;
@@ -233,7 +286,7 @@ export function computeJsxPropDensity(files, options = {}) {
     while ((m = TAG_RE.exec(file.content)) !== null) {
       const name = m[1];
       const attrsStart = m.index + m[0].length;
-      const { count, spreads } = readTagAttributes(file.content, attrsStart);
+      const { count, spreads, names, values } = readTagAttributes(file.content, attrsStart);
       // The regex deliberately resumes right after the tag NAME, not after
       // the tag's `>`. A tag embedded in an attribute value
       // (`menu={<Menu><MenuItem /></Menu>}`) is really rendered by the app,
@@ -254,10 +307,30 @@ export function computeJsxPropDensity(files, options = {}) {
       entry.props += count;
       entry.spreads += spreads;
 
-      if (!canTier) continue;
-
       // `Dialog.Footer` belongs to whichever tier `Dialog` is in.
       const root = name.split(".")[0];
+
+      if (/^[A-Z]/.test(root) && ds.has(root)) {
+        dsTotals.tags += 1;
+        dsTotals.props += count;
+        const own = defaults?.[name];
+        let afterSpread = false;
+        names.forEach((prop, k) => {
+          if (prop === "...") {
+            afterSpread = true;
+            return;
+          }
+          if (isPresentationProp(prop)) dsTotals.presentation += 1;
+          if (own && !afterSpread && Object.hasOwn(own, prop) && values[k] === own[prop]) {
+            dsTotals.defaultValued += 1;
+            const label = `${name} ${prop}=${typeof own[prop] === "string" ? `"${own[prop]}"` : `{${own[prop]}}`}`;
+            defaultValuedByProp[label] = (defaultValuedByProp[label] ?? 0) + 1;
+          }
+        });
+      }
+
+      if (!canTier) continue;
+
       const isComponent = /^[A-Z]/.test(root);
       let tier;
       if (isComponent && ds.has(root)) tier = primitives.has(root) ? "primitive" : "composite";
@@ -289,7 +362,30 @@ export function computeJsxPropDensity(files, options = {}) {
     byComponent: Object.fromEntries(
       Object.entries(byComponent).map(([k, v]) => [k, withAverage(v)]),
     ),
+    designSystem:
+      dsTotals.tags > 0
+        ? {
+            tags: dsTotals.tags,
+            props: dsTotals.props,
+            presentation: dsTotals.presentation,
+            presentationAverage: dsTotals.presentation / dsTotals.tags,
+            defaultValued: defaults ? dsTotals.defaultValued : null,
+            defaultValuedByProp: defaults ? defaultValuedByProp : null,
+          }
+        : null,
   };
+}
+
+/** Default-valued props by `Component prop=value`, summed across iterations; null when none had a table. */
+function pooledDefaults(withData) {
+  const known = withData.filter((r) => r.jsxPropDensity.designSystem?.defaultValuedByProp);
+  if (known.length === 0) return null;
+  const out = {};
+  for (const r of known) {
+    for (const [k, n] of Object.entries(r.jsxPropDensity.designSystem.defaultValuedByProp))
+      out[k] = (out[k] ?? 0) + n;
+  }
+  return out;
 }
 
 /**
@@ -352,6 +448,16 @@ export function analyzeJsxPropDensity(iterations) {
     byComponent: Object.fromEntries(
       Object.entries(pooled).map(([k, v]) => [k, { ...v, average: v.props / v.tags }]),
     ),
+    // Design-system tags only. Presentation is averaged per iteration like
+    // the totals; default-valued props are counted per iteration, and only
+    // over iterations whose version had a defaults table.
+    presentationAverage: mean((r) => r.jsxPropDensity.designSystem?.presentationAverage),
+    defaultValuedPerIteration: mean((r) => r.jsxPropDensity.designSystem?.defaultValued),
+    defaultValuedShare: mean((r) => {
+      const d = r.jsxPropDensity.designSystem;
+      return d && d.defaultValued != null && d.props > 0 ? d.defaultValued / d.props : null;
+    }),
+    defaultValuedByProp: pooledDefaults(withData),
     perIteration: withData.map((r) => ({
       iteration: r.iteration,
       tags: r.jsxPropDensity.tags,

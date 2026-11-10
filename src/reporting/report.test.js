@@ -1451,3 +1451,189 @@ describe("generateReport reports consistency over built iterations only", () => 
     expect(md).not.toContain("**Built iterations only**");
   });
 });
+
+// ---------------------------------------------------------------------------
+// DOM nesting depth
+// ---------------------------------------------------------------------------
+describe("generateReport DOM nesting depth", () => {
+  const iteration = (n, extra) => ({
+    iteration: n,
+    elapsedSeconds: 10,
+    linesOfCode: 50,
+    files: [{ path: "src/App.tsx", content: "export default () => null;\n" }],
+    componentImports: [],
+    fixAttempts: 0,
+    exitStage: "clean",
+    domElementCount: 120,
+    domHtmlBytes: 4096,
+    ...extra,
+  });
+
+  it("reports max and average nesting depth per iteration and across iterations", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const dir = await mkdtemp(join(tmpdir(), "at-report-"));
+
+    const iterations = [
+      iteration(1, { domMaxDepth: 12, domAvgDepth: 6.5 }),
+      iteration(2, { domMaxDepth: 20, domAvgDepth: 9.5 }),
+    ];
+
+    try {
+      await generateReport({ demo: iterations }, dir);
+      const reportJson = JSON.parse(await readFile(join(dir, "report.json"), "utf-8"));
+      const dom = reportJson.prompts.demo.domElements;
+
+      expect(dom.maxDepthAverage).toBe(16); // (12 + 20) / 2
+      expect(dom.maxDepthMin).toBe(12);
+      expect(dom.maxDepthMax).toBe(20);
+      expect(dom.maxDepthStdDev).toBe(round(stdDev([12, 20])));
+      expect(dom.avgDepthAverage).toBe(8); // (6.5 + 9.5) / 2
+      expect(dom.perIteration[0]).toMatchObject({ iteration: 1, maxDepth: 12, avgDepth: 6.5 });
+
+      const md = await readFile(join(dir, "report.md"), "utf-8");
+      expect(md).toContain("| Iteration | DOM Elements | HTML size | Max depth | Avg depth |");
+      expect(md).toContain("| 2 | 120 | 4.0 KB | 20 | 9.5 |");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      log.mockRestore();
+      warn.mockRestore();
+    }
+  });
+
+  it("omits nesting columns and stats for runs that predate the metric", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const dir = await mkdtemp(join(tmpdir(), "at-report-"));
+
+    try {
+      await generateReport({ demo: [iteration(1, {})] }, dir);
+      const reportJson = JSON.parse(await readFile(join(dir, "report.json"), "utf-8"));
+      const dom = reportJson.prompts.demo.domElements;
+
+      expect(dom.maxDepthAverage).toBeNull();
+      expect(dom.avgDepthAverage).toBeNull();
+      const md = await readFile(join(dir, "report.md"), "utf-8");
+      expect(md).not.toContain("nesting depth");
+      expect(md).not.toContain("Max depth");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      log.mockRestore();
+      warn.mockRestore();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Report-only accessibility checks (past the first page load)
+// ---------------------------------------------------------------------------
+describe("generateReport beyond-static accessibility", () => {
+  const a11y = (beyondStatic, states) => ({
+    axeViolationCount: 0,
+    axeViolations: [],
+    summary: { passed: true, lightViolations: 0, darkOnlyViolations: 0 },
+    beyondStatic,
+    interaction: { states },
+  });
+
+  it("aggregates unnamed controls, state problems and the rules that fired only in a state", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const dir = await mkdtemp(join(tmpdir(), "at-report-"));
+
+    const iterations = [
+      {
+        iteration: 1,
+        elapsedSeconds: 10,
+        linesOfCode: 50,
+        files: [{ path: "src/App.tsx", content: "export default () => null;\n" }],
+        componentImports: [],
+        fixAttempts: 0,
+        exitStage: "clean",
+        domElementCount: 120,
+        domHtmlBytes: 4096,
+        a11yResults: a11y(
+          { unnamedInteractive: 2, statesTested: 2, statesWithNewViolations: 1, focusNotInDialog: 1, focusNotRestored: 0, liveAnnouncements: 3 },
+          [{ axeNewViolations: ["image-alt"] }, { axeNewViolations: ["image-alt", "label"] }],
+        ),
+      },
+      {
+        iteration: 2,
+        elapsedSeconds: 10,
+        linesOfCode: 50,
+        files: [{ path: "src/App.tsx", content: "export default () => null;\n" }],
+        componentImports: [],
+        fixAttempts: 0,
+        exitStage: "clean",
+        domElementCount: 120,
+        domHtmlBytes: 4096,
+        // A run from before these checks existed: no beyondStatic at all.
+        a11yResults: { axeViolationCount: 0, axeViolations: [], summary: { passed: true, lightViolations: 0, darkOnlyViolations: 0 } },
+      },
+    ];
+
+    try {
+      await generateReport({ demo: iterations }, dir);
+      const reportJson = JSON.parse(await readFile(join(dir, "report.json"), "utf-8"));
+      const beyond = reportJson.prompts.demo.accessibility.beyondStatic;
+
+      expect(beyond.iterationsWithResults).toBe(1);
+      expect(beyond.iterationsWithUnnamed).toBe(1);
+      expect(beyond.unnamedInteractiveAvg).toBe(2);
+      expect(beyond.statesTested).toBe(2);
+      expect(beyond.statesWithNewViolations).toBe(1);
+      expect(beyond.focusNotInDialog).toBe(1);
+      expect(beyond.liveAnnouncements).toBe(3);
+      expect(beyond.topStateViolations).toEqual([
+        { id: "image-alt", count: 2 },
+        { id: "label", count: 1 },
+      ]);
+
+      const md = await readFile(join(dir, "report.md"), "utf-8");
+      expect(md).toContain("Gating: axe-core at page load");
+      expect(md).toContain("Pass rate (static axe checks)");
+      expect(md).toContain("**Beyond the first load (report only, not gating):**");
+      expect(md).toContain("| `image-alt` | 2 |");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      log.mockRestore();
+      warn.mockRestore();
+    }
+  });
+
+  it("omits the beyond-static section when no iteration ran those checks", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const dir = await mkdtemp(join(tmpdir(), "at-report-"));
+
+    try {
+      await generateReport(
+        {
+          demo: [
+            {
+              iteration: 1,
+              elapsedSeconds: 10,
+              linesOfCode: 50,
+              files: [{ path: "src/App.tsx", content: "export default () => null;\n" }],
+              componentImports: [],
+              fixAttempts: 0,
+              exitStage: "clean",
+              domElementCount: 120,
+              domHtmlBytes: 4096,
+              a11yResults: { axeViolationCount: 0, axeViolations: [], summary: { passed: true, lightViolations: 0, darkOnlyViolations: 0 } },
+            },
+          ],
+        },
+        dir,
+      );
+      const reportJson = JSON.parse(await readFile(join(dir, "report.json"), "utf-8"));
+      expect(reportJson.prompts.demo.accessibility.beyondStatic).toBeNull();
+      const md = await readFile(join(dir, "report.md"), "utf-8");
+      expect(md).not.toContain("Beyond the first load");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      log.mockRestore();
+      warn.mockRestore();
+    }
+  });
+});

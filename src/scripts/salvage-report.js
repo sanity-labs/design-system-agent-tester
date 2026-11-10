@@ -30,6 +30,7 @@ import { getTest } from "../config/prompts.js";
 import { extractComponentImports } from "../evaluation/extract-component-imports.js";
 import { computeJsxPropDensity } from "../evaluation/jsx-prop-density.js";
 import { isSourceFile } from "../evaluation/parse-files.js";
+import { propDefaultsForPackages } from "../evaluation/prop-defaults.js";
 import { generateReport } from "../reporting/report.js";
 
 const { values, positionals } = parseArgs({
@@ -97,7 +98,9 @@ async function readProjectSources(projectDir) {
  * that arm instead of failing the salvage.
  */
 function backfillSourceMetrics(iteration, arm) {
-  if (iteration.jsxPropDensity !== undefined) return iteration;
+  // `designSystem` (presentation and default-valued props) was added to the
+  // metric on 2026-10-07; a run recorded before that is recomputed too.
+  if (iteration.jsxPropDensity?.designSystem !== undefined) return iteration;
 
   let test;
   try {
@@ -122,6 +125,7 @@ function backfillSourceMetrics(iteration, arm) {
       dsComponents,
       primitives: test.coverage?.primitives,
       rawAllowlist: test.coverage?.rawAllowlist,
+      propDefaults: propDefaultsForPackages(test.packages),
     }),
   };
 }

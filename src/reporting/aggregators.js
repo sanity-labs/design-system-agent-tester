@@ -7,6 +7,12 @@
  * in render-markdown.js; the stats primitives live in stats.js.
  */
 import { normalizeIteration } from "../evaluation/normalize-structure.js";
+import {
+  LOW_SCORE_MAX,
+  QUESTIONS,
+  SCALE_MAX,
+  TEXT_QUESTIONS,
+} from "../evaluation/questionnaire.js";
 import { jaccardSimilarity, mean, ngramSet, round, roundedMean } from "./stats.js";
 
 /** Add the counts in `source` into `target` (mutates target). */
@@ -291,7 +297,9 @@ export function analyzeRepairLoop(iterations) {
   const jevJudged = num("jevJudged");
   const lintAutofixed = num("lintAutofixed");
   const selfLintCalls = num("selfLintCalls");
-  const lintGateNotRun = iterations.filter((r) => r.lintGateStatus === "error" || r.lintGateStatus === "unavailable").length;
+  const lintGateNotRun = iterations.filter(
+    (r) => r.lintGateStatus === "error" || r.lintGateStatus === "unavailable",
+  ).length;
   const jevUnjudged = num("jevUnjudged");
   const jevInputTokens = num("jevInputTokens");
   return {
@@ -320,7 +328,11 @@ export function analyzeRepairLoop(iterations) {
       autofixedAvg: roundedMean(lintAutofixed),
       fixedByAgentAvg:
         firstTryLint.length && residualLint.length
-          ? roundedMean(iterations.filter((r) => r.firstTryLint != null && r.residualLint != null).map((r) => r.firstTryLint - r.residualLint))
+          ? roundedMean(
+              iterations
+                .filter((r) => r.firstTryLint != null && r.residualLint != null)
+                .map((r) => r.firstTryLint - r.residualLint),
+            )
           : null,
       iterationsSelfLinted: selfLintCalls.filter((n) => n > 0).length,
       selfLintCallsAvg: roundedMean(selfLintCalls),
@@ -422,6 +434,46 @@ export function analyzeAccessibility(iterations) {
     passRate: round(perIteration.filter((p) => p.passed).length / withA11y.length),
     topViolations: topViolations.slice(0, 20),
     perIteration,
+    beyondStatic: aggregateBeyondStatic(withA11y),
+  };
+}
+
+/**
+ * Report-only checks past the first page load (evaluation/accessibility.js:
+ * the accessibility tree and the interaction states). They do not feed the
+ * pass rate. Null when no iteration has them, e.g. runs from before they
+ * existed.
+ */
+function aggregateBeyondStatic(withA11y) {
+  const beyond = withA11y.map((i) => i.a11yResults.beyondStatic).filter(Boolean);
+  if (beyond.length === 0) return null;
+
+  const total = (key) => beyond.reduce((n, b) => n + (b[key] || 0), 0);
+  const unnamed = beyond.map((b) => b.unnamedInteractive).filter((n) => n != null);
+
+  // Which rules fired only inside an interaction state, across iterations.
+  const newRules = {};
+  for (const iter of withA11y) {
+    for (const state of iter.a11yResults.interaction?.states ?? []) {
+      for (const id of state.axeNewViolations ?? []) {
+        newRules[id] = (newRules[id] || 0) + 1;
+      }
+    }
+  }
+
+  return {
+    iterationsWithResults: beyond.length,
+    iterationsWithUnnamed: unnamed.filter((n) => n > 0).length,
+    unnamedInteractiveAvg: unnamed.length ? round(mean(unnamed)) : null,
+    statesTested: total("statesTested"),
+    statesWithNewViolations: total("statesWithNewViolations"),
+    focusNotInDialog: total("focusNotInDialog"),
+    focusNotRestored: total("focusNotRestored"),
+    liveAnnouncements: total("liveAnnouncements"),
+    topStateViolations: Object.entries(newRules)
+      .map(([id, count]) => ({ id, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10),
   };
 }
 
@@ -756,5 +808,86 @@ export function analyzeSemanticHtml(iterations) {
     globalGenericByTag,
     globalRolesByValue,
     perIteration,
+  };
+}
+
+/**
+ * Likert ratings from each agent's RATINGS block, per question: how many
+ * answered, the median, the mean and the spread of 1–10 scores. Likert answers
+ * are ordinal, so the median and the spread are the headline; the mean is for
+ * comparison.
+ *
+ * Also splits each question by whether the iteration built. The ratings are
+ * written with the feedback, before the build runs, so the split shows
+ * whether a model's "easy" goes with its own build going smoothly.
+ */
+export const RATING_QUESTIONS = QUESTIONS;
+
+export function analyzeRatings(iterations) {
+  const rated = iterations.filter((r) => r.ratings);
+  if (!rated.length) return { measured: 0, totalIterations: iterations.length };
+  const median = (xs) => {
+    const s = [...xs].sort((a, b) => a - b);
+    const m = Math.floor(s.length / 2);
+    return s.length ? (s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2) : null;
+  };
+  const avg = (xs) =>
+    xs.length ? Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 100) / 100 : null;
+  const questions = {};
+  for (const q of RATING_QUESTIONS) {
+    const scores = rated.map((r) => r.ratings[q]).filter((n) => Number.isInteger(n));
+    const built = rated
+      .filter(iterationBuilt)
+      .map((r) => r.ratings[q])
+      .filter(Number.isInteger);
+    const unbuilt = rated
+      .filter((r) => !iterationBuilt(r))
+      .map((r) => r.ratings[q])
+      .filter(Number.isInteger);
+    // Why agents scored low (LOW_SCORE_MAX or below). It is the answer most worth reading: it
+    // names what got in the way.
+    const lowReasons = rated
+      .filter(
+        (r) =>
+          Number.isInteger(r.ratings[q]) && r.ratings[q] <= LOW_SCORE_MAX && r.ratings.reasons?.[q],
+      )
+      .map((r) => ({
+        iteration: r.iteration ?? null,
+        score: r.ratings[q],
+        reason: r.ratings.reasons[q],
+      }));
+    questions[q] = {
+      n: scores.length,
+      lowReasons,
+      median: median(scores),
+      mean: avg(scores),
+      distribution: Array.from(
+        { length: SCALE_MAX },
+        (_, i) => scores.filter((s) => s === i + 1).length,
+      ),
+      medianWhenBuilt: median(built),
+      medianWhenNotBuilt: median(unbuilt),
+    };
+  }
+  // Text answers, each beside the agent's sentiment score, so "what would
+  // move it up a point" reads against where it was.
+  const answers = Object.fromEntries(
+    TEXT_QUESTIONS.map((q) => [
+      q,
+      rated
+        .filter((r) => typeof r.ratings.answers?.[q] === "string" && r.ratings.answers[q].trim())
+        .map((r) => ({
+          iteration: r.iteration ?? null,
+          sentiment: Number.isInteger(r.ratings.sentiment) ? r.ratings.sentiment : null,
+          text: r.ratings.answers[q].trim(),
+        })),
+    ]),
+  );
+  return {
+    measured: rated.length,
+    totalIterations: iterations.length,
+    subject: rated[0].ratings.subject ?? null,
+    questions,
+    answers,
   };
 }

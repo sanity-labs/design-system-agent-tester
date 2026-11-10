@@ -154,10 +154,29 @@ Every test in a run gets the same interface brief, so results stay comparable. `
 | Performance | FCP, LCP, TBT, TTI, Lighthouse score. |
 | Component usage | JSX instance counts per component. |
 | Inline styles | Count by component, top CSS properties. |
-| DOM elements | Total rendered count. |
+| DOM elements | Total rendered count, HTML size, and nesting depth (deepest element and mean element depth; `<html>` is depth 1). |
 | Semantic HTML | Semantic vs generic tags, ARIA roles. |
 | Visual diff | Pairwise pixel comparison. |
 | Screenshots | 8 per iteration (4 breakpoints × light/dark). |
+| Ratings | The agent's 1–10 ratings of the design system, with reasons: median and spread per question. |
+
+### Ratings
+
+Every agent ends its answer with a `---RATINGS---` block, right after its feedback. It rates the test's `ratingSubject` (for example `"Sanity UI 5"`) on five 1–10 scales, from its experience doing the task:
+
+1. Overall sentiment (very unsatisfied — very satisfied)
+2. Ease of use (very hard — very easy)
+3. Speed of building (much slower — much faster)
+4. Ease of understanding (very hard — very easy)
+5. Use-case coverage (very few — very many)
+
+After the scores, the agent answers one question in words: what it would need to see for its overall sentiment score to be one point higher. Scores tend to cluster (sentiment was 7 in 32 of 40 iterations on 2026-10-14), and this answer names the change that would move them. It is optional for parsing: a missing answer never makes the scores unusable. The report lists each answer beside that agent's sentiment score.
+
+The questions are defined once, in `QUESTION_DEFS` and `TEXT_QUESTION_DEFS` in `src/evaluation/questionnaire.js`. The prompt, the parser and the report all read from there, so a change there is the only change needed.
+
+Each score needs a reason. An answer with a missing score or reason is recorded as unusable. The ratings go to `_ratings.json` in the iteration folder, and the report shows them in the Summary tables and beside the agent feedback.
+
+The FEEDBACK and RATINGS blocks come last, so an answer cut off by the output limit loses them first. When the first answer is missing either one, the harness asks once more in the same conversation for only the missing blocks, and tells the agent not to re-send files. Ratings that arrive this way are marked `"followUp": true` in `_ratings.json`.
 
 ## Other scripts
 

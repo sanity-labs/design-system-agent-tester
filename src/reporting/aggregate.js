@@ -11,13 +11,20 @@
  * same: per-test aggregated metrics keyed by label.
  */
 
+import { QUESTION_DEFS } from "../evaluation/questionnaire.js";
 import { delta, fmt, fmtInt, formatBytes, mdTable } from "./format.js";
+
 import { maxVal, mean, minVal, stdDev, sum } from "./stats.js";
 
 export { delta, fmt, fmtInt, formatBytes, mdTable } from "./format.js";
 // Re-export the shared stats/format helpers so existing importers of
 // `aggregate.js` keep working unchanged.
 export { maxVal, mean, minVal, stdDev } from "./stats.js";
+
+/** `sentiment` → `ratingSentiment`: the flat metric key for one question. */
+const ratingKey = (id) => `rating${id[0].toUpperCase()}${id.slice(1)}`;
+/** `sentiment` → `ratingMeanSentiment`: the flat metric key for one question's mean. */
+const ratingMeanKey = (id) => `ratingMean${id[0].toUpperCase()}${id.slice(1)}`;
 
 // ─── Metric extraction ──────────────────────────────────────────────
 
@@ -72,9 +79,27 @@ export function extractMetrics(data) {
     // components are being pushed harder, which is the escape-hatch signal.
     // Null on reports predating the metric, which renders as "—".
     propsPerTag: data.jsxPropDensity?.average ?? null,
+    // Agent ratings (medians of each 1–10 question). Null on reports without
+    // ratings, which renders as "—".
+    // One key per question — `ratingSentiment`, `ratingEase`, … — from QUESTION_DEFS.
+    ...Object.fromEntries(
+      QUESTION_DEFS.map((q) => [ratingKey(q.id), data.ratings?.questions?.[q.id]?.median ?? null]),
+    ),
+    // Means as well. Scores cluster on one or two values (sentiment was 7 in
+    // 32 of 40 iterations on 2026-10-14), so medians tie across arms that a
+    // mean still separates: 6.6 and 7.1 both have a median of 7.
+    ...Object.fromEntries(
+      QUESTION_DEFS.map((q) => [ratingMeanKey(q.id), data.ratings?.questions?.[q.id]?.mean ?? null]),
+    ),
+    ratingsAnswered: data.ratings?.measured ?? null,
     propsPerTagComposite: data.jsxPropDensity?.byTier?.composite?.average ?? null,
     propsPerTagPrimitive: data.jsxPropDensity?.byTier?.primitive?.average ?? null,
     propsPerTagRaw: data.jsxPropDensity?.byTier?.raw?.average ?? null,
+    // Design-system tags only: the presentation share of the props (what the
+    // defaults could have covered) and how many props were set to the
+    // component's own default. Null on older reports and unpinned versions.
+    presentationPerTag: data.jsxPropDensity?.presentationAverage ?? null,
+    defaultValuedPerIter: data.jsxPropDensity?.defaultValuedPerIteration ?? null,
     // Structural variance (repaired Jaccard). Element/composition compare
     // parsed component trees; contentSimilarity is the older text measure.
     componentChoiceSimilarity: data.codeVariance?.averageComponentChoiceSimilarity ?? null,
@@ -160,6 +185,8 @@ const AGGREGATABLE_KEYS = [
   "propsPerTagComposite",
   "propsPerTagPrimitive",
   "propsPerTagRaw",
+  "presentationPerTag",
+  "defaultValuedPerIter",
   "componentChoiceSimilarity",
   "elementSimilarity",
   "compositionSimilarity",
@@ -195,6 +222,10 @@ const AGGREGATABLE_KEYS = [
   "effectiveInputTokensTotal",
   "outputTokensTotal",
   "cacheHitRate",
+  // Agent ratings: each question's median and mean, so `summarize` can average
+  // them across runs. Derived from QUESTION_DEFS.
+  ...QUESTION_DEFS.flatMap((q) => [ratingKey(q.id), ratingMeanKey(q.id)]),
+  "ratingsAnswered",
 ];
 
 // ─── Aggregation ────────────────────────────────────────────────────
@@ -277,6 +308,21 @@ const METRIC_GROUPS = [
     ],
   },
   {
+    // The agents' own view of the design system after using it for the task.
+    // Medians of 1–10 scores; each score carries a reason in the report.
+    heading: "Agent ratings (median, 1–10)",
+    rows: [
+      ...QUESTION_DEFS.map((q) => [q.label, ratingKey(q.id), false, 1]),
+      ["Usable answers", "ratingsAnswered", undefined, 0],
+    ],
+  },
+  {
+    // The same scores averaged. Scores cluster, so medians often tie across
+    // arms; the mean shows the difference a median hides.
+    heading: "Agent ratings (mean, 1–10)",
+    rows: QUESTION_DEFS.map((q) => [q.label, ratingMeanKey(q.id), false, 1]),
+  },
+  {
     // Why builds failed, and what recovery cost. The category column names
     // the single most common failure so the table points at a fix rather
     // than only reporting a rate.
@@ -347,6 +393,12 @@ const METRIC_GROUPS = [
       ["Composite", "propsPerTagComposite", true, 2],
       ["Primitive", "propsPerTagPrimitive", true, 2],
       ["Raw HTML / local", "propsPerTagRaw", true, 2],
+      // The two that isolate the design system's share of the total:
+      // presentation props per design-system tag (wiring such as value,
+      // onChange and aria-* is the same in every system), and props set to
+      // the value the component already defaults to.
+      ["Presentation / DS tag", "presentationPerTag", true, 2],
+      ["Default-valued props / iter", "defaultValuedPerIter", true, 1],
     ],
   },
   {
@@ -572,8 +624,11 @@ function renderOneGroup(group, labels, aggregatesByLabel, iters) {
   const columns = buildGroupColumns(group, iters);
   const headers = ["Test", ...columns.map((c) => c.label)];
 
+  // A column with no better direction (a count, a label) marks no winner.
   const winnersByColumn = columns.map((c) =>
-    findWinners(labels, aggregatesByLabel, c.key, c.lowerBetter),
+    c.lowerBetter === undefined
+      ? new Set()
+      : findWinners(labels, aggregatesByLabel, c.key, c.lowerBetter),
   );
 
   const rows = labels.map((l) => {

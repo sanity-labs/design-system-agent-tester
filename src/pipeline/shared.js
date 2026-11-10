@@ -18,6 +18,7 @@ import { extractInlineStyles } from "../evaluation/extract-inline-styles.js";
 import { computeJsxPropDensity } from "../evaluation/jsx-prop-density.js";
 import { measureLighthouse } from "../evaluation/lighthouse.js";
 import { isSourceFile } from "../evaluation/parse-files.js";
+import { propDefaultsForPackages } from "../evaluation/prop-defaults.js";
 import { measureReactProfile } from "../evaluation/react-profile.js";
 import { captureScreenshots } from "../evaluation/screenshot.js";
 import { analyzeSemanticHtml } from "../evaluation/semantic-html.js";
@@ -136,7 +137,10 @@ export async function writeProjectFiles(projectDir, files, { clear = true } = {}
     // A block whose path names a directory (`---FILE: src---`) can't be
     // written as a file. It used to throw EISDIR and fail the whole iteration
     // (2026-09-23 16.01, iteration 1); skip it and say so instead.
-    if (/[\\/]$/.test(file.path) || (existsSync(filePath) && (await stat(filePath)).isDirectory())) {
+    if (
+      /[\\/]$/.test(file.path) ||
+      (existsSync(filePath) && (await stat(filePath)).isDirectory())
+    ) {
       console.warn(`⚠ Skipped a file block whose path is a directory: ${file.path}`);
       continue;
     }
@@ -242,7 +246,7 @@ export async function buildCurrentFilesText(projectDir, files, opts = {}) {
  * @param {boolean} [opts.screenshots=true] - per-test `measure.screenshots`
  *   toggle. When false, the screenshot capture (and the gallery/visual-diff
  *   input it feeds) is skipped; DOM count and semantic HTML still run.
- * @returns {Promise<{screenshotPath: string|null, domElementCount: number|null, domHtmlBytes: number|null, semanticHtml: object|null}>}
+ * @returns {Promise<{screenshotPath: string|null, domElementCount: number|null, domHtmlBytes: number|null, domMaxDepth: number|null, domAvgDepth: number|null, semanticHtml: object|null}>}
  */
 export async function runStaticMeasurements(serverUrl, iterDir, iterLabel, opts = {}) {
   const { screenshots = true } = opts;
@@ -255,6 +259,8 @@ export async function runStaticMeasurements(serverUrl, iterDir, iterLabel, opts 
     screenshotPath,
     domElementCount: dom?.count ?? null,
     domHtmlBytes: dom?.htmlBytes ?? null,
+    domMaxDepth: dom?.maxDepth ?? null,
+    domAvgDepth: dom?.avgDepth ?? null,
     semanticHtml,
   };
 }
@@ -372,6 +378,8 @@ export async function buildResult({
   reactProfile,
   domElementCount,
   domHtmlBytes,
+  domMaxDepth,
+  domAvgDepth,
   semanticHtml,
   runner,
   exitStage = null,
@@ -398,6 +406,9 @@ export async function buildResult({
   lintGateStatus = null,
   selfLintCalls = null,
   selfLintFindings = null,
+  // Likert ratings from the agent's RATINGS block (`{ subject, sentiment, ease, speed,
+  // understanding }`), or null when it wasn't asked or the answer was unusable.
+  ratings = null,
   jevInputTokens = null,
   // Per-iteration count of `npm install` failures across all validation
   // cycles. 0 when every install resolved cleanly. Aggregated at the
@@ -469,6 +480,9 @@ export async function buildResult({
     dsComponents: componentImports,
     primitives: test?.coverage?.primitives,
     rawAllowlist: test?.coverage?.rawAllowlist,
+    // Defaults for the exact version this arm pins, so props set to their
+    // component's default can be counted. Null for an unpinned version.
+    propDefaults: propDefaultsForPackages(test?.packages),
   });
 
   const sourceContents = files
@@ -508,6 +522,8 @@ export async function buildResult({
     reactProfile,
     domElementCount: domElementCount || null,
     domHtmlBytes: domHtmlBytes ?? null,
+    domMaxDepth: domMaxDepth ?? null,
+    domAvgDepth: domAvgDepth ?? null,
     exitStage,
     firstTryLint,
     firstTryLintRules,
@@ -523,6 +539,7 @@ export async function buildResult({
     lintGateStatus,
     selfLintCalls,
     selfLintFindings,
+    ratings,
     jevInputTokens,
     npmInstallFailures,
     tscFlakes,
@@ -559,6 +576,8 @@ export async function buildResult({
     reactProfile,
     domElementCount: domElementCount || null,
     domHtmlBytes: domHtmlBytes ?? null,
+    domMaxDepth: domMaxDepth ?? null,
+    domAvgDepth: domAvgDepth ?? null,
     exitStage,
     firstTryLint,
     firstTryLintRules,
@@ -574,6 +593,7 @@ export async function buildResult({
     lintGateStatus,
     selfLintCalls,
     selfLintFindings,
+    ratings,
     jevInputTokens,
     npmInstallFailures,
     tscFlakes,
